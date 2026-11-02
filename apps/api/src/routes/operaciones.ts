@@ -47,7 +47,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const d = parseo.data;
     const fila = await uno<{ id: string }>(
       `INSERT INTO core.producto (codigo, nombre, categoria_id, unidad, precio_con_igv, merma_pct)
-       VALUES ('P' || lpad((SELECT count(*) + 1 FROM core.producto)::text, 3, '0'), $1,$2,$3,$4,$5)
+       VALUES ('P' || lpad((SELECT coalesce(max(substring(codigo from 2)::int), 0) + 1 FROM core.producto WHERE codigo ~ '^P[0-9]+$')::text, 3, '0'), $1,$2,$3,$4,$5)
        RETURNING id`,
       [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), d.mermaPct.toFixed(6)],
     );
@@ -169,10 +169,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
           await c.query(
             `UPDATE core.orden_produccion
-             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2
+             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3
              WHERE id = $1`,
-            [op.id, mermaReal.toFixed(6)],
+            [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6)],
           );
+          await c.query('SELECT core.recalcular_costos()');
 
           return { codigo, estado: 'TERMINADA', producto: op.producto, cantidadProducida, consumidos };
         }),
@@ -288,10 +289,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const codigo = numero.rows[0].n;
 
           const v = await c.query<{ id: string }>(
-            `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,'CONFIRMADA',$8,$9) RETURNING id`,
+            `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key,vendedor_id,canal)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'CONFIRMADA',$8,$9,$10,
+                     CASE WHEN EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = $2) THEN 'APP' ELSE 'TERCEROS' END) RETURNING id`,
             [codigo, clienteId ?? null, formaPago, netas.toFixed(4), costoTotal.toFixed(4),
-              utilidad.toFixed(4), margen.toFixed(6), req.usuario!.nombre, clave ?? null],
+              utilidad.toFixed(4), margen.toFixed(6), req.usuario!.nombre, clave ?? null, req.usuario!.id],
           );
           const ventaId = v.rows[0].id;
 
@@ -553,10 +555,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
           );
           await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3',
             [nuevoSaldo.toFixed(6), nuevoCpp.toFixed(6), m.insumoId]);
+          if (tipo === 'COMPRA') await c.query('SELECT core.recalcular_costos()');
           return { insumo: ins.nombre, tipo, diferencia: Number(delta.toFixed(3)), saldo: Number(nuevoSaldo.toFixed(3)), cpp: Number(nuevoCpp.toFixed(4)) };
         }),
       );
-      invalidar('cat:insumos'); // el stock nuevo se ve al instante, no tras el TTL
+      invalidar('cat:'); // stock, CPP y costos nuevos se ven al instante, no tras el TTL
       void emitirEvento('inventario.movimiento', resultado);
       await auditar({
         actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,

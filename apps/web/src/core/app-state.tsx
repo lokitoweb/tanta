@@ -75,7 +75,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const cerrarSesion = useCallback(async () => {
     await logoutApi();
-    setFase({ tipo: 'sin-sesion' });
+    // Recarga completa: borra de memoria los datos del usuario anterior y vuelve al inicio,
+    // así el siguiente usuario no aterriza en la última pantalla del anterior.
+    window.location.replace('/');
   }, []);
 
   const refrescarDatos = useCallback(async () => {

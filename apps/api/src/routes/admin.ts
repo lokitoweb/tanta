@@ -55,12 +55,17 @@ export async function rutasAdmin(app: FastifyInstance) {
         return reply.code(422).send(error(422, 'PORCENTAJE_FUERA_DE_RANGO', 'El porcentaje debe estar entre 0 y 1 (0.18 = 18 %).'));
       }
     }
+    if (clave === 'cif_base_prorrateo' && !['UNIDADES', 'COSTO_INSUMOS'].includes(nuevo.toUpperCase())) {
+      return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa UNIDADES o COSTO_INSUMOS.'));
+    }
     if (actual.tipo === 'booleano' && !['true', 'false'].includes(nuevo.toLowerCase())) {
       return reply.code(422).send(error(422, 'BOOLEANO_INVALIDO', 'Usa true o false.'));
     }
 
     await tx(async (c) => {
-      await c.query('UPDATE core.parametro SET valor = $1 WHERE clave = $2', [nuevo, clave]);
+      await c.query('UPDATE core.parametro SET valor = $1 WHERE clave = $2', [clave === 'cif_base_prorrateo' ? nuevo.toUpperCase() : nuevo, clave]);
+      // Cambiar la base de prorrateo cambia el costo de cada producto: se recostea en la misma transacción.
+      if (clave === 'cif_base_prorrateo') await c.query('SELECT core.recalcular_costos()');
       await c.query(
         'INSERT INTO audit.parametro_historial (clave, valor_antes, valor_nuevo, usuario_id) VALUES ($1,$2,$3,$4)',
         [clave, actual.valor, nuevo, req.usuario!.id],
@@ -250,11 +255,26 @@ export async function rutasAdmin(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------------ auditoría */
+  // Bitácora con filtros y páginas de 50. Solo lectura: la tabla es append-only por trigger.
   app.get('/auditoria', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'usuarios.gestionar')) return;
+    if (!exigir(req, reply, 'auditoria.ver')) return;
+    const f = z.object({
+      texto: z.string().max(60).optional(), accion: z.string().max(60).optional(),
+      desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      antesDe: z.coerce.number().int().positive().optional(),
+    }).safeParse(req.query);
+    if (!f.success) return reply.code(422).send(error(422, 'FILTRO_INVALIDO', 'Filtro inválido.'));
+    const { texto, accion, desde, hasta, antesDe } = f.data;
     const filas = await q<Record<string, string>>(
       `SELECT id, actor, rol, accion, entidad, entidad_id, detalle::text AS detalle, ocurrido_en::text AS creado_en
-       FROM audit.evento ORDER BY id DESC LIMIT 100`,
+       FROM audit.evento
+       WHERE ($1::text IS NULL OR actor ILIKE '%' || $1 || '%' OR entidad_id ILIKE '%' || $1 || '%')
+         AND ($2::text IS NULL OR accion = $2)
+         AND ($3::date IS NULL OR ocurrido_en >= $3::date)
+         AND ($4::date IS NULL OR ocurrido_en < $4::date + 1)
+         AND ($5::bigint IS NULL OR id < $5)
+       ORDER BY id DESC LIMIT 50`,
+      [texto || null, accion || null, desde ?? null, hasta ?? null, antesDe ?? null],
     );
     return reply.send(filas.map((f) => ({
       id: num(f.id), actor: f.actor, rol: f.rol, accion: f.accion,

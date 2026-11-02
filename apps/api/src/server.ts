@@ -10,6 +10,8 @@ import { rutasDatos } from './routes/datos.js';
 import { rutasOperaciones } from './routes/operaciones.js';
 import { rutasAdmin } from './routes/admin.js';
 import { rutasSistema } from './routes/sistema.js';
+import { rutasMaestros } from './routes/maestros.js';
+import { rutasReportes } from './routes/reportes.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
 const ORIGENES = (process.env.CORS_ORIGINS ??
@@ -53,7 +55,7 @@ export async function construir() {
   // Toda escritura exitosa invalida los agregados cacheados ANTES de responder: quien
   // recarga justo después de su venta, cobro o ajuste ya ve el dato nuevo.
   app.addHook('onSend', async (req, reply) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD' && reply.statusCode < 400) invalidar('agg:');
+    if (req.method !== 'GET' && req.method !== 'HEAD' && reply.statusCode < 400) { invalidar('agg:'); invalidar('cat:'); }
   });
 
   // Respuesta de error uniforme (RFC 9457). Nunca se filtra el mensaje crudo de PostgreSQL.
@@ -125,6 +127,8 @@ export async function construir() {
     await api.register(rutasOperaciones);
     await api.register(rutasAdmin);
     await api.register(rutasSistema);
+    await api.register(rutasMaestros);
+    await api.register(rutasReportes);
   }, { prefix: '/api/v1' });
 
   return app;

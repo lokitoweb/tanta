@@ -48,15 +48,17 @@ const PERMISOS: Array<[string, string, string]> = [
   ['periodos.cerrar', 'Gerencia', 'Calcular y cerrar el período de costos'],
   ['config.gestionar', 'Seguridad', 'Configurar marca, app móvil, integraciones y legal'],
   ['roles.gestionar', 'Seguridad', 'Editar los permisos de cada rol'],
+  ['clientes.gestionar', 'Ventas', 'Crear y editar clientes, crédito y lista de precios'],
+  ['auditoria.ver', 'Seguridad', 'Consultar la bitácora de auditoría'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar']],
+    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
-    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar']],
+    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
     ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'recetas.ver', 'inventario.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,
@@ -80,10 +82,13 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-productos', 'Maestros', 'Productos', '/maestros/productos', 'bread', 'maestros.ver', 1, 3],
   ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 3],
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
-  ['n-usuarios', 'Maestros', 'Usuarios y roles', '/seguridad/usuarios', 'shield', 'usuarios.gestionar', 4, 3],
-  ['n-parametros', 'Maestros', 'Parámetros', '/seguridad/parametros', 'settings', 'parametros.gestionar', 5, 3],
+  ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 3],
+  ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 3],
+  ['n-usuarios', 'Maestros', 'Usuarios y roles', '/seguridad/usuarios', 'shield', 'usuarios.gestionar', 6, 3],
+  ['n-parametros', 'Maestros', 'Parámetros', '/seguridad/parametros', 'settings', 'parametros.gestionar', 7, 3],
   ['n-roles', 'Sistema', 'Roles y permisos', '/sistema/roles', 'shield', 'roles.gestionar', 1, 9],
   ['n-config', 'Sistema', 'Configuración', '/sistema/configuracion', 'settings', 'config.gestionar', 2, 9],
+  ['n-auditoria', 'Sistema', 'Auditoría', '/sistema/auditoria', 'ledger', 'auditoria.ver', 3, 9],
   ['n-dashboard', 'Gerencia', 'Costos y márgenes', '/gerencia/dashboard', 'chart', 'dashboard.ver', 1, 4],
   ['n-reportes', 'Gerencia', 'Reportes', '/gerencia/reportes', 'report', 'reportes.ver', 2, 4],
   ['n-periodos', 'Gerencia', 'Períodos de costo', '/gerencia/periodos', 'report', 'periodos.cerrar', 3, 4],
@@ -185,7 +190,7 @@ async function main() {
       audit.evento RESTART IDENTITY CASCADE`);
     await c.query("UPDATE audit.cadena_estado SET hash_actual = '' WHERE id = 1");
     await c.query('ALTER TABLE audit.evento ENABLE TRIGGER USER');
-    await c.query('TRUNCATE core.periodo_costos, core.idempotencia CASCADE');
+    await c.query('TRUNCATE core.periodo_costos, core.idempotencia, core.costo_indirecto CASCADE');
 
     await c.query('BEGIN');
 
@@ -220,6 +225,7 @@ async function main() {
       ['moneda', 'PEN', 'texto', 'Moneda del sistema'],
       ['margen_objetivo_global', '0.52', 'porcentaje', 'Margen objetivo por defecto'],
       ['permitir_saldo_negativo', 'false', 'booleano', 'Política estricta de inventario'],
+      ['cif_base_prorrateo', 'UNIDADES', 'texto', 'Base de prorrateo del CIF: UNIDADES o COSTO_INSUMOS'],
     ]) {
       await c.query('INSERT INTO core.parametro (clave,valor,tipo,descripcion) VALUES ($1,$2,$3,$4)', [clave, valor, tipo, desc]);
     }
@@ -310,7 +316,8 @@ async function main() {
         await c.query(
           `INSERT INTO core.receta_detalle (receta_id,insumo_id,insumo,unidad,cantidad,cpp,costo,orden)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [productoId, idInsumo.get(l.cod), ins[1], ins[2], d(l.cantidad), d(l.cpp), d(l.cantidad * l.cpp), orden++],
+          // La receta describe una tanda de 24 unidades (rendimiento): cantidades por tanda, no por unidad.
+          [productoId, idInsumo.get(l.cod), ins[1], ins[2], d(l.cantidad * 24), d(l.cpp), d(l.cantidad * 24 * l.cpp), orden++],
         );
       }
 
@@ -419,7 +426,8 @@ async function main() {
           await c.query(
             `INSERT INTO core.venta_detalle (venta_id,producto_id,producto,cantidad,precio_con_igv,precio_neto,costo_unitario,utilidad,margen)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-            [ventaId, l.p.id, l.p.nombre, d(l.qty), d(l.p.precio, 4), d(neto, 4), d(l.p.costo),
+            // precio_neto es por unidad (igual que la API de ventas); utilidad es el total de la línea.
+            [ventaId, l.p.id, l.p.nombre, d(l.qty), d(l.p.precio, 4), d(neto / l.qty, 4), d(l.p.costo),
               d(r2(neto - costo), 4), d(r6((neto - costo) / neto))],
           );
         }
@@ -482,6 +490,16 @@ async function main() {
       `INSERT INTO core.periodo_costos (anio, mes, estado, cif_total) VALUES (2026, 11, 'ABIERTO', $1)`,
       [d(0, 4)],
     );
+
+    // ------------------------------------------ costos indirectos (PDF §3.3)
+    for (const [concepto, tipo, monto] of [
+      ['Alquiler del local', 'FIJO', 3200], ['Energía eléctrica', 'VARIABLE', 1450], ['Gas GLP del horno', 'VARIABLE', 1380],
+      ['Agua', 'VARIABLE', 240], ['Planilla indirecta', 'FIJO', 1650], ['Depreciación de equipos', 'FIJO', 500.5],
+    ] as Array<[string, string, number]>) {
+      await c.query('INSERT INTO core.costo_indirecto (concepto, tipo, monto_mensual) VALUES ($1,$2,$3)', [concepto, tipo, monto]);
+    }
+    // El costo de cada producto sale del motor (receta × CPP + merma + CIF), no de un número fijo.
+    await c.query('SELECT core.recalcular_costos()');
 
     // Los correlativos siguen a los documentos cargados: sin esto, la primera venta real
     // de una base recién sembrada chocaba con VTA-…-000001 (409 DUPLICADO).

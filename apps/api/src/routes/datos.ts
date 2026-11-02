@@ -82,7 +82,7 @@ export async function rutasDatos(app: FastifyInstance) {
           -- LATERAL explícito: antes el planner eliminaba el LEFT JOIN de venta
           -- (sus columnas no se usaban) y con él se perdía el filtro de 30 días,
           -- así que la categoría sumaba el histórico completo.
-          SELECT sum(vd.precio_neto)                AS ventas,
+          SELECT sum(vd.precio_neto * vd.cantidad)                AS ventas,
                  sum(vd.costo_unitario * vd.cantidad) AS costo,
                  sum(vd.utilidad)                   AS utilidad
           FROM core.venta_detalle vd
@@ -97,19 +97,19 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
                p.precio_con_igv, p.costo_unitario, p.merma_pct, p.vendidos_30d, p.stock, p.estado,
-               p.precio_con_igv / (1 + $1::numeric) AS precio_neto,
+               p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) AS precio_neto,
                CASE WHEN p.precio_con_igv > 0
-                    THEN (p.precio_con_igv / (1 + $1::numeric) - p.costo_unitario) / (p.precio_con_igv / (1 + $1::numeric))
+                    THEN (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) - p.costo_unitario) / (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')))
                     ELSE NULL END AS margen,
                (SELECT c.margen_objetivo FROM core.categoria c WHERE c.id = p.categoria_id) AS margen_objetivo
         FROM core.producto p
-        ORDER BY p.nombre`, [String(0.18)])),
+        ORDER BY p.nombre`)),
 
       agg('3', () => q<Record<string, string>>(`
         SELECT vd.producto_id AS id, vd.producto AS nombre, p.categoria_id AS categoria,
-               sum(vd.precio_neto) AS ventas, sum(vd.utilidad) AS utilidad,
+               sum(vd.precio_neto * vd.cantidad) AS ventas, sum(vd.utilidad) AS utilidad,
                sum(vd.cantidad)    AS unidades,
-               CASE WHEN sum(vd.precio_neto) > 0 THEN sum(vd.utilidad) / sum(vd.precio_neto) ELSE 0 END AS margen,
+               CASE WHEN sum(vd.precio_neto * vd.cantidad) > 0 THEN sum(vd.utilidad) / sum(vd.precio_neto * vd.cantidad) ELSE 0 END AS margen,
                (SELECT c.margen_objetivo FROM core.categoria c WHERE c.id = p.categoria_id) AS margen_objetivo
         FROM core.venta_detalle vd
         JOIN core.venta v ON v.id = vd.venta_id AND v.estado = 'CONFIRMADA'

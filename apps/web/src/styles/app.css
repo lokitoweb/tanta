@@ -345,10 +345,10 @@ input, select, textarea { font-family: inherit; }
   :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) :is(.navitem span, .navgroup__title, .perfil__txt, .perfil__btn, .sidebar__logo, .cambiar-rol) { opacity: 0; pointer-events: none; }
   :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .sidebar__logo { position: absolute; }
   :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .sidebar__brand { justify-content: center; padding-inline: 0; }
-  :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .navgroup + .navgroup { border-top: 1px solid rgba(255,255,255,.08); margin: 10px 8px 0; padding-top: 10px; }
+  :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .navgroup + .navgroup { border-top: 1px solid rgba(255,255,255,.08); margin-top: 10px; padding-top: 10px; }
   .navitem { padding-inline: 15px; }
 }
-.sidebar__nav { flex: 1; overflow-y: auto; padding: 14px 10px; }
+.sidebar__nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px 10px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.12) transparent; }
 .sidebar__nav::-webkit-scrollbar { width: 6px; }
 .sidebar__nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 999px; }
 
