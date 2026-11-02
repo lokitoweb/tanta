@@ -6,7 +6,9 @@ import { Tabla, type Columna } from '@/ui/Tabla';
 import type { Insumo } from '@/core/types';
 
 export function Almacen() {
-  const { dataset } = useApp();
+  const { dataset, puede } = useApp();
+  // Misma regla que el API (PDF 3.3): valorización para Gerencia/Admin y Almacén.
+  const verValor = puede('costos.ver') || puede('inventario.mover');
   const [q, setQ] = useState('');
 
   const insumos = useMemo(
@@ -17,7 +19,7 @@ export function Almacen() {
   const bajos = dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO');
   const valorTotal = dataset.insumos.reduce((s, i) => s + i.valorizado, 0);
 
-  const columnas: Array<Columna<Insumo>> = [
+  const todas: Array<Columna<Insumo>> = [
     {
       key: 'nombre', header: 'Insumo',
       render: (i) => (
@@ -29,8 +31,8 @@ export function Almacen() {
     },
     { key: 'stock', header: 'Stock', align: 'right', render: (i) => <strong>{num(i.stock)} {i.unidad}</strong> },
     { key: 'minimo', header: 'Mínimo', align: 'right', render: (i) => <span className="t-muted">{num(i.minimo)}</span> },
-    { key: 'cpp', header: 'CPP', align: 'right', permiso: 'costos.ver', render: (i) => money(i.cpp) },
-    { key: 'valorizado', header: 'Valorizado', align: 'right', permiso: 'costos.ver', render: (i) => money(i.valorizado) },
+    { key: 'cpp', header: 'CPP', align: 'right', render: (i) => money(i.cpp) },
+    { key: 'valorizado', header: 'Valorizado', align: 'right', render: (i) => money(i.valorizado) },
     {
       key: 'estado', header: 'Estado', align: 'right',
       render: (i) => i.estado === 'BAJO_MINIMO'
@@ -38,6 +40,7 @@ export function Almacen() {
         : <Insignia tono="ok" punto>Disponible</Insignia>,
     },
   ];
+  const columnas = todas.filter((c) => verValor || (c.key !== 'cpp' && c.key !== 'valorizado'));
 
   return (
     <>
@@ -49,9 +52,9 @@ export function Almacen() {
 
       <div className="grid grid--4">
         <Kpi label="Insumos activos" valor={num(dataset.insumos.length)} nota={`${bajos.length} bajo mínimo`} icono="sack" />
-        <Kpi label="Valor del stock" valor={money(valorTotal)} nota="costo promedio ponderado" icono="wallet" />
+        {verValor && <Kpi label="Valor del stock" valor={money(valorTotal)} nota="costo promedio ponderado" icono="wallet" />}
         <Kpi label="Movimientos del día" valor={num(dataset.movimientos.length)} nota="kárdex inmutable" icono="ledger" />
-        <Kpi label="Merma valorizada" valor={money(dataset.kpis.mermaValorizada)} nota={pct(dataset.kpis.mermaPct) + ' de la producción'} icono="alert" />
+        {verValor && <Kpi label="Merma valorizada" valor={money(dataset.kpis.mermaValorizada)} nota={pct(dataset.kpis.mermaPct) + ' de la producción'} icono="alert" />}
       </div>
 
       {bajos.length > 0 && (

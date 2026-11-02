@@ -351,6 +351,13 @@ export async function rutasDatos(app: FastifyInstance) {
       p.topProductos = payload.topProductos.map((t) => ({
         id: t.id, nombre: t.nombre, categoria: t.categoria, ventas: t.ventas, unidades: t.unidades,
       }));
+      p.productos = (p.productos as Record<string, unknown>[]).map(sinSoles);
+      if (p.negocio) p.negocio = sinSoles(p.negocio as Record<string, unknown>);
+      // PDF 3.3: el inventario y el kárdex valorizados son de Almacén; Producción solo ve cantidades.
+      if (!u.permisos.has('inventario.mover')) {
+        p.movimientos = (p.movimientos as Record<string, unknown>[]).map(sinSoles);
+        p.insumos = (p.insumos as Record<string, unknown>[]).map(sinSoles);
+      }
     }
 
     const puede = (perm: string) => u.permisos.has(perm);
@@ -393,6 +400,11 @@ export async function rutasDatos(app: FastifyInstance) {
 
     return reply.send(p);
   });
+}
+
+/** Quita todo campo en soles de costo o margen; las cantidades se conservan. */
+function sinSoles(o: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(o).filter(([k]) => !/costo|cpp|valor|margen|utilidad/i.test(k)));
 }
 
 function precioDe(productoId: string, productos: Array<Record<string, string>>): number {

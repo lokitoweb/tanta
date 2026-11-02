@@ -3,8 +3,9 @@ const PEN0 = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN'
 const NUM = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const NUM2 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export const money = (n: number) => PEN.format(n ?? 0);
-export const moneyShort = (n: number) => (Math.abs(n) >= 1000 ? PEN0.format(n) : PEN.format(n));
+// Sin dato (p. ej. el rol no puede ver soles) se muestra "—", nunca NaN ni un S/ 0.00 engañoso.
+export const money = (n: number) => (Number.isFinite(n) ? PEN.format(n) : "—");
+export const moneyShort = (n: number) => (!Number.isFinite(n) ? "—" : Math.abs(n) >= 1000 ? PEN0.format(n) : PEN.format(n));
 export const num = (n: number) => NUM.format(n ?? 0);
 export const num2 = (n: number) => NUM2.format(n ?? 0);
 

@@ -1,7 +1,8 @@
 /**
  * Cliente HTTP del API.
  *
- * - El token de acceso (15 min) vive en memoria + localStorage.
+ * - El token de acceso (15 min) vive SOLO en memoria: un XSS no puede leerlo de localStorage.
+ *   Al recargar la página se recupera con la cookie de refresco.
  * - El token de refresco viaja en una cookie HttpOnly: JavaScript no puede leerla,
  *   así un XSS no se lleva la sesión. Por eso todas las llamadas usan `credentials: 'include'`.
  */
@@ -21,34 +22,41 @@ export class ApiError extends Error {
   }
 }
 
+let acceso: string | null = null;
+
 export function leerAcceso(): string | null {
-  try {
-    return localStorage.getItem(CLAVE);
-  } catch {
-    return null;
-  }
+  return acceso;
 }
 
 export function guardarAcceso(token: string): void {
-  localStorage.setItem(CLAVE, token);
+  acceso = token;
 }
 
 export function borrarAcceso(): void {
-  localStorage.removeItem(CLAVE);
+  acceso = null;
 }
 
 export function idempotencyKey(): string {
   return crypto.randomUUID();
 }
 
-async function refrescar(): Promise<boolean> {
+// Un solo refresco en vuelo: el servidor rota el token y detecta reuso, así que dos
+// refrescos paralelos cerrarían la sesión.
+let enVuelo: Promise<boolean> | null = null;
+
+export function refrescar(): Promise<boolean> {
+  enVuelo ??= hacerRefresco().finally(() => { enVuelo = null; });
+  return enVuelo;
+}
+
+async function hacerRefresco(): Promise<boolean> {
   const res = await fetch(`${BASE}/auth/refresh`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  });
-  if (!res.ok) {
+  }).catch(() => null);
+  if (!res?.ok) {
     borrarAcceso();
     return false;
   }

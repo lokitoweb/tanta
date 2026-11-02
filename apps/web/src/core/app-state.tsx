@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, borrarAcceso, leerAcceso, logout as logoutApi } from './api';
+import { api, borrarAcceso, leerAcceso, logout as logoutApi, refrescar } from './api';
 import type { Dataset, NavGrupo, Rol } from './types';
 import { Acceso } from '@/modules/auth/Acceso';
 
@@ -39,6 +39,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const p = new URLSearchParams(window.location.search);
       const u = p.get('usuario');
       const c = p.get('clave');
+      // Las credenciales no quedan en la barra ni en el historial del navegador.
+      if (u || c) window.history.replaceState(null, '', window.location.pathname);
       if (u && c) {
         try {
           const { login } = await import('./api');
@@ -51,7 +53,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch { /* se muestra el login normal */ }
       }
     }
-    if (!leerAcceso()) {
+    if (!leerAcceso() && !(await refrescar())) {
       setFase({ tipo: 'sin-sesion' });
       return;
     }

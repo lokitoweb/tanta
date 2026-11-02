@@ -9,6 +9,16 @@ export function AppShell() {
   const { rol, sesion, navegacionVisible, cerrarSesion, dataset } = useApp();
   const [menu, setMenu] = useState(false);
   const [menuMovil, setMenuMovil] = useState(false);
+  // Preferencia de cada usuario en su navegador; sin almacenamiento, el menú arranca colapsado.
+  const [fijo, setFijo] = useState(() => { try { return localStorage.getItem('tanta.menu.fijo') === '1'; } catch { return false; } });
+  // Tras colapsar con el botón, el hover no lo reabre hasta que el mouse salga del menú.
+  const [forzarCierre, setForzarCierre] = useState(false);
+  const alternarFijo = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const nuevo = !fijo;
+    try { localStorage.setItem('tanta.menu.fijo', nuevo ? '1' : '0'); } catch { /* sin almacenamiento */ }
+    setFijo(nuevo);
+    if (!nuevo) { setForzarCierre(true); e.currentTarget.blur(); }
+  };
   const loc = useLocation();
 
   const { grupo, item } = useMemo(() => {
@@ -20,12 +30,16 @@ export function AppShell() {
   }, [navegacionVisible, loc.pathname]);
 
   return (
-    <div className={`shell ${menuMovil ? 'shell--menu' : ''}`}>
+    <div className={`shell ${menuMovil ? 'shell--menu' : ''} ${fijo ? 'shell--fijo' : ''} ${forzarCierre ? 'shell--cerrado' : ''}`}>
       <a href="#contenido" className="saltar-contenido">Saltar al contenido</a>
 
-      <aside className="sidebar">
+      <aside className="sidebar" onMouseLeave={() => setForzarCierre(false)}>
         <div className="sidebar__brand">
-          <BrandMark variant="dark" size="sm" />
+          <span className="sidebar__logo"><BrandMark variant="dark" size="sm" /></span>
+          <button className="sidebar__fijar" onClick={alternarFijo} aria-pressed={fijo}
+            aria-label={fijo ? 'Colapsar menú' : 'Mantener menú abierto'} title={fijo ? 'Colapsar menú' : 'Mantener menú abierto'}>
+            <Icon name="panel" size={18} />
+          </button>
         </div>
 
         <nav className="sidebar__nav">
@@ -39,6 +53,7 @@ export function AppShell() {
                   end
                   className={({ isActive }) => `navitem ${isActive ? 'is-active' : ''}`}
                   onClick={() => setMenuMovil(false)}
+                  title={i.etiqueta}
                 >
                   <Icon name={i.icono as NombreIcono} size={18} />
                   <span>{i.etiqueta}</span>

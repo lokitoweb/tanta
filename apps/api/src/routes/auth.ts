@@ -51,6 +51,9 @@ function quitarCookie(reply: FastifyReply) {
 /** Hash de relleno: iguala el tiempo de respuesta cuando el usuario no existe. */
 const HASH_SEÑUELO = hashClave('señuelo-para-igualar-tiempos-' + Math.random());
 
+// Límite estricto para todo lo que adivina un secreto corto (TOTP de 6 dígitos, tickets).
+const ESTRICTO = { config: { rateLimit: { max: Number(process.env.LOGIN_RATE_MAX ?? 8), timeWindow: '1 minute' } } };
+
 export async function rutasAuth(app: FastifyInstance) {
   /**
    * POST /auth/login
@@ -141,7 +144,7 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/mfa/enrolar — genera el secreto y la URL para la app autenticadora. */
-  app.post('/auth/mfa/enrolar', async (req, reply) => {
+  app.post('/auth/mfa/enrolar', ESTRICTO, async (req, reply) => {
     const parseo = Ticket.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Falta el ticket de la sesión.'));
 
@@ -160,7 +163,7 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/mfa/activar — confirma el primer código y abre la sesión. */
-  app.post('/auth/mfa/activar', async (req, reply) => {
+  app.post('/auth/mfa/activar', ESTRICTO, async (req, reply) => {
     const parseo = VerificarMfa.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Falta el código de 6 dígitos.'));
 
@@ -192,7 +195,7 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/mfa/verificar — segundo factor en un inicio de sesión normal. */
-  app.post('/auth/mfa/verificar', async (req, reply) => {
+  app.post('/auth/mfa/verificar', ESTRICTO, async (req, reply) => {
     const parseo = VerificarMfa.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Falta el código.'));
     const codigo = parseo.data.codigo.trim();
@@ -227,7 +230,7 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/refresh — rota el token. El refresco viaja en cookie HttpOnly. */
-  app.post('/auth/refresh', async (req, reply) => {
+  app.post('/auth/refresh', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
     const enCookie = (req as { cookies?: Record<string, string> }).cookies?.[COOKIE];
     const enCuerpo = Refresh.safeParse(req.body ?? {}).success ? (req.body as { refreshToken?: string }).refreshToken : undefined;
     const token = enCookie ?? enCuerpo;

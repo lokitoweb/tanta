@@ -1,8 +1,15 @@
 import { useState } from 'react';
 import demo from '@/config/demo.json';
-import { activarMfa, enrolarMfa, login, verificarMfa } from '@/core/api';
+import { ApiError, activarMfa, enrolarMfa, login, verificarMfa } from '@/core/api';
 import { BrandMark, Boton } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
+
+/** Mensaje claro para el usuario; nunca revela si el usuario existe. */
+function mensajeError(e: unknown, defecto: string): string {
+  if (e instanceof ApiError && e.status === 429) return 'Demasiados intentos. Espera un minuto antes de volver a intentar.';
+  if (e instanceof TypeError) return 'No hay conexión con el servidor. Revisa tu internet.';
+  return e instanceof Error ? e.message : defecto;
+}
 
 interface DemoUsuario { rol: string; usuario: string; nombre: string }
 const usuarios = demo.usuarios as DemoUsuario[];
@@ -23,6 +30,8 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
   const [trabajando, setTrabajando] = useState(false);
   const [verClave, setVerClave] = useState(false);
   const [usarRecuperacion, setUsarRecuperacion] = useState(false);
+  const [mayus, setMayus] = useState(false);
+  const detectarMayus = (e: React.KeyboardEvent) => setMayus(e.getModifierState?.('CapsLock') ?? false);
 
   const entrar = async () => {
     setError(undefined);
@@ -46,7 +55,8 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
       });
       setCodigo('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo iniciar sesión.');
+      setError(mensajeError(e, 'No se pudo iniciar sesión.'));
+      setClave('');
     } finally {
       setTrabajando(false);
     }
@@ -69,7 +79,8 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
       }
       onSesion();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Código inválido.');
+      setError(mensajeError(e, 'Código inválido.'));
+      setCodigo('');
     } finally {
       setTrabajando(false);
     }
@@ -143,6 +154,9 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                   autoComplete="username"
                   autoCapitalize="none"
                   spellCheck={false}
+                  required
+                  maxLength={60}
+                  autoFocus={!esDev}
                 />
               </label>
 
@@ -155,11 +169,17 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                     value={clave}
                     onChange={(e) => setClave(e.target.value)}
                     autoComplete="current-password"
+                    required
+                    maxLength={128}
+                    onKeyUp={detectarMayus}
+                    onKeyDown={detectarMayus}
                   />
-                  <button type="button" className="field__ojo" onClick={() => setVerClave((v) => !v)} aria-label="Mostrar contraseña">
+                  <button type="button" className="field__ojo" onClick={() => setVerClave((v) => !v)}
+                    aria-label={verClave ? 'Ocultar contraseña' : 'Mostrar contraseña'} aria-pressed={verClave}>
                     <Icon name="eye" size={17} />
                   </button>
                 </div>
+                {mayus && <span className="field__aviso"><Icon name="alert" size={13} /> Bloq Mayús está activado</span>}
               </label>
 
               {error && (
@@ -168,7 +188,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                 </p>
               )}
 
-              <Boton variant="primary" size="lg" full type="submit" iconoDer="chevron" disabled={trabajando}>
+              <Boton variant="primary" size="lg" full type="submit" iconoDer="chevron" disabled={trabajando || !usuario.trim() || !clave}>
                 {trabajando ? 'Verificando…' : 'Entrar al sistema'}
               </Boton>
 
@@ -204,7 +224,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
           )}
 
           {paso.tipo === 'enrolar' && (
-            <div className="form">
+            <form className="form" onSubmit={(e) => { e.preventDefault(); if (codigo.length === 6) void confirmarCodigo(); }}>
               <div className="mfa__secreto">
                 <span className="field__label">Clave secreta</span>
                 <code className="mfa__clave">{paso.secreto}</code>
@@ -229,11 +249,11 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
 
               {error && <p className="form__error" role="alert"><Icon name="alert" size={15} /> {error}</p>}
 
-              <Boton variant="primary" size="lg" full onClick={() => void confirmarCodigo()} disabled={trabajando || codigo.length !== 6}>
+              <Boton variant="primary" size="lg" full type="submit" disabled={trabajando || codigo.length !== 6}>
                 {trabajando ? 'Activando…' : 'Activar y entrar'}
               </Boton>
               <button type="button" className="mfa__volver" onClick={volver}>Volver</button>
-            </div>
+            </form>
           )}
 
           {paso.tipo === 'codigo' && (

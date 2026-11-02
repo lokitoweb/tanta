@@ -21,9 +21,11 @@ export async function construir() {
     bodyLimit: 256 * 1024,
   });
 
-  await app.register(cookie, { secret: process.env.COOKIE_SECRET ?? process.env.JWT_SECRET ?? 'dev' });
+  await app.register(cookie, { secret: process.env.COOKIE_SECRET ?? process.env.JWT_SECRET! });
 
-  await app.register(helmet, { contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'same-site' } });
+  // El API solo sirve JSON: una CSP que no permite nada.
+  await app.register(helmet, {
+    contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginResourcePolicy: { policy: 'same-site' } });
 
   await app.register(cors, {
     // Devolver false (no lanzar) hace que el navegador reciba la respuesta sin las

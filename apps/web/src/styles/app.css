@@ -327,7 +327,27 @@ input, select, textarea { font-family: inherit; }
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 30;
 }
-.sidebar__brand { padding: 20px 18px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.sidebar__brand { padding: 20px 18px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.07); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar__fijar { color: var(--tanta-text-sidebar-muted); display: grid; place-items: center; padding: 5px; border-radius: 6px; flex: 0 0 auto; }
+.sidebar__fijar:hover, .sidebar__fijar[aria-pressed="true"] { background: rgba(255, 255, 255, 0.08); color: var(--tanta-cream-50); }
+
+/* Escritorio: menú colapsado a iconos; se expande encima del contenido al pasar el mouse
+   o al navegar con teclado, y se vuelve a colapsar al salir. "Fijar" lo deja abierto. */
+@media (min-width: 981px) {
+  .shell { grid-template-columns: 68px 1fr; transition: grid-template-columns 180ms ease; }
+  .shell--fijo { grid-template-columns: 244px 1fr; }
+  .sidebar { width: 68px; overflow: hidden; transition: width 180ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease; }
+  .shell--fijo .sidebar, .shell:not(.shell--cerrado) .sidebar:is(:hover, :focus-within) { width: 244px; }
+  .shell:not(.shell--fijo):not(.shell--cerrado) .sidebar:is(:hover, :focus-within) { box-shadow: var(--tanta-shadow-lg); }
+  .sidebar__brand { min-height: 64px; }
+  .sidebar :is(.navitem span, .navgroup__title, .perfil__txt, .perfil__btn, .sidebar__logo, .cambiar-rol) { transition: opacity 120ms ease; white-space: nowrap; }
+  /* Colapsado: solo el botón de panel, centrado (sin logo). Abierto: logo + botón. */
+  :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) :is(.navitem span, .navgroup__title, .perfil__txt, .perfil__btn, .sidebar__logo, .cambiar-rol) { opacity: 0; pointer-events: none; }
+  :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .sidebar__logo { position: absolute; }
+  :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .sidebar__brand { justify-content: center; padding-inline: 0; }
+  :is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .navgroup + .navgroup { border-top: 1px solid rgba(255,255,255,.08); margin: 10px 8px 0; padding-top: 10px; }
+  .navitem { padding-inline: 15px; }
+}
 .sidebar__nav { flex: 1; overflow-y: auto; padding: 14px 10px; }
 .sidebar__nav::-webkit-scrollbar { width: 6px; }
 .sidebar__nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 999px; }
@@ -878,3 +898,5 @@ select.field__input {
   background: var(--tanta-surface-card); border: 1px solid var(--tanta-border-subtle);
   border-radius: 5px; padding: 6px 8px; text-align: center;
 }
+
+.field__aviso { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 0.75rem; font-weight: 500; color: var(--tanta-state-warn); }

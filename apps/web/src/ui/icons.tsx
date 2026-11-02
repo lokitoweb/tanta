@@ -4,7 +4,7 @@ export type NombreIcono =
   | 'home' | 'oven' | 'box' | 'ledger' | 'clipboard' | 'wallet' | 'bread' | 'sack'
   | 'recipe' | 'shield' | 'chart' | 'report' | 'settings' | 'truck' | 'user'
   | 'search' | 'bell' | 'chevron' | 'plus' | 'up' | 'down' | 'check' | 'alert'
-  | 'close' | 'filter' | 'download' | 'sync' | 'logout' | 'menu' | 'eye' | 'clock' | 'spark';
+  | 'close' | 'filter' | 'download' | 'sync' | 'logout' | 'menu' | 'eye' | 'clock' | 'spark' | 'panel';
 
 const D: Record<NombreIcono, string> = {
   home: 'M3 10.6 12 3.5l9 7.1V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
@@ -36,6 +36,7 @@ const D: Record<NombreIcono, string> = {
   sync: 'M20 12a8 8 0 0 1-13.6 5.7M4 12a8 8 0 0 1 13.6-5.7M4 4.5V9h4.5M20 19.5V15h-4.5',
   logout: 'M14.5 4.5H19v15h-4.5M10 8l-4 4 4 4M6 12h9',
   menu: 'M4 7h16M4 12h16M4 17h16',
+  panel: 'M4 4.5h16v15H4zM9.5 4.5v15',
   eye: 'M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12zM12 14.6a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2z',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5.2l3.4 2',
   spark: 'M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.2l-1.8-5.6L4.5 10.8 10.2 9z',
