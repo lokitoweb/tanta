@@ -95,20 +95,26 @@ rsync -avz tanta@servidor:/var/lib/docker/volumes/tanta_tanta_backups/_data/ ~/r
 
 ### Ensayo de restauración — obligatorio antes del go-live y mensual después
 
+El contenedor `backup` tiene los scripts y los respaldos montados. El ensayo se hace en una
+base **aparte** (`tanta_ensayo`) del mismo servidor: producción no se toca.
+
 ```bash
-# 1. Preparar un entorno limpio (NUNCA sobre producción)
-docker run -d --name tanta-restore -e POSTGRES_PASSWORD=x -e POSTGRES_USER=tanta -e POSTGRES_DB=tanta postgres:17-alpine
+# 1. Base vacía para el ensayo
+docker compose -f infra/compose/docker-compose.prod.yml exec backup createdb tanta_ensayo
 
 # 2. Restaurar y cronometrar
-time docker compose -f infra/compose/docker-compose.prod.yml exec -T postgres \
-  sh /scripts/restore.sh /backups/tanta-<fecha>.sql.gz
+time docker compose -f infra/compose/docker-compose.prod.yml exec -T -e PGDATABASE=tanta_ensayo backup   sh /scripts/restore.sh /backups/tanta-<fecha>.sql.gz
 
-# 3. Verificar los invariantes que imprime restore.sh:
-#    el stock de cada insumo debe coincidir con el último asiento del kárdex.
+# 3. Revisar los invariantes que imprime restore.sh (stock = último asiento del kárdex) y borrar
+docker compose -f infra/compose/docker-compose.prod.yml exec backup dropdb tanta_ensayo
 ```
 
-**RPO real:** 24 h si solo se usa el dump diario. Si se activa el archivado WAL (ya configurado en
-`archive_mode=on`), el RPO baja a minutos recuperando los WAL hasta el punto exacto.
+Restaurar sobre producción (desastre real): detener el API (`docker compose … stop api caddy`),
+`dropdb` + `createdb` de la base y ejecutar el paso 2 sin `-e PGDATABASE`; al arrancar, el API
+reaplica migraciones y el rol de aplicación.
+
+**RPO real:** 24 h (dump diario). El archivado WAL está desactivado; para RPO de minutos hay que
+configurar PITR con un destino externo.
 **RTO medido:** registrar aquí el tiempo real de la última prueba → `______ minutos` (objetivo ≤ 4 h).
 
 ---

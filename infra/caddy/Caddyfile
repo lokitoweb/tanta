@@ -28,8 +28,10 @@
 	handle /api/* {
 		reverse_proxy api:3001 {
 			header_up X-Real-IP {remote_host}
-			health_uri /api/v1/health
-			health_interval 30s
+			# Sin chequeo activo (dejaba el API fuera ~2 min al arrancar): Docker ya vigila su salud.
+			# Durante un reinicio del API, Caddy reintenta hasta 15 s antes de responder error.
+			lb_try_duration 15s
+			lb_try_interval 250ms
 		}
 	}
 

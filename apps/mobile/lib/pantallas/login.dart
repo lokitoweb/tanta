@@ -12,57 +12,61 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  /// Solo en desarrollo: en producción el build se compila sin DEMO_LOGIN y el
-  /// formulario arranca vacío, sin credenciales ni atajos dentro del binario.
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+  /// Solo en desarrollo: la build publicada se compila sin DEMO_LOGIN (sin credenciales ni atajos).
   static const _esDemo = bool.fromEnvironment('DEMO_LOGIN');
+  static const _demo = [('Gerente', 'osquilcate'), ('Administrador', 'lbermudez'), ('Producción', 'rquispe'),
+    ('Almacén', 'jramos'), ('Vendedor', 'cmedina'), ('Cliente', 'mfernandez')];
 
   final _usuario = TextEditingController(text: _esDemo ? 'osquilcate' : '');
   final _clave = TextEditingController(text: _esDemo ? 'tanta' : '');
+  late final AnimationController _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..forward();
   bool _cargando = false;
-  String? _error;
   bool _ver = false;
+  bool _recuperar = false;
+  String? _error;
+  String? _ok;
 
-  static const _demo = [
-    ('Gerente', 'osquilcate'),
-    ('Administrador', 'lbermudez'),
-    ('Producción', 'rquispe'),
-    ('Almacén', 'jramos'),
-    ('Vendedor', 'cmedina'),
-    ('Cliente', 'mfernandez'),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    Api.instancia.recuperacionDisponible().then((v) { if (mounted) setState(() => _recuperar = v); });
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    _usuario.dispose();
+    _clave.dispose();
+    super.dispose();
+  }
 
   Future<void> _entrar() async {
-    setState(() {
-      _cargando = true;
-      _error = null;
-    });
+    FocusScope.of(context).unfocus();
+    setState(() { _cargando = true; _error = null; _ok = null; });
     try {
       await Api.instancia.login(_usuario.text.trim(), _clave.text);
       final datos = await Api.instancia.datos();
       if (!mounted) return;
       widget.onEntrar(datos);
+    } on SinConexion {
+      if (mounted) setState(() => _error = 'Sin conexión con el servidor. Revisa tu internet.');
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
+      if (mounted) setState(() { _error = '$e'; _clave.clear(); });
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
   }
 
-  /// Build de pruebas: apuntar la app a otro servidor (p. ej. un túnel de Cloudflare).
+  /// Build de pruebas: mantener presionado el logo permite apuntar a otro servidor.
   Future<void> _cambiarServidor() async {
+    if (!Api.pruebas) return;
     final c = TextEditingController(text: Api.base.replaceAll('/api/v1', ''));
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Servidor'),
-        content: TextField(
-          controller: c,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          decoration: const InputDecoration(labelText: 'https://…trycloudflare.com'),
-        ),
+        title: const Text('Servidor (pruebas)'),
+        content: TextField(controller: c, keyboardType: TextInputType.url, autocorrect: false, decoration: const InputDecoration(labelText: 'https://…')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Usar')),
@@ -80,157 +84,212 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final claim = '${(Api.instancia.config['negocio'] as Map?)?['claim'] ?? ''}';
     return Scaffold(
       backgroundColor: TantaColors.surfacePage,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, restricciones) {
-            final ancho = restricciones.maxWidth;
-            final dosColumnas = ancho > 900;
-            final marca = Container(
-              width: double.infinity,
-              color: TantaColors.ink800,
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Marca(escala: 1.25, invertida: true),
-                  const SizedBox(height: 18),
-                  Text(
-                    'PAN DE MASA MADRE',
-                    style: TextStyle(
-                      fontSize: 10,
-                      letterSpacing: 3,
-                      fontWeight: FontWeight.w600,
-                      color: TantaColors.sand300.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ],
-              ),
-            );
-
-            final formulario = SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text('Bienvenido de nuevo', style: estiloDisplay.copyWith(fontSize: 30)),
-                      const SizedBox(height: 6),
-                      const Text('Ingresa con tu cuenta para continuar.',
-                          style: TextStyle(color: TantaColors.textMuted)),
-                      const SizedBox(height: 26),
-                      _campo('Usuario', _usuario, autofocus: false),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _clave,
-                        obscureText: !_ver,
-                        decoration: InputDecoration(
-                          labelText: 'Contraseña',
-                          suffixIcon: IconButton(
-                            icon: Icon(_ver ? Icons.visibility_off : Icons.visibility,
-                                color: TantaColors.textMuted, size: 20),
-                            onPressed: () => setState(() => _ver = !_ver),
-                          ),
-                        ),
-                      ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 14),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: TantaColors.stateDangerBg,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Row(children: [
-                            const Icon(Icons.error_outline, size: 18, color: TantaColors.stateDanger),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(_error!,
-                                  style: const TextStyle(fontSize: 13, color: TantaColors.stateDanger)),
-                            ),
+      body: LayoutBuilder(builder: (context, c) {
+        final alto = c.maxHeight;
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: alto),
+            child: Column(children: [
+              // Encabezado de marca: degradado cálido, logo centrado que aparece con un leve zoom.
+              Container(
+                width: double.infinity,
+                height: alto * 0.36,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [TantaColors.ink900, TantaColors.ink700]),
+                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
+                ),
+                child: SafeArea(
+                  bottom: false,
+                  child: Center(
+                    child: GestureDetector(
+                      onLongPress: _cambiarServidor,
+                      child: FadeTransition(
+                        opacity: CurvedAnimation(parent: _anim, curve: Curves.easeOut),
+                        child: ScaleTransition(
+                          scale: Tween(begin: 0.86, end: 1.0).animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutBack)),
+                          child: Column(mainAxisSize: MainAxisSize.min, children: [
+                            const Marca(escala: 1.15, invertida: true),
+                            if (claim.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              Text(claim.toUpperCase(), textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 10.5, letterSpacing: 3, fontWeight: FontWeight.w600, color: TantaColors.sand300.withValues(alpha: 0.9))),
+                            ],
                           ]),
                         ),
-                      ],
-                      const SizedBox(height: 20),
-                      FilledButton(
-                        onPressed: _cargando ? null : _entrar,
-                        child: _cargando
-                            ? const SizedBox(
-                                width: 20, height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.cream50))
-                            : const Text('Entrar al sistema'),
                       ),
-                      if (Api.pruebas) ...[
-                        const SizedBox(height: 14),
-                        TextButton.icon(
-                          onPressed: _cambiarServidor,
-                          icon: const Icon(Icons.dns_outlined, size: 18),
-                          label: Text('Servidor: ${Uri.tryParse(Api.base)?.host ?? Api.base}',
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                      ],
-                      if (_esDemo) ...[
-                        const SizedBox(height: 24),
-                        const Text('ACCESO RÁPIDO DE DEMOSTRACIÓN',
-                            style: TextStyle(
-                                fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w700,
-                                color: TantaColors.textMuted)),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: _demo
-                              .map((d) => ActionChip(
-                                    label: Text(d.$1, style: const TextStyle(fontSize: 12)),
-                                    backgroundColor: TantaColors.surfaceCard,
-                                    side: const BorderSide(color: TantaColors.borderDefault),
-                                    onPressed: () {
-                                      setState(() {
-                                        _usuario.text = d.$2;
-                                        _clave.text = 'tanta';
-                                        _error = null;
-                                      });
-                                    },
-                                  ))
-                              .toList(),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-            );
-
-            if (!dosColumnas) {
-              return Column(
-                children: [
-                  SizedBox(height: 210, child: marca),
-                  Expanded(child: formulario),
-                ],
-              );
-            }
-            return Row(
-              children: [
-                Expanded(flex: 5, child: marca),
-                Expanded(flex: 6, child: formulario),
-              ],
-            );
-          },
-        ),
-      ),
+              SlideTransition(
+                position: Tween(begin: const Offset(0, 0.08), end: Offset.zero).animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic)),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(26, 30, 26, 24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: AutofillGroup(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        Text('Iniciar sesión', textAlign: TextAlign.center, style: estiloDisplay.copyWith(fontSize: 26)),
+                        const SizedBox(height: 24),
+                        TextField(
+                          controller: _usuario,
+                          textInputAction: TextInputAction.next,
+                          autocorrect: false,
+                          autofillHints: const [AutofillHints.username],
+                          decoration: const InputDecoration(labelText: 'Usuario o correo', prefixIcon: Icon(Icons.person_outline)),
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _clave,
+                          obscureText: !_ver,
+                          textInputAction: TextInputAction.done,
+                          autofillHints: const [AutofillHints.password],
+                          onSubmitted: (_) => _cargando ? null : _entrar(),
+                          decoration: InputDecoration(
+                            labelText: 'Contraseña',
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              tooltip: _ver ? 'Ocultar contraseña' : 'Mostrar contraseña',
+                              icon: Icon(_ver ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 21),
+                              onPressed: () => setState(() => _ver = !_ver),
+                            ),
+                          ),
+                        ),
+                        if (_recuperar)
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () async {
+                                final msg = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => RecuperarClave(identificador: _usuario.text.trim())));
+                                if (msg != null && mounted) setState(() { _ok = msg; _error = null; });
+                              },
+                              child: const Text('¿Olvidaste tu contraseña?', style: TextStyle(fontWeight: FontWeight.w600)),
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 14),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: _error != null ? _Aviso(texto: _error!, error: true) : _ok != null ? _Aviso(texto: _ok!) : const SizedBox.shrink(),
+                        ),
+                        const SizedBox(height: 10),
+                        FilledButton(
+                          onPressed: _cargando ? null : _entrar,
+                          child: _cargando
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.cream50))
+                              : const Text('Ingresar'),
+                        ),
+                        if (_esDemo) ...[
+                          const SizedBox(height: 24),
+                          const Text('ACCESO RÁPIDO DE DEMOSTRACIÓN', textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w700, color: TantaColors.textMuted)),
+                          const SizedBox(height: 10),
+                          Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: _demo.map((d) => ActionChip(
+                                label: Text(d.$1, style: const TextStyle(fontSize: 12)),
+                                onPressed: () => setState(() { _usuario.text = d.$2; _clave.text = 'tanta'; _error = null; }),
+                              )).toList()),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        );
+      }),
     );
   }
+}
 
-  Widget _campo(String etiqueta, TextEditingController c, {bool autofocus = true}) {
-    return TextField(
-      controller: c,
-      autofocus: autofocus,
-      autocorrect: false,
-      textCapitalization: TextCapitalization.none,
-      decoration: InputDecoration(labelText: etiqueta),
+class _Aviso extends StatelessWidget {
+  const _Aviso({required this.texto, this.error = false});
+  final String texto;
+  final bool error;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: error ? TantaColors.stateDangerBg : TantaColors.stateOk.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+        child: Row(children: [
+          Icon(error ? Icons.error_outline : Icons.check_circle_outline, size: 18, color: error ? TantaColors.stateDanger : TantaColors.stateOk),
+          const SizedBox(width: 8),
+          Expanded(child: Text(texto, style: TextStyle(fontSize: 13, color: error ? TantaColors.stateDanger : TantaColors.stateOk))),
+        ]),
+      );
+}
+
+/// Recuperar contraseña: código de 6 dígitos al correo (SMTP configurado por el Superadmin).
+class RecuperarClave extends StatefulWidget {
+  const RecuperarClave({super.key, this.identificador = ''});
+  final String identificador;
+
+  @override
+  State<RecuperarClave> createState() => _RecuperarClaveState();
+}
+
+class _RecuperarClaveState extends State<RecuperarClave> {
+  late final _id = TextEditingController(text: widget.identificador);
+  final _codigo = TextEditingController();
+  final _nueva = TextEditingController();
+  final _repetir = TextEditingController();
+  bool _enviado = false;
+  bool _ocupado = false;
+  String? _error;
+  String? _info;
+
+  Future<void> _correr(Future<void> Function() fn) async {
+    setState(() { _ocupado = true; _error = null; });
+    try {
+      await fn();
+    } on SinConexion {
+      setState(() => _error = 'Sin conexión con el servidor.');
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Recuperar contraseña')),
+      body: ListView(padding: const EdgeInsets.all(24), children: [
+        Text(_enviado ? 'Escribe el código que te enviamos y tu nueva contraseña.' : 'Te enviaremos un código de 6 dígitos a tu correo registrado.',
+            style: const TextStyle(color: TantaColors.textMuted)),
+        const SizedBox(height: 20),
+        TextField(controller: _id, enabled: !_enviado, autocorrect: false, decoration: const InputDecoration(labelText: 'Usuario o correo', prefixIcon: Icon(Icons.person_outline))),
+        if (_enviado) ...[
+          const SizedBox(height: 14),
+          TextField(controller: _codigo, keyboardType: TextInputType.number, maxLength: 6, autofillHints: const [AutofillHints.oneTimeCode],
+              decoration: const InputDecoration(labelText: 'Código', prefixIcon: Icon(Icons.pin_outlined), counterText: '')),
+          const SizedBox(height: 14),
+          TextField(controller: _nueva, obscureText: true, autofillHints: const [AutofillHints.newPassword], decoration: const InputDecoration(labelText: 'Nueva contraseña (mínimo 10)', prefixIcon: Icon(Icons.lock_outline))),
+          const SizedBox(height: 14),
+          TextField(controller: _repetir, obscureText: true, decoration: const InputDecoration(labelText: 'Repite la contraseña', prefixIcon: Icon(Icons.lock_outline))),
+        ],
+        if (_info != null) ...[const SizedBox(height: 14), _Aviso(texto: _info!)],
+        if (_error != null) ...[const SizedBox(height: 14), _Aviso(texto: _error!, error: true)],
+        const SizedBox(height: 20),
+        FilledButton(
+          onPressed: _ocupado ? null : () => _correr(() async {
+            if (!_enviado) {
+              final m = await Api.instancia.pedirCodigo(_id.text.trim());
+              setState(() { _enviado = true; _info = m; });
+            } else {
+              if (_nueva.text != _repetir.text) throw 'Las contraseñas no coinciden.';
+              final m = await Api.instancia.restablecerClave(_id.text.trim(), _codigo.text.trim(), _nueva.text);
+              if (mounted) Navigator.pop(this.context, m);
+            }
+          }),
+          child: Text(_enviado ? 'Cambiar contraseña' : 'Enviarme un código'),
+        ),
+        if (_enviado) TextButton(onPressed: () => setState(() { _enviado = false; _info = null; }), child: const Text('No me llegó: pedir otro código')),
+      ]),
     );
   }
 }

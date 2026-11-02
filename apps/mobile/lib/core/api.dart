@@ -318,6 +318,29 @@ class Api {
     } catch (_) {/* el nuevo aún no responde: se reintenta en la próxima apertura */}
   }
 
+  /* ------------------------------------------------ recuperar contraseña */
+  /// ¿El Superadmin configuró el correo? Si no, el enlace no se muestra.
+  Future<bool> recuperacionDisponible() async {
+    try {
+      final r = await http.get(Uri.parse('$base/auth/recuperar/disponible')).timeout(const Duration(seconds: 5));
+      return r.statusCode == 200 && (jsonDecode(r.body) as Map)['disponible'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<String> pedirCodigo(String identificador) async =>
+      '${(await _post('/auth/recuperar', {'identificador': identificador}, sinAuth: true) as Map)['mensaje']}';
+
+  Future<String> restablecerClave(String identificador, String codigo, String nueva) async =>
+      '${(await _post('/auth/restablecer', {'identificador': identificador, 'codigo': codigo, 'nueva': nueva}, sinAuth: true) as Map)['mensaje']}';
+
+  /* ------------------------------------------------------- pedidos y OP */
+  Future<List<dynamic>> misPedidos() async => await _get('/pedidos') as List<dynamic>;
+
+  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, required String fechaEntrega, String hora = '', String observaciones = ''}) async =>
+      await _post('/pedidos', {'items': items, 'fechaEntrega': fechaEntrega, 'horaEntrega': hora, 'observaciones': observaciones}, idempotente: true) as Map<String, dynamic>;
+
   Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;
 
   Future<void> actualizarPerfil({required String nombre, required String email, required String telefono}) async {

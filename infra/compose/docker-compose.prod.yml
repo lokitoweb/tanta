@@ -1,11 +1,19 @@
-# Producción de Tanta: PostgreSQL + API + Caddy (TLS automático) + respaldos.
-# Uso:  docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d
+# Producción de Tanta: PostgreSQL + API + Caddy (TLS automático, sirve la web) + respaldos.
+# Uso:  docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d --build
+# Valores por defecto pensados para un VPS de 4 GB; para 8 GB sube PG_SHARED_BUFFERS y los límites.
 name: tanta
+
+# Logs con rotación: sin esto el disco se llena (Caddy registra cada petición).
+x-logs: &logs
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
 
 services:
   postgres:
+    <<: *logs
     image: postgres:17-alpine
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${PGUSER}
       POSTGRES_PASSWORD: ${PGPASSWORD}
@@ -14,28 +22,32 @@ services:
       PGTZ: America/Lima
     volumes:
       - tanta_pgdata:/var/lib/postgresql/data
-      - tanta_wal:/var/lib/postgresql/wal-archive
     # Sin puertos publicados: la base solo es alcanzable desde la red interna.
+    shm_size: ${PG_SHM:-256m}
     command:
       - postgres
       - -c
-      - shared_buffers=1GB
+      - shared_buffers=${PG_SHARED_BUFFERS:-768MB}
       - -c
-      - effective_cache_size=3GB
+      - effective_cache_size=${PG_EFFECTIVE_CACHE:-2GB}
       - -c
-      - work_mem=32MB
+      - work_mem=${PG_WORK_MEM:-8MB}
       - -c
-      - maintenance_work_mem=256MB
+      - maintenance_work_mem=128MB
       - -c
-      - max_connections=120
+      - max_connections=${PG_MAX_CONN:-40}
       - -c
-      - wal_level=replica
+      - max_wal_size=2GB
       - -c
-      - archive_mode=on
+      - random_page_cost=1.1
+      # Sin archivado continuo: con un destino no escribible, el WAL crecía hasta llenar el disco.
+      # La recuperación es por el respaldo diario (servicio backup). PITR requiere configurarlo aparte.
       - -c
-      - archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f
+      - archive_mode=off
       - -c
-      - log_min_duration_statement=300
+      - timezone=America/Lima
+      - -c
+      - log_min_duration_statement=500
       - -c
       - shared_preload_libraries=pg_stat_statements
     healthcheck:
@@ -43,26 +55,34 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
     deploy:
       resources:
         limits:
-          memory: 3g
+          memory: ${PG_MEM_LIMIT:-1536m}
 
   api:
+    <<: *logs
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
-    restart: always
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      TZ: America/Lima
       PGHOST: postgres
       PGPORT: 5432
+      # Dueño: solo para aplicar migraciones al arrancar.
       PGUSER: ${PGUSER}
       PGPASSWORD: ${PGPASSWORD}
       PGDATABASE: ${PGDATABASE}
+      # Rol de aplicación (sin superusuario, no dueño de las tablas): con él atiende el API.
+      # Así ni una inyección SQL ni un robo de credenciales puede desactivar la auditoría.
+      APP_DB_USER: ${APP_DB_USER:-tanta_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       CONFIG_KEY: ${CONFIG_KEY}
       LOGIN_RATE_MAX: ${LOGIN_RATE_MAX:-8}
@@ -73,18 +93,18 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1g
-      restart_policy:
-        condition: on-failure
+          memory: ${API_MEM_LIMIT:-768m}
 
   caddy:
+    <<: *logs
     # La web se compila dentro de la imagen (apps/web/Dockerfile): no hace falta Node en el servidor.
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
-    restart: always
+    restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "${PUERTO_HTTP:-80}:80"
       - "${PUERTO_HTTPS:-443}:443"
@@ -94,9 +114,15 @@ services:
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
   backup:
+    <<: *logs
     image: postgres:17-alpine
-    restart: always
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -106,14 +132,24 @@ services:
       PGUSER: ${PGUSER}
       PGDATABASE: ${PGDATABASE}
       RETENCION_DIAS: ${RETENCION_DIAS:-30}
+      TZ: America/Lima
     volumes:
       - ./../../infra/backup:/scripts:ro
       - tanta_backups:/backups
     entrypoint: ["/bin/sh", "/scripts/loop.sh"]
+    # Sano si existe un respaldo de más de 1 KB y de menos de 26 horas.
+    healthcheck:
+      test: ["CMD-SHELL", "find /backups -name 'tanta-*.sql.gz' -mmin -1560 -size +1k | grep -q ."]
+      interval: 30m
+      timeout: 10s
+      start_period: 10m
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
 volumes:
   tanta_pgdata:
-  tanta_wal:
   tanta_backups:
   caddy_data:
   caddy_config:

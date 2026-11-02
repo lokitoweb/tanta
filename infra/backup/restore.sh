@@ -3,8 +3,8 @@
 #
 #   ./restore.sh /backups/tanta-20261101-030000.sql.gz
 #
-# Se ejecuta en el contenedor de postgres:
-#   docker compose -f infra/compose/docker-compose.prod.yml exec -T postgres sh /scripts/restore.sh <archivo>
+# Se ejecuta en el contenedor backup (tiene /scripts y /backups):
+#   docker compose -f infra/compose/docker-compose.prod.yml exec -T backup sh /scripts/restore.sh <archivo>
 set -eu
 
 ARCHIVO="${1:?Uso: restore.sh <archivo.sql.gz>}"

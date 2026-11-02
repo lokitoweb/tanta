@@ -24,39 +24,15 @@ class Marca extends StatelessWidget {
     return _wordmark();
   }
 
+  /// Sin logo subido: el nombre de la app (Configuración → Marca) como wordmark centrado.
   Widget _wordmark() {
     final color = invertida ? TantaColors.cream50 : TantaColors.ink800;
-    final pillBg = invertida ? TantaColors.cream50 : TantaColors.ink800;
-    final pillFg = invertida ? TantaColors.ink800 : TantaColors.cream50;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          'TANTA',
-          style: TextStyle(
-            fontFamily: 'Fraunces',
-            fontSize: 34 * escala,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 34 * escala * 0.2,
-            color: color,
-            height: 1.05,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Container(
-          padding: EdgeInsets.symmetric(horizontal: 16 * escala, vertical: 5 * escala),
-          decoration: BoxDecoration(color: pillBg, borderRadius: BorderRadius.circular(999)),
-          child: Text(
-            'PAN DE CASA',
-            style: TextStyle(
-              fontSize: 9.5 * escala,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 2.6 * escala,
-              color: pillFg,
-            ),
-          ),
-        ),
-      ],
+    final nombre = '${(Api.instancia.config['marca'] as Map?)?['nombreApp'] ?? 'Tanta'}'.toUpperCase();
+    return Text(
+      nombre,
+      textAlign: TextAlign.center,
+      style: TextStyle(fontFamily: 'Fraunces', fontSize: 34 * escala, fontWeight: FontWeight.w600,
+          letterSpacing: 34 * escala * 0.2, color: color, height: 1.05),
     );
   }
 }

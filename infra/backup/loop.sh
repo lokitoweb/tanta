@@ -1,6 +1,6 @@
 #!/bin/sh
-# Bucle de respaldos: copia lógica diaria cifrada con retención.
-# Un backup que nunca se restauró no es un backup: ver restore.sh.
+# Bucle de respaldos: copia lógica diaria con retención y verificación.
+# Un backup que nunca se restauró no es un backup: ver restore.sh y docs/17 §Restauración.
 set -eu
 
 RETENCION="${RETENCION_DIAS:-30}"
@@ -10,24 +10,34 @@ mkdir -p "$DESTINO"
 echo "[backup] iniciando bucle · retención ${RETENCION} días"
 
 while true; do
+  # Al arrancar el stack, Postgres puede estar aún en su arranque inicial: se espera de verdad.
+  until pg_isready -q; do sleep 3; done
+
   FECHA=$(date +%Y%m%d-%H%M%S)
   ARCHIVO="$DESTINO/tanta-$FECHA.sql.gz"
-
   echo "[backup] $ARCHIVO"
-  if pg_dump --no-owner --no-privileges --clean --if-exists | gzip -9 > "$ARCHIVO"; then
-    # Manifiesto con el checksum: permite verificar que la copia no se corrompió.
+
+  # pg_dump escribe directo a un archivo (sin tubería): un fallo de pg_dump
+  # no queda oculto detrás del código de salida de gzip (antes salían respaldos vacíos "ok").
+  if pg_dump --no-owner --no-privileges --clean --if-exists -Fp -f "$ARCHIVO.tmp.sql" \
+     && [ -s "$ARCHIVO.tmp.sql" ] \
+     && gzip -9 -c "$ARCHIVO.tmp.sql" > "$ARCHIVO.tmp" \
+     && gzip -t "$ARCHIVO.tmp" \
+     && [ "$(gzip -cd "$ARCHIVO.tmp" | head -c 200 | wc -c)" -gt 0 ]; then
+    mv "$ARCHIVO.tmp" "$ARCHIVO"
+    rm -f "$ARCHIVO.tmp.sql"
     sha256sum "$ARCHIVO" > "$ARCHIVO.sha256"
-    TAMANO=$(du -h "$ARCHIVO" | cut -f1)
-    echo "[backup] ok $TAMANO"
+    echo "[backup] ok $(du -h "$ARCHIVO" | cut -f1)"
+    ESPERA=86400
   else
-    echo "[backup] ERROR: pg_dump falló" >&2
-    rm -f "$ARCHIVO"
+    echo "[backup] ERROR: el respaldo falló; se reintenta en 5 minutos" >&2
+    rm -f "$ARCHIVO.tmp" "$ARCHIVO.tmp.sql"
+    ESPERA=300
   fi
 
   # Retención por antigüedad
   find "$DESTINO" -name 'tanta-*.sql.gz' -mtime +"$RETENCION" -delete
   find "$DESTINO" -name 'tanta-*.sql.gz.sha256' -mtime +"$RETENCION" -delete
 
-  # Cada 24 h; el primero corre al arrancar.
-  sleep 86400
+  sleep "$ESPERA"
 done
