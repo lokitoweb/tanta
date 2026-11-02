@@ -36,9 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # La versión de pnpm sale de "packageManager" en package.json (una sola fuente).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
