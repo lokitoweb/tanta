@@ -6,7 +6,11 @@ import { Icon, type NombreIcono } from '@/ui/icons';
 import { hoyLargo } from '@/core/fecha';
 
 export function Panel() {
-  const { dataset, rol, sesion, navegacionVisible } = useApp();
+  const { dataset, rol, sesion, navegacionVisible, puede } = useApp();
+  // La vista sale de los permisos, no del nombre del rol: un rol creado desde
+  // Roles y permisos (o el Superadmin) recibe el panel que le corresponde.
+  const vista = puede('costos.ver') ? 'GERENCIA' : puede('produccion.ejecutar') ? 'PRODUCCION'
+    : puede('inventario.mover') ? 'ALMACEN' : puede('cobranza.ver') ? 'VENDEDOR' : puede('catalogo.ver') ? 'CLIENTE' : 'SOPORTE';
   const k = dataset.kpis;
   const hora = new Date().getHours();
   const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
@@ -31,7 +35,7 @@ export function Panel() {
         </div>
       </div>
 
-      {rol.id === 'SOPORTE' ? (
+      {vista === 'SOPORTE' ? (
         <Tarjeta>
           <TarjetaTitulo titulo="Acceso de soporte" subtitulo="Break-glass sin datos de negocio" />
           <p className="t-muted">
@@ -42,7 +46,7 @@ export function Panel() {
       ) : (
         <>
           <div className="grid grid--4">
-            {(rol.id === 'GERENTE' || rol.id === 'ADMINISTRADOR') && (
+            {vista === 'GERENCIA' && (
               <>
                 <Kpi label="Ventas netas" valor={money(k.ventasNetas)} delta={pct(k.variacionVentas)} deltaTono="up" nota="30 días" icono="up" />
                 <Kpi label="Utilidad bruta" valor={money(k.utilidadBruta)} nota={pct(k.margen) + ' de margen'} icono="spark" />
@@ -50,7 +54,7 @@ export function Panel() {
                 <Kpi label="Productos activos" valor={num(dataset.productos.length)} nota={`${dataset.recetas.length} recetas vigentes`} icono="bread" />
               </>
             )}
-            {rol.id === 'PRODUCCION' && (
+            {vista === 'PRODUCCION' && (
               <>
                 <Kpi label="Órdenes para hoy" valor={num(dataset.ops.filter((o) => o.estado !== 'TERMINADA').length)} nota="pendientes y en proceso" icono="oven" />
                 <Kpi label="Terminadas" valor={num(dataset.ops.filter((o) => o.estado === 'TERMINADA').length)} nota="del turno" icono="check" />
@@ -58,7 +62,7 @@ export function Panel() {
                 <Kpi label="Insumos bajo mínimo" valor={num(dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').length)} nota="avisar a almacén" icono="sack" />
               </>
             )}
-            {rol.id === 'ALMACEN' && (
+            {vista === 'ALMACEN' && (
               <>
                 <Kpi label="Insumos" valor={num(dataset.insumos.length)} nota={`${dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').length} bajo mínimo`} icono="sack" />
                 <Kpi label="Bajas del día" valor={num(dataset.movimientos.filter((m) => m.cantidad < 0).length)} nota="kárdex inmutable" icono="ledger" />
@@ -66,7 +70,7 @@ export function Panel() {
                 <Kpi label="Merma valorizada" valor={money(k.mermaValorizada)} nota={pct(k.mermaPct)} icono="alert" />
               </>
             )}
-            {rol.id === 'VENDEDOR' && (
+            {vista === 'VENDEDOR' && (
               <>
                 <Kpi label="Pedidos por despachar" valor={num(dataset.pedidos.filter((p) => p.estado === 'LISTO').length)} nota="confirmar entrega" icono="truck" />
                 <Kpi label="En producción" valor={num(dataset.pedidos.filter((p) => p.estado === 'EN_PRODUCCION').length)} nota="seguimiento" icono="oven" />
@@ -74,7 +78,7 @@ export function Panel() {
                 <Kpi label="Clientes activos" valor={num(dataset.clientes.length)} nota="con y sin deuda" icono="user" />
               </>
             )}
-            {rol.id === 'CLIENTE' && (() => {
+            {vista === 'CLIENTE' && (() => {
               const mios = dataset.misPedidos ?? [];
               const ultimo = mios[0];
               return (
@@ -103,14 +107,14 @@ export function Panel() {
               <div className="card__head card__head--padded">
                 <div>
                   <h3 className="card__title">
-                    {rol.id === 'PRODUCCION' ? 'Órdenes de hoy' : rol.id === 'ALMACEN' ? 'Stock crítico' : rol.id === 'VENDEDOR' ? 'Despachos pendientes' : 'Productos por margen'}
+                    {vista === 'PRODUCCION' ? 'Órdenes de hoy' : vista === 'ALMACEN' ? 'Stock crítico' : vista === 'VENDEDOR' ? 'Despachos pendientes' : 'Productos por margen'}
                   </h3>
                   <p className="card__sub">Lo que requiere tu atención ahora</p>
                 </div>
                 <Boton variant="ghost" iconoDer="chevron">Ver todo</Boton>
               </div>
 
-              {rol.id === 'ALMACEN' ? (
+              {vista === 'ALMACEN' ? (
                 <ul className="listado">
                   {dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').concat(dataset.insumos.slice(0, 3)).slice(0, 5).map((i) => (
                     <li key={i.id}>
@@ -125,7 +129,7 @@ export function Panel() {
                     </li>
                   ))}
                 </ul>
-              ) : rol.id === 'PRODUCCION' ? (
+              ) : vista === 'PRODUCCION' ? (
                 <ul className="listado">
                   {dataset.ops.filter((o) => o.estado !== 'TERMINADA').map((o) => (
                     <li key={o.codigo}>
@@ -138,7 +142,7 @@ export function Panel() {
                     </li>
                   ))}
                 </ul>
-              ) : rol.id === 'VENDEDOR' ? (
+              ) : vista === 'VENDEDOR' ? (
                 <ul className="listado">
                   {dataset.pedidos.filter((p) => ['LISTO', 'DESPACHADO', 'EN_PRODUCCION'].includes(p.estado)).map((p) => (
                     <li key={p.codigo}>

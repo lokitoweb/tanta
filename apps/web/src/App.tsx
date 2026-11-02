@@ -17,6 +17,9 @@ import { Usuarios } from '@/modules/seguridad/Usuarios';
 import { Parametros } from '@/modules/seguridad/Parametros';
 import { Periodos } from '@/modules/gerencia/Periodos';
 import { SinAcceso } from '@/modules/seguridad/SinAcceso';
+import { Perfil } from '@/modules/perfil/Perfil';
+import { Configuracion } from '@/modules/sistema/Configuracion';
+import { Roles } from '@/modules/sistema/Roles';
 
 export function App() {
   return (
@@ -42,6 +45,10 @@ export function App() {
         <Route path="/seguridad/usuarios" element={<Gate permiso="usuarios.gestionar" siNo={<SinAcceso />}><Usuarios /></Gate>} />
         <Route path="/seguridad/parametros" element={<Gate permiso="parametros.gestionar" siNo={<SinAcceso />}><Parametros /></Gate>} />
         <Route path="/gerencia/periodos" element={<Gate permiso="periodos.cerrar" siNo={<SinAcceso />}><Periodos /></Gate>} />
+
+        <Route path="/perfil" element={<Perfil />} />
+        <Route path="/sistema/roles" element={<Gate permiso="roles.gestionar" siNo={<SinAcceso />}><Roles /></Gate>} />
+        <Route path="/sistema/configuracion" element={<Gate permiso="config.gestionar" siNo={<SinAcceso />}><Configuracion /></Gate>} />
 
         <Route path="*" element={<Navigate to="/panel" replace />} />
       </Route>

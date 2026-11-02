@@ -301,7 +301,11 @@ export async function rutasAuth(app: FastifyInstance) {
       g.items.push({ id: f.id, etiqueta: f.etiqueta, ruta: f.ruta, icono: f.icono });
     }
     const rol = await uno('SELECT id, nombre, corto, descripcion, perfil, icono FROM core.rol WHERE id = $1', [u.rol]);
-    return reply.send({ usuario: { id: u.id, nombre: u.nombre }, rol, permisos: [...u.permisos], navegacion: grupos });
+    const foto = await uno<{ foto_id: string | null }>('SELECT foto_id FROM core.usuario WHERE id = $1', [u.id]);
+    return reply.send({
+      usuario: { id: u.id, nombre: u.nombre, fotoUrl: foto?.foto_id ? `/archivos/${foto.foto_id}` : null },
+      rol, permisos: [...u.permisos], navegacion: grupos,
+    });
   });
 
   /** POST /auth/logout — revoca el refresco y borra la cookie. */

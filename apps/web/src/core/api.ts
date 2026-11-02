@@ -36,6 +36,26 @@ export function borrarAcceso(): void {
   acceso = null;
 }
 
+/** URL absoluta de un recurso del API (fotos, logos: "/archivos/…"). */
+export const urlApi = (ruta: string) => BASE + ruta;
+
+export interface ConfigPublica {
+  marca: { nombreApp: string; colorPrimario: string; colorAcento: string; logoId: string | null; iconoId: string | null };
+  movil: { versionActual: string; versionMinima: string };
+  legal: { urlPrivacidad: string; urlTerminos: string; correoSoporte: string };
+}
+
+// Una sola petición por carga de página; el superadmin la renueva tras guardar.
+let configPublica: Promise<ConfigPublica> | null = null;
+export function leerConfigPublica(renovar = false): Promise<ConfigPublica> {
+  if (renovar || !configPublica) {
+    configPublica = api<ConfigPublica>('/config/publica', { sinAuth: true });
+    // Avisa a logo, título, etc. que la marca cambió, sin recargar la página.
+    if (renovar) void configPublica.then(() => window.dispatchEvent(new Event('tanta:config')));
+  }
+  return configPublica;
+}
+
 export function idempotencyKey(): string {
   return crypto.randomUUID();
 }

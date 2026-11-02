@@ -134,7 +134,8 @@ export async function rutasSistema(app: FastifyInstance) {
   app.get('/config/publica', async (_req, reply) => {
     const [marca, movil, legal, fb] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase')]);
     const f = fb as Record<string, unknown>;
-    reply.header('Cache-Control', 'public, max-age=60');
+    // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
+    reply.header('Cache-Control', 'no-cache');
     return {
       marca, movil, legal,
       // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
@@ -149,7 +150,9 @@ export async function rutasSistema(app: FastifyInstance) {
     if (!f) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Archivo no encontrado.'));
     // El id es inmutable (un archivo nuevo = id nuevo): se puede cachear para siempre.
     return reply.header('Content-Type', f.mime).header('Cache-Control', 'public, max-age=31536000, immutable')
-      .header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', "default-src 'none'").send(f.datos);
+      .header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', "default-src 'none'")
+      // Imágenes públicas que también carga la app móvil (otro origen): el resto del API sigue same-site.
+      .header('Cross-Origin-Resource-Policy', 'cross-origin').send(f.datos);
   });
 
   /* ------------------------------------------------- configuración (admin) */

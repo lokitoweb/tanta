@@ -1,9 +1,22 @@
+import { useEffect, useState } from 'react';
+import { leerConfigPublica, urlApi, type ConfigPublica } from '@/core/api';
 import type { ReactNode } from 'react';
 import { Icon, type NombreIcono } from './icons';
 
 /* ---------- Marca ---------- */
 
+/** Logo subido por el superadmin si existe; si no, el wordmark de texto. */
 export function BrandMark({ variant = 'light', size = 'md' }: { variant?: 'light' | 'dark'; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
+  const [cfg, setCfg] = useState<ConfigPublica | null>(null);
+  useEffect(() => {
+    const leer = () => { leerConfigPublica().then(setCfg).catch(() => {}); };
+    leer();
+    window.addEventListener('tanta:config', leer);
+    return () => window.removeEventListener('tanta:config', leer);
+  }, []);
+  if (cfg?.marca.logoId) {
+    return <img className={`brandmark-img brandmark-img--${size}`} src={urlApi(`/archivos/${cfg.marca.logoId}`)} alt={cfg.marca.nombreApp} />;
+  }
   return (
     <div className={`brandmark brandmark--${variant} brandmark--${size}`}>
       <span className="brandmark__word">TANTA</span>
@@ -168,7 +181,8 @@ export function Vacio({ titulo, detalle, icono = 'box' }: { titulo: string; deta
 
 /* ---------- Avatar ---------- */
 
-export function Avatar({ nombre, size = 'md' }: { nombre: string; size?: 'sm' | 'md' }) {
+export function Avatar({ nombre, size = 'md', fotoUrl }: { nombre: string; size?: 'sm' | 'md' | 'lg'; fotoUrl?: string | null }) {
+  if (fotoUrl) return <img className={`avatar avatar--${size} avatar--foto`} src={urlApi(fotoUrl)} alt={nombre} />;
   const ini = nombre.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('');
   return <span className={`avatar avatar--${size}`}>{ini}</span>;
 }

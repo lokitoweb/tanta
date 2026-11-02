@@ -4,9 +4,6 @@ import { useApp } from '@/core/app-state';
 import { Avatar, BrandMark } from '@/ui/primitives';
 import { Icon, type NombreIcono } from '@/ui/icons';
 import { fechaCorta } from '@/core/fecha';
-import { regenerarRecuperacion } from '@/core/api';
-import { Dialogo } from '@/ui/Dialogo';
-import { Boton } from '@/ui/primitives';
 
 export function AppShell() {
   const { rol, sesion, navegacionVisible, cerrarSesion, dataset } = useApp();
@@ -23,11 +20,6 @@ export function AppShell() {
     if (!nuevo) { setForzarCierre(true); e.currentTarget.blur(); }
   };
   const loc = useLocation();
-  const [codigos, setCodigos] = useState<{ lista?: string[]; error?: string } | null>(null);
-  const pedirCodigos = async () => {
-    try { setCodigos({ lista: await regenerarRecuperacion() }); }
-    catch (e) { setCodigos({ error: e instanceof Error ? e.message : 'No se pudieron generar.' }); }
-  };
 
   const { grupo, item } = useMemo(() => {
     for (const g of navegacionVisible) {
@@ -73,11 +65,13 @@ export function AppShell() {
 
         <div className="sidebar__foot">
           <div className="perfil">
-            <Avatar nombre={sesion.usuario.nombre} />
-            <div className="perfil__txt">
-              <p className="perfil__nombre">{sesion.usuario.nombre}</p>
-              <p className="perfil__rol">{rol.nombre}</p>
-            </div>
+            <NavLink to="/perfil" className="perfil__link" title="Mi perfil" onClick={() => setMenuMovil(false)}>
+              <Avatar nombre={sesion.usuario.nombre} fotoUrl={sesion.usuario.fotoUrl} />
+              <div className="perfil__txt">
+                <p className="perfil__nombre">{sesion.usuario.nombre}</p>
+                <p className="perfil__rol">{rol.nombre}</p>
+              </div>
+            </NavLink>
             <button className="perfil__btn" onClick={() => setMenu((v) => !v)} title="Cuenta">
               <Icon name="chevron" size={15} />
             </button>
@@ -98,9 +92,9 @@ export function AppShell() {
                 <Icon name="check" size={15} />
                 <span>{rol.permisos.length} permisos</span>
               </div>
-              <button className="cambiar-rol__salir" onClick={() => void pedirCodigos()}>
-                <Icon name="shield" size={15} /> Códigos de recuperación
-              </button>
+              <NavLink className="cambiar-rol__salir" to="/perfil" onClick={() => setMenu(false)}>
+                <Icon name="user" size={15} /> Mi perfil
+              </NavLink>
               <button className="cambiar-rol__salir" onClick={() => void cerrarSesion()}>
                 <Icon name="logout" size={15} /> Cerrar sesión
               </button>
@@ -142,17 +136,6 @@ export function AppShell() {
         <main className="content" id="contenido" tabIndex={-1}>
           <Outlet />
         </main>
-
-        <Dialogo
-          abierto={codigos !== null}
-          titulo="Códigos de recuperación"
-          descripcion="Sirven para entrar si pierdes el teléfono. Cada uno funciona una sola vez; los anteriores quedan anulados."
-          onCerrar={() => setCodigos(null)}
-          acciones={<Boton variant="primary" onClick={() => setCodigos(null)}>Ya los guardé</Boton>}
-        >
-          {codigos?.error && <p className="form__error" role="alert">{codigos.error}</p>}
-          {codigos?.lista && <ul className="mfa__lista">{codigos.lista.map((c) => <li key={c} className="mfa__item">{c}</li>)}</ul>}
-        </Dialogo>
       </div>
     </div>
   );

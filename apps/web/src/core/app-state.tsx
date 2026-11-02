@@ -4,7 +4,7 @@ import type { Dataset, NavGrupo, Rol } from './types';
 import { Acceso } from '@/modules/auth/Acceso';
 
 interface Yo {
-  usuario: { id: string; nombre: string };
+  usuario: { id: string; nombre: string; fotoUrl?: string | null };
   rol: Rol;
   permisos: string[];
   navegacion: NavGrupo[];
@@ -13,13 +13,15 @@ interface Yo {
 interface Estado {
   dataset: Dataset;
   rol: Rol;
-  sesion: { usuario: { id: string; nombre: string }; rolId: string };
+  sesion: { usuario: { id: string; nombre: string; fotoUrl?: string | null }; rolId: string };
   permisos: string[];
   navegacion: NavGrupo[];
   navegacionVisible: NavGrupo[];
   puede: (permiso: string) => boolean;
   cerrarSesion: () => Promise<void>;
   refrescarDatos: () => Promise<void>;
+  /** Vuelve a pedir /auth/yo (tras cambiar nombre, foto o permisos). */
+  recargarSesion: () => Promise<void>;
 }
 
 const Ctx = createContext<Estado | null>(null);
@@ -81,6 +83,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setFase((f) => (f.tipo === 'listo' ? { ...f, dataset } : f));
   }, []);
 
+  const recargarSesion = useCallback(async () => {
+    const yo = await api<Yo>('/auth/yo');
+    setFase((f) => (f.tipo === 'listo' ? { ...f, yo } : f));
+  }, []);
+
   const valor = useMemo<Estado | null>(() => {
     if (fase.tipo !== 'listo') return null;
     const { yo, dataset } = fase;
@@ -96,8 +103,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       puede: (p: string) => set.has(p),
       cerrarSesion,
       refrescarDatos,
+      recargarSesion,
     };
-  }, [fase, cerrarSesion, refrescarDatos]);
+  }, [fase, cerrarSesion, refrescarDatos, recargarSesion]);
 
   if (fase.tipo === 'cargando') {
     return (
