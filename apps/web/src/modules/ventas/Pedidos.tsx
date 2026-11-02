@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num } from '@/core/format';
 import { Boton, Buscador, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
@@ -56,7 +57,7 @@ export function Pedidos() {
       <Encabezado
         titulo="Pedidos"
         descripcion="Del registro del cliente al despacho · cada cambio de estado queda auditado"
-        acciones={<><Boton icono="download">Exportar</Boton><Boton variant="primary" icono="plus">Registrar pedido</Boton></>}
+        acciones={<><Boton icono="download" onClick={() => exportarExcel('pedidos', filas.map((p) => ({ ...p })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton><Boton variant="primary" icono="plus">Registrar pedido</Boton></>}
       />
 
       <div className="grid grid--4">

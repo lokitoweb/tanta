@@ -900,3 +900,12 @@ select.field__input {
 }
 
 .field__aviso { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 0.75rem; font-weight: 500; color: var(--tanta-state-warn); }
+
+/* Exportar a PDF = imprimir solo el contenido: sin menú, barra ni botones. */
+@media print {
+  .sidebar, .topbar, .saltar-contenido, .btn, .dialogo__fondo { display: none !important; }
+  .shell { display: block; }
+  .content { padding: 0; }
+  body { background: #fff; }
+  .card, .tarjeta { break-inside: avoid; box-shadow: none; }
+}

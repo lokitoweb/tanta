@@ -4,6 +4,9 @@ import { useApp } from '@/core/app-state';
 import { Avatar, BrandMark } from '@/ui/primitives';
 import { Icon, type NombreIcono } from '@/ui/icons';
 import { fechaCorta } from '@/core/fecha';
+import { regenerarRecuperacion } from '@/core/api';
+import { Dialogo } from '@/ui/Dialogo';
+import { Boton } from '@/ui/primitives';
 
 export function AppShell() {
   const { rol, sesion, navegacionVisible, cerrarSesion, dataset } = useApp();
@@ -20,6 +23,11 @@ export function AppShell() {
     if (!nuevo) { setForzarCierre(true); e.currentTarget.blur(); }
   };
   const loc = useLocation();
+  const [codigos, setCodigos] = useState<{ lista?: string[]; error?: string } | null>(null);
+  const pedirCodigos = async () => {
+    try { setCodigos({ lista: await regenerarRecuperacion() }); }
+    catch (e) { setCodigos({ error: e instanceof Error ? e.message : 'No se pudieron generar.' }); }
+  };
 
   const { grupo, item } = useMemo(() => {
     for (const g of navegacionVisible) {
@@ -90,6 +98,9 @@ export function AppShell() {
                 <Icon name="check" size={15} />
                 <span>{rol.permisos.length} permisos</span>
               </div>
+              <button className="cambiar-rol__salir" onClick={() => void pedirCodigos()}>
+                <Icon name="shield" size={15} /> Códigos de recuperación
+              </button>
               <button className="cambiar-rol__salir" onClick={() => void cerrarSesion()}>
                 <Icon name="logout" size={15} /> Cerrar sesión
               </button>
@@ -131,6 +142,17 @@ export function AppShell() {
         <main className="content" id="contenido" tabIndex={-1}>
           <Outlet />
         </main>
+
+        <Dialogo
+          abierto={codigos !== null}
+          titulo="Códigos de recuperación"
+          descripcion="Sirven para entrar si pierdes el teléfono. Cada uno funciona una sola vez; los anteriores quedan anulados."
+          onCerrar={() => setCodigos(null)}
+          acciones={<Boton variant="primary" onClick={() => setCodigos(null)}>Ya los guardé</Boton>}
+        >
+          {codigos?.error && <p className="form__error" role="alert">{codigos.error}</p>}
+          {codigos?.lista && <ul className="mfa__lista">{codigos.lista.map((c) => <li key={c} className="mfa__item">{c}</li>)}</ul>}
+        </Dialogo>
       </div>
     </div>
   );

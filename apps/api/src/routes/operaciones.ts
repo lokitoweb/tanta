@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
+import { invalidar } from '../cache.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -184,7 +185,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
       return reply.send(resultado);
     } catch (e) {
       const err = e as Error & { status?: number };
-      const status = err.status ?? 500;
+      // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
+      if (!err.status) throw e;
+      const status = err.status;
       return reply.code(status).send(error(status, err.message, err.message));
     }
   });
@@ -354,7 +357,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
       return reply.code(201).send(venta);
     } catch (e) {
       const err = e as Error & { status?: number };
-      const status = err.status ?? 500;
+      // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
+      if (!err.status) throw e;
+      const status = err.status;
       return reply.code(status).send(error(status, err.message, err.message));
     }
   });
@@ -407,7 +412,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
       return reply.code(201).send(res);
     } catch (e) {
       const err = e as Error & { status?: number };
-      const status = err.status ?? 500;
+      // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
+      if (!err.status) throw e;
+      const status = err.status;
       return reply.code(status).send(error(status, err.message, err.message));
     }
   });
@@ -479,6 +486,81 @@ export async function rutasOperaciones(app: FastifyInstance) {
   });
 
   /* ---------------------------------------------------------------- kárdex */
+  /* --------------------------------------------------- inventario: insumos */
+  // PDF 3.3: compra (actualiza el CPP), bajas con motivo y toma de inventario físico.
+  const MovInsumo = z.discriminatedUnion('tipo', [
+    z.object({ tipo: z.literal('COMPRA'), insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000),
+      costoUnitario: z.number().positive().max(100_000), motivo: z.string().trim().min(3).max(200) }),
+    z.object({ tipo: z.literal('MERMA'), insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000),
+      motivo: z.string().trim().min(3).max(200) }),
+    z.object({ tipo: z.literal('CONTEO'), insumoId: z.string().uuid(), cantidadContada: z.number().min(0).max(1_000_000),
+      motivo: z.string().trim().min(3).max(200) }),
+  ]);
+
+  app.post('/inventario/movimientos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'inventario.mover')) return;
+    const parseo = MovInsumo.safeParse(req.body);
+    if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Revisa cantidad, costo y motivo (mínimo 3 caracteres).'));
+    const m = parseo.data;
+    const clave = req.headers['idempotency-key'] as string | undefined;
+
+    try {
+      const resultado = await conIdempotencia(clave, req.usuario!.id, 'inventario-mov', () =>
+        tx(async (c) => {
+          const r = await c.query<{ codigo: string; nombre: string; cpp: string; stock: string }>(
+            'SELECT codigo, nombre, cpp, stock FROM core.insumo WHERE id = $1 FOR UPDATE', [m.insumoId],
+          );
+          const ins = r.rows[0];
+          if (!ins) throw Object.assign(new Error('INSUMO_NO_EXISTE'), { status: 404 });
+          const saldo = Number(ins.stock);
+          const cpp = Number(ins.cpp);
+
+          let tipo: 'COMPRA' | 'MERMA' | 'AJUSTE';
+          let delta: number;
+          let costo = cpp;
+          let nuevoCpp = cpp;
+          if (m.tipo === 'COMPRA') {
+            tipo = 'COMPRA'; delta = m.cantidad; costo = m.costoUnitario;
+            // Costo promedio ponderado: (saldo·cpp + compra·costo) / (saldo + compra).
+            nuevoCpp = (Math.max(saldo, 0) * cpp + m.cantidad * m.costoUnitario) / (Math.max(saldo, 0) + m.cantidad);
+          } else if (m.tipo === 'MERMA') {
+            tipo = 'MERMA'; delta = -m.cantidad;
+          } else {
+            tipo = 'AJUSTE'; delta = m.cantidadContada - saldo;
+            if (Math.abs(delta) < 0.000001) return { insumo: ins.nombre, tipo, diferencia: 0, saldo };
+          }
+          const nuevoSaldo = saldo + delta;
+          if (nuevoSaldo < -0.000001) {
+            throw Object.assign(new Error(`STOCK_INSUFICIENTE:${ins.nombre} (disponible ${saldo.toFixed(2)})`), { status: 409 });
+          }
+          const valor = delta * costo;
+          await c.query(
+            `INSERT INTO core.movimiento_inventario
+               (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,idempotency_key,registrado_por)
+             VALUES ($1,'INSUMO',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            [tipo, m.insumoId, m.motivo.slice(0, 200), delta.toFixed(6), costo.toFixed(6), valor.toFixed(4),
+              nuevoSaldo.toFixed(6), (nuevoSaldo * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), clave ?? null, req.usuario!.id],
+          );
+          await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3',
+            [nuevoSaldo.toFixed(6), nuevoCpp.toFixed(6), m.insumoId]);
+          return { insumo: ins.nombre, tipo, diferencia: Number(delta.toFixed(3)), saldo: Number(nuevoSaldo.toFixed(3)), cpp: Number(nuevoCpp.toFixed(4)) };
+        }),
+      );
+      invalidar('cat:insumos'); // el stock nuevo se ve al instante, no tras el TTL
+      await auditar({
+        actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
+        accion: `INVENTARIO_${m.tipo}`, entidad: 'insumo', entidadId: m.insumoId, detalle: m, ip: req.ip,
+      });
+      return reply.send(resultado);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
+      if (!err.status) throw e;
+      const status = err.status;
+      return reply.code(status).send(error(status, err.message, err.message));
+    }
+  });
+
   app.get('/kardex/:codigo', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'inventario.ver')) return;
     const { codigo } = req.params as { codigo: string };

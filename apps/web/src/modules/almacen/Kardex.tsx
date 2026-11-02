@@ -1,3 +1,4 @@
+import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, num2 } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Tarjeta } from '@/ui/primitives';
@@ -21,7 +22,7 @@ export function Kardex() {
       <Encabezado
         titulo="Kárdex valorizado"
         descripcion="Harina de trigo sin preparar · INS-001 · libro inmutable: ningún asiento se edita ni se borra"
-        acciones={<><Boton icono="download">Exportar</Boton><Boton icono="filter">Filtros</Boton></>}
+        acciones={<><Boton icono="download" onClick={() => exportarExcel('kardex', movs.map((m) => ({ ...m })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton><Boton icono="filter">Filtros</Boton></>}
       />
 
       <div className="grid grid--4">

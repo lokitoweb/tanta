@@ -15,7 +15,7 @@ export interface Producto {
   mermaPct: number; estado: string;
 }
 export interface Insumo {
-  id: string; nombre: string; unidad: string; cpp: number; stock: number;
+  id: string; codigo?: string; nombre: string; unidad: string; cpp: number; stock: number;
   minimo: number; proveedor: string; estado: string; valorizado: number;
 }
 export interface Categoria {

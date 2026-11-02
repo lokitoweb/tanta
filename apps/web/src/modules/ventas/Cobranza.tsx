@@ -1,3 +1,4 @@
+import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
@@ -46,7 +47,7 @@ export function Cobranza() {
       <Encabezado
         titulo="Cobranza"
         descripcion="Cartera por cliente y antigüedad de saldos · pagos totales o parciales con referencia de operación"
-        acciones={<><Boton icono="download">Exportar</Boton><Boton variant="primary" icono="plus">Registrar pago</Boton></>}
+        acciones={<><Boton icono="download" onClick={() => exportarExcel('cuentas-por-cobrar', dataset.clientes.map((c) => ({ ...c })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton><Boton variant="primary" icono="plus">Registrar pago</Boton></>}
       />
 
       <div className="grid grid--4">

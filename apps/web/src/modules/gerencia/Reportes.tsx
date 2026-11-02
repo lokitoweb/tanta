@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import reportesJson from '@/config/reportes.json';
+import { exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
@@ -19,7 +20,7 @@ export function Reportes() {
       <Encabezado
         titulo="Reportes"
         descripcion="Catálogo del Informe Ejecutivo · todos admiten filtros por fecha, categoría y cliente, y exportación"
-        acciones={<Boton icono="download">Exportar todo</Boton>}
+        acciones={<Boton icono="report" onClick={exportarPdf}>Exportar PDF</Boton>}
       />
 
       <div className="grid grid--4">

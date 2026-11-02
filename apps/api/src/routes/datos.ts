@@ -281,7 +281,7 @@ export async function rutasDatos(app: FastifyInstance) {
           id: i.id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
           stock: num(i.stock), minimo: num(i.minimo), proveedor: i.proveedor, estado: i.estado,
         };
-        if (!verCosto) return base;
+        if (!verCosto && !u.permisos.has('inventario.mover')) return base;
         return { ...base, cpp: num(i.cpp), valorizado: num(i.valorizado) };
       }),
       ops: ops.map((o) => ({

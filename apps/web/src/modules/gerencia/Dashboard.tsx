@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, moneyShort, num, pct, semaforo, eje } from '@/core/format';
 import { AreaSerie, BarrasH, Dona } from '@/ui/charts';
@@ -49,7 +50,8 @@ export function Dashboard() {
               valor={periodo}
               onChange={setPeriodo}
             />
-            <Boton icono="download">Exportar</Boton>
+            <Boton icono="download" onClick={() => exportarExcel('rentabilidad-productos', dataset.topProductos.map((p) => ({ ...p })))}>Excel</Boton>
+            <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
           </>
         }
       />

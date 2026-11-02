@@ -229,7 +229,9 @@ export async function rutasAdmin(app: FastifyInstance) {
       return reply.send(res);
     } catch (e) {
       const err = e as Error & { status?: number };
-      const status = err.status ?? 500;
+      // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
+      if (!err.status) throw e;
+      const status = err.status;
       return reply.code(status).send(error(status, err.message, err.message));
     }
   });

@@ -187,7 +187,7 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/mfa/recuperacion — regenera los códigos de respaldo (requiere sesión). */
-  app.post('/auth/mfa/recuperacion', { preHandler: autenticar }, async (req, reply) => {
+  app.post('/auth/mfa/recuperacion', { preHandler: autenticar, ...ESTRICTO }, async (req, reply) => {
     const u = req.usuario!;
     const codigos = await generarCodigosRecuperacion(u.id);
     await auditar({ actorId: u.id, actor: u.nombre, rol: u.rol, accion: 'MFA_CODIGOS_REGENERADOS', entidad: 'usuario', entidadId: u.id, ip: req.ip });
