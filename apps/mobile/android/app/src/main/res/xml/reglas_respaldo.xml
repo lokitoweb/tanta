@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: no se copian a la nube ni a otro equipo los datos de la app
+     (la sesión vive en el Keystore y no debe restaurarse en otro teléfono). -->
+<data-extraction-rules>
+    <cloud-backup><exclude domain="root" /><exclude domain="sharedpref" /><exclude domain="database" /><exclude domain="file" /></cloud-backup>
+    <device-transfer><exclude domain="root" /><exclude domain="sharedpref" /><exclude domain="database" /><exclude domain="file" /></device-transfer>
+</data-extraction-rules>

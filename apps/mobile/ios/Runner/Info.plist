@@ -7,7 +7,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Tanta App</string>
+	<string>Tanta</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Tanta usa la cámara solo para tomar tu foto de perfil.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Tanta accede a tus fotos solo para elegir tu foto de perfil.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

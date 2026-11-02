@@ -25,6 +25,13 @@ class Api {
   String rol = '';
   List<String> permisos = const [];
   List<Map<String, dynamic>> menu = const [];
+  String? fotoUrl;
+
+  /// Marca, versión mínima, legal y Firebase: lo que el superadmin cambia desde la web.
+  Map<String, dynamic> config = const {};
+
+  /// URL absoluta de un archivo del API ("/archivos/…").
+  String urlArchivo(String ruta) => '$base$ruta';
 
   bool get autenticado => _acceso != null;
 
@@ -65,6 +72,7 @@ class Api {
     rol = '';
     permisos = const [];
     menu = const [];
+    fotoUrl = null;
     await _seguro.delete(key: 'acceso');
     await _seguro.delete(key: 'refresco');
   }
@@ -200,6 +208,7 @@ class Api {
   Future<void> yo() async {
     final datos = await _get('/auth/yo') as Map<String, dynamic>;
     nombre = (datos['usuario'] as Map)['nombre'] as String;
+    fotoUrl = (datos['usuario'] as Map)['fotoUrl'] as String?;
     rol = (datos['rol'] as Map)['nombre'] as String;
     permisos = (datos['permisos'] as List).cast<String>();
     menu = (datos['navegacion'] as List).cast<Map<String, dynamic>>();
@@ -239,19 +248,75 @@ class Api {
       ) as Map<String, dynamic>;
 
   /// Cambia el estado de un pedido. El servidor valida la transición.
-  Future<Map<String, dynamic>> cambiarEstadoPedido(String codigo, String estado) async {
+  Future<Map<String, dynamic>> cambiarEstadoPedido(String codigo, String estado) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': estado}) as Map<String, dynamic>;
+
+  /// PATCH/PUT/DELETE con renovación de token y tiempo límite, igual que _get/_post.
+  Future<dynamic> _enviar(String metodo, String ruta, Map<String, dynamic> cuerpo, {bool reintentar = true}) async {
+    Future<http.Response> mandar() async {
+      final req = http.Request(metodo, Uri.parse('$base$ruta'))
+        ..headers.addAll(_cabeceras(conCuerpo: true))
+        ..body = jsonEncode(cuerpo);
+      return http.Response.fromStream(await req.send().timeout(_limite));
+    }
+
     late http.Response r;
     try {
-      r = await http.patch(
-        Uri.parse('$base/pedidos/$codigo/estado'),
-        headers: _cabeceras(conCuerpo: true),
-        body: jsonEncode({'estado': estado}),
-      ).timeout(_limite);
+      r = await mandar();
+      if (r.statusCode == 401 && reintentar && await _refrescar()) r = await mandar();
     } catch (_) {
       throw SinConexion();
     }
-    return await _decodificar(r) as Map<String, dynamic>;
+    return _decodificar(r);
   }
+
+  /* --------------------------------------------- configuración y perfil */
+  Future<Map<String, dynamic>> cargarConfig() async {
+    try {
+      // 5 s: sin red la app abre igual con la marca por defecto.
+      final r = await http.get(Uri.parse('$base/config/publica')).timeout(const Duration(seconds: 5));
+      if (r.statusCode == 200) config = jsonDecode(r.body) as Map<String, dynamic>;
+    } catch (_) {/* sin red: se usa la marca por defecto */}
+    return config;
+  }
+
+  Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;
+
+  Future<void> actualizarPerfil({required String nombre, required String email, required String telefono}) async {
+    await _enviar('PATCH', '/perfil', {'nombre': nombre, 'email': email, 'telefono': telefono});
+    await yo();
+  }
+
+  Future<void> cambiarClave(String actual, String nueva) async =>
+      await _post('/perfil/clave', {'actual': actual, 'nueva': nueva});
+
+  Future<void> subirFoto(List<int> bytes) async {
+    final r = await _enviar('PUT', '/perfil/foto', {'base64': base64Encode(bytes)}) as Map<String, dynamic>;
+    fotoUrl = r['fotoUrl'] as String?;
+  }
+
+  /// App Store 5.1.1(v) / Google Play: eliminar la cuenta desde la app.
+  Future<void> eliminarCuenta(String clave) async {
+    await _enviar('DELETE', '/perfil', {'clave': clave});
+    await cerrarSesion();
+  }
+
+  /// Id estable de esta instalación (no del usuario ni del teléfono): para versiones y push.
+  Future<String> instalacion() async {
+    final previa = await _seguro.read(key: 'instalacion');
+    if (previa != null) return previa;
+    final nueva = _uuid();
+    await _seguro.write(key: 'instalacion', value: nueva);
+    return nueva;
+  }
+
+  Future<Map<String, dynamic>> registrarDispositivo({required String plataforma, required String version, String? tokenPush}) async =>
+      await _post('/dispositivo', {
+        'instalacion': await instalacion(),
+        'plataforma': plataforma,
+        'versionApp': version,
+        if (tokenPush != null) 'tokenPush': tokenPush,
+      }) as Map<String, dynamic>;
 
   bool puede(String permiso) => permisos.contains(permiso);
 }

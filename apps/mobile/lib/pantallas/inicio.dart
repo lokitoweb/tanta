@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/arranque.dart';
 import '../core/cola.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
@@ -8,13 +9,15 @@ import '../ui/comunes.dart';
 import 'operacion.dart';
 import 'ventas.dart';
 import 'catalogo.dart';
+import 'perfil.dart';
 
 /// Contenedor principal: el menú se construye a partir de los permisos que
 /// devuelve el servidor. Si un permiso no está, la pestaña no existe.
 class Inicio extends StatefulWidget {
-  const Inicio({super.key, required this.datos, required this.onSalir});
+  const Inicio({super.key, required this.datos, required this.onSalir, this.version = const EstadoVersion()});
   final Map<String, dynamic> datos;
   final VoidCallback onSalir;
+  final EstadoVersion version;
 
   @override
   State<Inicio> createState() => _InicioState();
@@ -80,7 +83,8 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     final api = Api.instancia;
     // Cada pestaña existe solo si el servidor confirmó el permiso.
     return [
-      _Pestana('Panel', Icons.home_outlined, Icons.home, const _PanelInicio()),
+      _Pestana('Panel', Icons.home_outlined, Icons.home,
+          _PanelInicio(datos: widget.datos, version: widget.version, irA: _irA)),
       if (api.puede('produccion.ver'))
         _Pestana('Producción', Icons.local_fire_department_outlined, Icons.local_fire_department,
             Produccion(datos: widget.datos)),
@@ -96,7 +100,15 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
       if (api.puede('catalogo.ver'))
         _Pestana('Catálogo', Icons.bakery_dining_outlined, Icons.bakery_dining,
             Catalogo(datos: widget.datos)),
+      // Todos los roles: datos, contraseña, privacidad y eliminar cuenta (exigido por las tiendas).
+      _Pestana('Perfil', Icons.person_outline, Icons.person, Perfil(onSalir: widget.onSalir)),
     ];
+  }
+
+  /// Accesos rápidos del panel: salta a la pestaña por su título.
+  void _irA(String titulo) {
+    final i = _pestanas.indexWhere((p) => p.titulo == titulo);
+    if (i >= 0) setState(() => _indice = i);
   }
 
   @override
@@ -121,10 +133,14 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
                 ],
               ),
             ),
-            IconButton(
-              tooltip: 'Cerrar sesión',
-              icon: const Icon(Icons.logout, size: 20),
-              onPressed: widget.onSalir,
+            Semantics(
+              button: true,
+              label: 'Mi perfil',
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => _irA('Perfil'),
+                child: Avatar(nombre: Api.instancia.nombre, fotoUrl: Api.instancia.fotoUrl, radio: 17),
+              ),
             ),
           ],
         ),
@@ -243,22 +259,54 @@ class _AvisoColaState extends State<_AvisoCola> {
 
 /// Panel de inicio: se adapta al perfil con los datos que trae el API.
 class _PanelInicio extends StatelessWidget {
-  const _PanelInicio();
+  const _PanelInicio({required this.datos, required this.version, required this.irA});
+  final Map<String, dynamic> datos;
+  final EstadoVersion version;
+  final ValueChanged<String> irA;
 
   @override
   Widget build(BuildContext context) {
     final api = Api.instancia;
-    final datos = _datosDe(context);
     final k = (datos['kpis'] as Map<String, dynamic>?) ?? const {};
     final nombre = api.nombre.split(' ').first;
+    final hora = DateTime.now().hour;
+    final saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
+    final accesos = _accesos(api);
+    final actividad = _actividad(api);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        Text('Hola, $nombre', style: estiloDisplay.copyWith(fontSize: 26)),
-        const SizedBox(height: 4),
-        Text(api.rol, style: const TextStyle(fontSize: 13, color: TantaColors.textMuted)),
-        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(color: TantaColors.ink800, borderRadius: BorderRadius.circular(12)),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('$saludo, $nombre', style: estiloDisplay.copyWith(fontSize: 22, color: TantaColors.cream50)),
+                const SizedBox(height: 4),
+                Text(api.rol, style: TextStyle(fontSize: 12.5, color: TantaColors.cream50.withValues(alpha: 0.75))),
+                const SizedBox(height: 10),
+                Text('${(datos['periodo'] as Map?)?['etiqueta'] ?? ''}',
+                    style: const TextStyle(fontSize: 11.5, color: TantaColors.sand300, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+            Avatar(nombre: api.nombre, fotoUrl: api.fotoUrl, radio: 26),
+          ]),
+        ),
+        if (version.disponible && !version.obligatoria) ...[
+          const SizedBox(height: 12),
+          Material(
+            color: TantaColors.stateInfo.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(12),
+            child: ListTile(
+              leading: const Icon(Icons.system_update_outlined, color: TantaColors.stateInfo),
+              title: const Text('Hay una nueva versión', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+              subtitle: Text(version.mensaje, style: const TextStyle(fontSize: 12)),
+            ),
+          ),
+        ],
+        const SizedBox(height: 16),
         GridView(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -270,27 +318,68 @@ class _PanelInicio extends StatelessWidget {
           ),
           children: _kpis(api, datos, k),
         ),
-        const SizedBox(height: 22),
-        TituloSeccion('Mi sesión'),
-        const SizedBox(height: 10),
-        Panel(
-          child: Column(
-            children: [
-              _fila('Perfil', api.rol),
-              const Divider(height: 20),
-              _fila('Permisos activos', '${api.permisos.length}'),
-              const Divider(height: 20),
-              _fila('Almacenamiento', 'Sesión persistente (Keychain / Keystore)'),
-            ],
+        if (accesos.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          const TituloSeccion('Accesos rápidos'),
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: accesos),
+        ],
+        if (actividad.length > 1) ...[
+          const SizedBox(height: 22),
+          TituloSeccion(actividad.first.$1),
+          const SizedBox(height: 10),
+          Panel(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              for (final (i, fila) in actividad.skip(1).indexed) ...[
+                if (i > 0) const Divider(height: 1),
+                ListTile(
+                  dense: true,
+                  title: Text(fila.$1, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: Text(fila.$2),
+                  trailing: Text(fila.$3, style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ]),
           ),
-        ),
+        ],
       ],
     );
   }
 
-  Map<String, dynamic> _datosDe(BuildContext context) {
-    final inicio = context.findAncestorWidgetOfExactType<Inicio>();
-    return inicio?.datos ?? const {};
+  /// Botones a las pestañas que el rol realmente tiene.
+  List<Widget> _accesos(Api api) {
+    Widget chip(String titulo, IconData icono) =>
+        ActionChip(avatar: Icon(icono, size: 18), label: Text(titulo), onPressed: () => irA(titulo));
+    return [
+      if (api.puede('pedidos.ver')) chip('Pedidos', Icons.receipt_long_outlined),
+      if (api.puede('cobranza.ver')) chip('Cobranza', Icons.account_balance_wallet_outlined),
+      if (api.puede('produccion.ver')) chip('Producción', Icons.local_fire_department_outlined),
+      if (api.puede('inventario.ver')) chip('Almacén', Icons.inventory_2_outlined),
+      if (api.puede('catalogo.ver')) chip('Catálogo', Icons.bakery_dining_outlined),
+    ];
+  }
+
+  /// Lo más reciente para el rol. El primer elemento es el título de la sección.
+  List<(String, String, String)> _actividad(Api api) {
+    String txt(dynamic v) => '${v ?? ''}';
+    if (api.puede('produccion.ver')) {
+      final ops = ((datos['ops'] as List?) ?? const []).where((o) => o['estado'] != 'TERMINADA').take(5);
+      return [('Órdenes pendientes', '', ''), for (final o in ops) (txt(o['producto']), '${o['codigo']} · ${o['estado']}', '${o['cantidad']} u')];
+    }
+    if (api.puede('inventario.ver')) {
+      final ins = ((datos['insumos'] as List?) ?? const []).where((i) => i['estado'] == 'BAJO_MINIMO').take(5);
+      return [('Insumos por reponer', '', ''), for (final i in ins) (txt(i['nombre']), 'mínimo ${i['minimo']}', '${i['stock']} ${i['unidad']}')];
+    }
+    if (api.puede('pedidos.ver')) {
+      final ps = ((datos['pedidos'] as List?) ?? const []).take(5);
+      return [('Pedidos recientes', '', ''), for (final p in ps) (txt(p['cliente']), '${p['codigo']} · ${p['estado']}', dinero(_n(p['total']).toDouble()))];
+    }
+    if (api.puede('catalogo.ver')) {
+      final ps = ((datos['misPedidos'] as List?) ?? const []).take(5);
+      return [('Mis últimos pedidos', '', ''), for (final p in ps) (txt(p['codigo']), txt(p['estado']), dinero(_n(p['total']).toDouble()))];
+    }
+    return const [];
   }
 
   /// Los indicadores nacen de los permisos: cada perfil ve lo que le sirve.
@@ -356,17 +445,4 @@ class _PanelInicio extends StatelessWidget {
 
   num _n(dynamic v) => v is num ? v : num.tryParse('$v') ?? 0;
 
-  Widget _fila(String etiqueta, String valor) => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(etiqueta, style: const TextStyle(fontSize: 12.5, color: TantaColors.textMuted)),
-          Flexible(
-            child: Text(
-              valor,
-              textAlign: TextAlign.right,
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: TantaColors.ink800),
-            ),
-          ),
-        ],
-      );
 }

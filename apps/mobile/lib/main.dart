@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'core/api.dart';
+import 'core/arranque.dart';
 import 'core/tema.dart';
 import 'core/tokens.dart';
+import 'pantallas/actualizar.dart';
 import 'pantallas/inicio.dart';
 import 'pantallas/login.dart';
 import 'ui/comunes.dart';
@@ -9,6 +12,7 @@ import 'ui/comunes.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Api.instancia.cargarSesion();
+  await Api.instancia.cargarConfig();
   runApp(const TantaApp());
 }
 
@@ -36,7 +40,14 @@ class Raiz extends StatefulWidget {
 
 class _RaizState extends State<Raiz> {
   Map<String, dynamic>? _datos;
+  EstadoVersion _version = const EstadoVersion();
   bool _cargando = true;
+
+  /// Tras entrar: registra versión/dispositivo y pregunta si hay que actualizar.
+  Future<void> _sesionLista(Map<String, dynamic> datos) async {
+    final v = await arrancarSesion();
+    if (mounted) setState(() { _datos = datos; _version = v; });
+  }
 
   @override
   void initState() {
@@ -47,7 +58,8 @@ class _RaizState extends State<Raiz> {
   Future<void> _arrancar() async {
     // Atajo de demostración: solo existe si se compila con DEMO_AUTOLOGIN=true.
     // No salta la autenticación: envía credenciales reales al servidor.
-    const autologin = bool.fromEnvironment('DEMO_AUTOLOGIN');
+    // Solo en desarrollo: nunca existe en una versión publicada.
+    const autologin = bool.fromEnvironment('DEMO_AUTOLOGIN') && !kReleaseMode;
     if (autologin && !Api.instancia.autenticado) {
       try {
         await Api.instancia.login(
@@ -59,8 +71,7 @@ class _RaizState extends State<Raiz> {
     if (Api.instancia.autenticado) {
       try {
         await Api.instancia.yo();
-        final datos = await Api.instancia.datos();
-        if (mounted) setState(() => _datos = datos);
+        await _sesionLista(await Api.instancia.datos());
       } catch (_) {
         await Api.instancia.cerrarSesion();
       }
@@ -90,11 +101,14 @@ class _RaizState extends State<Raiz> {
     }
 
     if (_datos == null) {
-      return LoginScreen(onEntrar: (datos) => setState(() => _datos = datos));
+      return LoginScreen(onEntrar: _sesionLista);
     }
+
+    if (_version.obligatoria) return ActualizacionObligatoria(estado: _version);
 
     return Inicio(
       datos: _datos!,
+      version: _version,
       onSalir: () async {
         await Api.instancia.cerrarSesion();
         if (mounted) setState(() => _datos = null);

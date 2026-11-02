@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { createHmac } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { importPKCS8, SignJWT } from 'jose';
 import { z } from 'zod';
 import { q, tx, uno } from '../db.js';
@@ -20,9 +20,37 @@ type Seccion = (typeof SECCIONES)[number];
 const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'] };
 const MASCARA = '••••••••';
 
+/**
+ * Secretos cifrados en reposo con AES-256-GCM: un respaldo o un volcado de la base no
+ * expone la llave de Firebase ni el secreto del webhook. La llave vive solo en el entorno
+ * (CONFIG_KEY; si falta, se deriva de JWT_SECRET). Cambiarla obliga a volver a cargar los secretos.
+ */
+const LLAVE = createHash('sha256').update(process.env.CONFIG_KEY ?? `config:${process.env.JWT_SECRET ?? ''}`).digest();
+
+export function cifrar(texto: string): string {
+  if (!texto) return '';
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', LLAVE, iv);
+  const datos = Buffer.concat([c.update(texto, 'utf8'), c.final()]);
+  return 'enc:v1:' + Buffer.concat([iv, c.getAuthTag(), datos]).toString('base64');
+}
+
+export function descifrar(valor: string): string {
+  if (!valor?.startsWith('enc:v1:')) return valor ?? '';
+  const b = Buffer.from(valor.slice(7), 'base64');
+  const d = createDecipheriv('aes-256-gcm', LLAVE, b.subarray(0, 12));
+  d.setAuthTag(b.subarray(12, 28));
+  return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8');
+}
+
 export async function leerConfig(seccion: Seccion): Promise<Config> {
-  return recordar(`cfg:${seccion}`, 30_000, async () =>
-    (await uno<{ valor: Config }>('SELECT valor FROM core.configuracion WHERE clave = $1', [seccion]))?.valor ?? {});
+  return recordar(`cfg:${seccion}`, 30_000, async () => {
+    const v = (await uno<{ valor: Config }>('SELECT valor FROM core.configuracion WHERE clave = $1', [seccion]))?.valor ?? {};
+    for (const k of SECRETOS[seccion] ?? []) {
+      try { v[k] = descifrar(String(v[k] ?? '')); } catch { v[k] = ''; /* llave cambiada: hay que volver a cargarlo */ }
+    }
+    return v;
+  });
 }
 
 const enmascarar = (s: Seccion, v: Config) =>
@@ -182,7 +210,9 @@ export async function rutasSistema(app: FastifyInstance) {
       } catch { return reply.code(422).send(error(422, 'CUENTA_SERVICIO_INVALIDA', 'Pega el JSON completo de la cuenta de servicio de Firebase.')); }
       tokenGoogle = null;
     }
-    await q('UPDATE core.configuracion SET valor = $1, actualizado_en = now(), actualizado_por = $2 WHERE clave = $3', [p.data, req.usuario!.id, seccion]);
+    const guardar: Config = { ...p.data };
+    for (const k of SECRETOS[seccion] ?? []) guardar[k] = cifrar(String(guardar[k] ?? ''));
+    await q('UPDATE core.configuracion SET valor = $1, actualizado_en = now(), actualizado_por = $2 WHERE clave = $3', [guardar, req.usuario!.id, seccion]);
     invalidar(`cfg:${seccion}`);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CONFIG_CAMBIADA',
       entidad: 'configuracion', entidadId: seccion, detalle: enmascarar(seccion, p.data), ip: req.ip });

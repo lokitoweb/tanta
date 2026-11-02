@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 
@@ -11,6 +12,17 @@ class Marca extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Logo subido por el superadmin en Configuración → Marca; si no hay, el wordmark.
+    final logoId = (Api.instancia.config['marca'] as Map?)?['logoId'];
+    if (logoId != null) {
+      return Image.network(Api.instancia.urlArchivo('/archivos/$logoId'), height: 56 * escala, fit: BoxFit.contain,
+          semanticLabel: '${(Api.instancia.config['marca'] as Map)['nombreApp'] ?? 'Tanta'}',
+          errorBuilder: (_, __, ___) => _wordmark());
+    }
+    return _wordmark();
+  }
+
+  Widget _wordmark() {
     final color = invertida ? TantaColors.cream50 : TantaColors.ink800;
     final pillBg = invertida ? TantaColors.cream50 : TantaColors.ink800;
     final pillFg = invertida ? TantaColors.ink800 : TantaColors.cream50;
@@ -187,6 +199,29 @@ class Progreso extends StatelessWidget {
         backgroundColor: TantaColors.cream300,
         valueColor: AlwaysStoppedAnimation(color),
       ),
+    );
+  }
+}
+
+/// Foto de perfil o iniciales si no hay foto (o no carga sin red).
+class Avatar extends StatelessWidget {
+  const Avatar({super.key, required this.nombre, this.fotoUrl, this.radio = 18});
+  final String nombre;
+  final String? fotoUrl;
+  final double radio;
+
+  @override
+  Widget build(BuildContext context) {
+    final iniciales = nombre.split(' ').where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join();
+    final fondo = CircleAvatar(
+      radius: radio,
+      backgroundColor: TantaColors.sand300,
+      child: Text(iniciales, style: TextStyle(fontSize: radio * 0.7, fontWeight: FontWeight.w700, color: TantaColors.ink900)),
+    );
+    if (fotoUrl == null) return fondo;
+    return ClipOval(
+      child: Image.network(Api.instancia.urlArchivo(fotoUrl!), width: radio * 2, height: radio * 2, fit: BoxFit.cover,
+          semanticLabel: nombre, errorBuilder: (_, __, ___) => fondo),
     );
   }
 }
