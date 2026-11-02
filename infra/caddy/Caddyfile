@@ -16,8 +16,13 @@
 	}
 
 	# El certificado y la clave privada nunca se sirven.
-	@noPermitido path /.*\.(env|sql|log|pem|key)$
-	respond @noPermitido 404
+	# path_regexp, no path: path usa comodines y la expresión anterior nunca coincidía.
+	# Bloquea archivos ocultos (.env, .git…) y extensiones sensibles.
+	# Va en su propio handle: un respond suelto se evalúa DESPUÉS de los handle (la web lo tapaba).
+	@noPermitido path_regexp (?i)(/\.|\.(env|sql|log|pem|key|bak|dump|gz|zip)$)
+	handle @noPermitido {
+		respond 404
+	}
 
 	# --- API ---
 	handle /api/* {

@@ -42,19 +42,16 @@ cp .env.production.example .env.production
 nano .env.production     # dominio, correo, claves
 chmod 600 .env.production
 
-# 5. Web compilada (Caddy la sirve como estáticos)
-pnpm install && pnpm build
+# 5. Construir y arrancar (la web se compila dentro de Docker; el API migra solo al iniciar)
+docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d --build
 
-# 6. Arrancar
-docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d
-
-# 7. Migrar y sembrar SOLO la primera vez
-docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml \
-  exec -T api node dist/db/migrate.js
+# 6. Primer Superadministrador (ver la sección al final de esta guía)
+docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml exec \
+  -e SUPERADMIN_USUARIO=admin -e SUPERADMIN_CLAVE='una-clave-larga-y-unica' api node dist/db/superadmin.js
 ```
 
-**No se ejecuta la semilla en producción.** El catálogo real se carga con el importador de Excel
-(`14 §Plantilla de carga`). La semilla es solo para desarrollo y demostración.
+**No se ejecuta la semilla en producción.** El catálogo real (categorías, productos, insumos, recetas,
+clientes y costos indirectos) se carga desde la web, en Maestros. La semilla es solo para desarrollo.
 
 ### Verificación de que quedó bien
 
@@ -71,10 +68,8 @@ docker compose --env-file .env.production -f infra/compose/docker-compose.prod.y
 ```bash
 cd ~/tanta
 git pull
-pnpm install && pnpm build
-docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml \
-  exec -T api node dist/db/migrate.js     # idempotente: aplica solo lo nuevo
-docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d --no-deps --build api
+# Reconstruye API y web; el API aplica solo las migraciones nuevas al arrancar (idempotente).
+docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d --build api caddy
 ```
 
 El reinicio del API dura menos de 5 segundos. Caddy reintenta mientras tanto, así que el usuario ve
