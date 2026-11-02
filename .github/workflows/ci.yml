@@ -84,7 +84,13 @@ jobs:
           done
 
       - name: Pruebas funcionales
-        run: node --test tests/api.test.mjs
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: tanta
+          PGPASSWORD: tanta_ci
+          PGDATABASE: tanta
+        run: node --test --test-concurrency=1 tests/api.test.mjs tests/sistema.test.mjs tests/inventario.test.mjs tests/exportar.test.mjs
 
       - name: Concurrencia del correlativo (0 colisiones)
         run: node tests/concurrencia-ventas.mjs 12

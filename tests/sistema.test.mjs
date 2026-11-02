@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { sql } from './_sql.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u, c = 'tanta') => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: c }) })).json()).accessToken;
@@ -26,7 +26,7 @@ test('configuración: pública sin secretos, admin enmascarado, validación', as
   const cfg = await api(sa, 'GET', '/sistema/config');
   assert.equal(cfg.b.webhook.secreto, '••••••••');
   // En la base el secreto está cifrado (AES-256-GCM), no en claro.
-  const enBase = spawnSync('docker', ['exec', 'tanta-pg', 'psql', '-U', 'tanta', '-d', 'tanta', '-t', '-A', '-c', "SELECT valor->>'secreto' FROM core.configuracion WHERE clave='webhook'"], { encoding: 'utf8' }).stdout.trim();
+  const enBase = sql("SELECT valor->>'secreto' FROM core.configuracion WHERE clave='webhook'");
   assert.ok(enBase.startsWith('enc:v1:') && !enBase.includes('abc123'), 'secreto cifrado en reposo');
 
   assert.equal((await api(sa, 'PUT', '/sistema/config/webhook', { habilitado: true, url: 'http://inseguro.com', secreto: '', eventos: [] })).s, 422, 'solo https');

@@ -7,6 +7,7 @@
  * autenticación, autorización por rol, idempotencia, invariantes de inventario y validación.
  */
 import { test, describe, before } from 'node:test';
+import { sql } from './_sql.mjs';
 import assert from 'node:assert/strict';
 
 const API = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
@@ -51,15 +52,7 @@ async function pedir(ruta, { metodo = 'GET', token, cuerpo, extra = {} } = {}) {
 before(async () => {
   // La suite provoca fallos de login a propósito (para probar el bloqueo por cuenta).
   // Sin limpiar el contador, la segunda ejecución seguida se bloquearía sola.
-  try {
-    const { execSync } = await import('node:child_process');
-    execSync(
-      'docker exec tanta-pg psql -U tanta -d tanta -c "DELETE FROM core.intento_login"',
-      { stdio: 'ignore' },
-    );
-  } catch {
-    // Sin Docker (CI) el bloqueo no se acumula porque cada ejecución usa usuarios limpios.
-  }
+  sql('DELETE FROM core.intento_login');
 
   for (const u of ['osquilcate', 'lbermudez', 'cmedina', 'rquispe', 'jramos']) {
     const r = await login(u);
@@ -102,11 +95,7 @@ describe('Autenticación', () => {
   test('la contraseña se guarda con Argon2id', async () => {
     const r = await login('osquilcate');
     assert.equal(r.status, 200);
-    const { execSync } = await import('node:child_process');
-    const hash = execSync(
-      'docker exec tanta-pg psql -U tanta -d tanta -t -A -c "SELECT clave_hash FROM core.usuario WHERE usuario=\'osquilcate\'"',
-      { encoding: 'utf8' },
-    ).trim();
+    const hash = sql("SELECT clave_hash FROM core.usuario WHERE usuario='osquilcate'");
     assert.match(hash, /^argon2id\$m=\d+,t=\d+,p=\d+\$/);
   });
 
