@@ -4,8 +4,8 @@ import { Gate } from '@/core/app-state';
 import { Panel } from '@/modules/panel/Panel';
 import { Dashboard } from '@/modules/gerencia/Dashboard';
 import { Reportes } from '@/modules/gerencia/Reportes';
-import { Productos } from '@/modules/maestros/Productos';
-import { Insumos } from '@/modules/maestros/Insumos';
+import { Categorias, Clientes, CostosIndirectos, Insumos, Productos } from '@/modules/maestros/Maestros';
+import { Auditoria } from '@/modules/sistema/Auditoria';
 import { Recetas } from '@/modules/maestros/Recetas';
 import { Produccion } from '@/modules/produccion/Produccion';
 import { Almacen } from '@/modules/almacen/Almacen';
@@ -46,6 +46,10 @@ export function App() {
         <Route path="/seguridad/parametros" element={<Gate permiso="parametros.gestionar" siNo={<SinAcceso />}><Parametros /></Gate>} />
         <Route path="/gerencia/periodos" element={<Gate permiso="periodos.cerrar" siNo={<SinAcceso />}><Periodos /></Gate>} />
 
+        <Route path="/maestros/categorias" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Categorias /></Gate>} />
+        <Route path="/maestros/clientes" element={<Gate permiso="clientes.gestionar" siNo={<SinAcceso />}><Clientes /></Gate>} />
+        <Route path="/maestros/cif" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><CostosIndirectos /></Gate>} />
+        <Route path="/sistema/auditoria" element={<Gate permiso="auditoria.ver" siNo={<SinAcceso />}><Auditoria /></Gate>} />
         <Route path="/perfil" element={<Perfil />} />
         <Route path="/sistema/roles" element={<Gate permiso="roles.gestionar" siNo={<SinAcceso />}><Roles /></Gate>} />
         <Route path="/sistema/configuracion" element={<Gate permiso="config.gestionar" siNo={<SinAcceso />}><Configuracion /></Gate>} />

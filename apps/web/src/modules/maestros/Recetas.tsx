@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { useApp } from '@/core/app-state';
 import { cantidad, money, num2, partesQueSuman, pct, semaforo } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { EditorReceta } from './EditorReceta';
 
 export function Recetas() {
   const { dataset, puede } = useApp();
   const [sel, setSel] = useState(dataset.recetas[1]?.id ?? dataset.recetas[0]?.id);
   const receta = dataset.recetas.find((r) => r.id === sel) ?? dataset.recetas[0];
   const verCosto = puede('costos.ver');
+  const [editando, setEditando] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
 
   // Si el rol no ve costos, el API no los envía: aquí no hay nada que calcular.
   const [insumos, merma] = verCosto
@@ -36,8 +39,10 @@ export function Recetas() {
       <Encabezado
         titulo="Recetas"
         descripcion="Cada versión queda congelada: cambiar una receta crea una versión nueva, no reescribe la historia"
-        acciones={<Boton variant="primary" icono="plus">Nueva versión</Boton>}
+        acciones={puede('recetas.editar') && <Boton variant="primary" icono="plus" onClick={() => { setAviso(null); setEditando(true); }}>Nueva versión</Boton>}
       />
+      {aviso && <div className="aviso aviso--ok" role="status"><span className="aviso__icono">✓</span><div><p>{aviso}</p></div></div>}
+      {editando && <EditorReceta receta={receta} onCerrar={(r) => { setEditando(false); if (r) setAviso(r); }} />}
 
       <div className="split">
         <Tarjeta padding="none" className="split__lista">
@@ -92,7 +97,7 @@ export function Recetas() {
                 <thead>
                   <tr>
                     <th>Insumo</th>
-                    <th className="t-right">Cantidad por unidad</th>
+                    <th className="t-right">Cantidad por tanda</th>
                     {verCosto && <th className="t-right">CPP</th>}
                     {verCosto && <th className="t-right">Costo</th>}
                   </tr>

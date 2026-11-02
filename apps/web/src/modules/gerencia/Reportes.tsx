@@ -1,63 +1,95 @@
-import { useMemo, useState } from 'react';
-import reportesJson from '@/config/reportes.json';
-import { exportarPdf } from '@/core/exportar';
-import { useApp } from '@/core/app-state';
-import { money, num, pct } from '@/core/format';
+import { useEffect, useState } from 'react';
+import { api } from '@/core/api';
+import { exportarExcel, exportarPdf } from '@/core/exportar';
+import { money, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
-import { Icon } from '@/ui/icons';
+import { BarraFiltros, aQuery, rango, useEnVivo, type Filtros } from '@/ui/Filtros';
+import { TablaReporte, type ColRep } from '@/ui/TablaReporte';
 
-interface Reporte { codigo: string; nombre: string; detalle: string; perfil: string; grupo: string }
-const REPORTES = reportesJson.reportes as Reporte[];
+interface Catalogo { codigo: string; titulo: string; columnas: ColRep[] }
+interface Resultado extends Catalogo { filas: Array<Record<string, unknown>>; resumen?: Record<string, unknown>; generadoEn: string }
 
+const GRUPOS: Record<string, string> = { G: 'Gerencia', V: 'Ventas y cobranza', A: 'Almacén', M: 'Maestros' };
+// Qué filtros tiene sentido mostrar en cada reporte (el resto no los usa).
+const CAMPOS: Record<string, Array<'categoria' | 'producto' | 'cliente' | 'vendedor'>> = {
+  'G-08': [], 'G-09': ['categoria'], 'G-10': [], 'G-11': [], 'G-12': [], 'G-13': [], 'V-01': ['cliente'], 'V-02': ['cliente'], 'A-01': ['producto'], 'A-02': [], 'M-01': ['producto'],
+};
+
+const RESUMEN: Record<string, (r: Record<string, unknown>) => Array<[string, string]>> = {
+  'G-06': (r) => [['Ventas con margen negativo', String(r.ventasConMargenNegativo)]],
+  'G-09': (r) => [['Margen de contribución', pct(r.margenContribucion as number)], ['Punto de equilibrio', money(r.puntoEquilibrio as number)], ['Estado', r.cubierto ? 'Cubierto' : 'Por debajo']],
+  'G-10': (r) => [['Merma valorizada', money(r.mermaValorizada as number)], ['% de la producción', pct(r.pctProduccion as number)]],
+  'G-11': (r) => [['Por cobrar', money(r.totalPorCobrar as number)], ['Vencido', money(r.vencido as number)], ['Días promedio de cobro', String(r.diasPromedioCobro)]],
+  'G-12': (r) => [['Valor del inventario', money(r.valorTotal as number)], ['Ítems críticos', String(r.criticos)]],
+  'G-13': (r) => [['Pedidos entregados a tiempo', pct(r.cumplimientoPedidos as number)]],
+  'M-01': (r) => [['Producto', String(r.producto)], ['Versión de receta', String(r.version)], ['Margen', pct(r.margen as number)], ['Markup', pct(r.markup as number)]],
+};
+
+/** Catálogo de reportes del PDF (Tabla 4), calculados en vivo por el API. */
 export function Reportes() {
-  const { dataset } = useApp();
-  const [grupo, setGrupo] = useState('todos');
-  const grupos = useMemo(() => ['todos', ...Array.from(new Set(REPORTES.map((r) => r.grupo)))], []);
-  const lista = REPORTES.filter((r) => grupo === 'todos' || r.grupo === grupo);
+  const [catalogo, setCatalogo] = useState<Catalogo[]>([]);
+  const [codigo, setCodigo] = useState<string>('');
+  const [filtros, setFiltros] = useState<Filtros>(rango(30));
+  const [res, setRes] = useState<Resultado | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [cargando, setCargando] = useState(false);
+
+  useEffect(() => { void api<Catalogo[]>('/reportes').then((c) => { setCatalogo(c); setCodigo((x) => x || c[0]?.codigo || ''); }); }, []);
+
+  const cargar = async () => {
+    if (!codigo) return;
+    if (codigo === 'M-01' && !filtros.producto) { setRes(null); setError('Elige un producto para ver su ficha de costo.'); return; }
+    setCargando(true);
+    try { setRes(await api<Resultado>(`/reportes/${codigo}${aQuery(filtros)}`)); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : 'No se pudo generar.'); }
+    finally { setCargando(false); }
+  };
+  const hace = useEnVivo(cargar, [codigo, JSON.stringify(filtros)], 60);
+
+  const actual = catalogo.find((c) => c.codigo === codigo);
+  const grupos = [...new Set(catalogo.map((c) => c.codigo[0]))];
+  const resumen = res?.resumen && RESUMEN[codigo]?.(res.resumen);
 
   return (
     <>
-      <Encabezado
-        titulo="Reportes"
-        descripcion="Catálogo del Informe Ejecutivo · todos admiten filtros por fecha, categoría y cliente, y exportación"
-        acciones={<Boton icono="report" onClick={exportarPdf}>Exportar PDF</Boton>}
-      />
+      <Encabezado titulo="Reportes" descripcion="Calculados en vivo desde ventas, kárdex y el motor de costeo. Montos sin IGV."
+        acciones={res && <>
+          <Boton icono="download" onClick={() => exportarExcel(`${codigo}-${res.titulo}`, res.filas.map((f) => Object.fromEntries(res.columnas.map((c) => [c.label, f[c.key]]))))}>Excel</Boton>
+          <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
+        </>} />
 
-      <div className="grid grid--4">
-        <Tarjeta className="mini-stat"><span>Ventas del período</span><b>{money(dataset.kpis.ventasNetas)}</b></Tarjeta>
-        <Tarjeta className="mini-stat"><span>Utilidad bruta</span><b>{money(dataset.kpis.utilidadBruta)}</b></Tarjeta>
-        <Tarjeta className="mini-stat"><span>Margen</span><b>{pct(dataset.kpis.margen)}</b></Tarjeta>
-        <Tarjeta className="mini-stat"><span>Tickets</span><b>{num(dataset.kpis.tickets)}</b></Tarjeta>
+      <div className="reportes">
+        <nav className="reportes__lista" aria-label="Catálogo de reportes">
+          {grupos.map((g) => (
+            <div key={g} className="reportes__grupo">
+              <p className="reportes__grupo-t">{GRUPOS[g] ?? g}</p>
+              {catalogo.filter((c) => c.codigo[0] === g).map((c) => (
+                <button key={c.codigo} className={`reportes__item ${c.codigo === codigo ? 'is-active' : ''}`} onClick={() => { setCodigo(c.codigo); setRes(null); }}>
+                  <span className="mono">{c.codigo}</span>{c.titulo}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        <div className="pila">
+          <Tarjeta>
+            <div className="reportes__cab">
+              <div><h2 className="card__title">{actual?.titulo ?? 'Reporte'}</h2>
+                <p className="card__sub">{hace === null ? 'Cargando…' : `Actualizado hace ${hace} s · se refresca solo`}</p></div>
+              {cargando && <Insignia tono="info" punto>Calculando</Insignia>}
+            </div>
+            <BarraFiltros valor={filtros} onChange={setFiltros} campos={CAMPOS[codigo] ?? ['categoria', 'producto', 'cliente', 'vendedor']} />
+            {resumen && <div className="resumen">{resumen.map(([k, v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>}
+          </Tarjeta>
+
+          <Tarjeta padding="none">
+            {error ? <Vacio titulo="Sin datos" detalle={error} icono="report" />
+              : res && res.filas.length === 0 ? <Vacio titulo="Sin resultados" detalle="No hay movimientos con estos filtros." icono="report" />
+                : res && <TablaReporte columnas={res.columnas} filas={res.filas} />}
+          </Tarjeta>
+        </div>
       </div>
-
-      <div className="chips chips--fila">
-        {grupos.map((g) => (
-          <button key={g} className={`chipfilter ${grupo === g ? 'is-active' : ''}`} onClick={() => setGrupo(g)}>
-            {g === 'todos' ? 'Todos' : g}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid--3">
-        {lista.map((r) => (
-          <article className="repcard" key={r.codigo}>
-            <header className="repcard__head">
-              <span className="repcard__cod">{r.codigo}</span>
-              <Insignia tono="neutral">{r.grupo}</Insignia>
-            </header>
-            <h3 className="repcard__nombre">{r.nombre}</h3>
-            <p className="repcard__detalle">{r.detalle}</p>
-            <footer className="repcard__foot">
-              <span className="t-muted">{r.perfil}</span>
-              <button className="repcard__link">
-                Ver <Icon name="chevron" size={14} />
-              </button>
-            </footer>
-          </article>
-        ))}
-      </div>
-
-      {lista.length === 0 && <Vacio titulo="Sin reportes en este grupo" icono="report" />}
     </>
   );
 }

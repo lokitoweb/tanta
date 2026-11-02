@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import demo from '@/config/demo.json';
 import { ApiError, activarMfa, enrolarMfa, login, verificarMfa } from '@/core/api';
-import { BrandMark, Boton } from '@/ui/primitives';
+import { Boton } from '@/ui/primitives';
+import { TarjetaMarca } from './TarjetaMarca';
 import { Icon } from '@/ui/icons';
 
 /** Mensaje claro para el usuario; nunca revela si el usuario existe. */
@@ -105,22 +106,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
           <span className="acceso__eyebrow">Sistema Integral de Gestión</span>
         </div>
 
-        <div className="tarjeta-marca">
-          <div className="tarjeta-marca__cuerpo">
-            <BrandMark variant="light" size="xl" />
-            <p className="tarjeta-marca__claim">Pan de masa madre</p>
-          </div>
-          <div className="tarjeta-marca__banda">
-            <div>
-              <p className="tarjeta-marca__nombre">Oscar Quilcate Rosell</p>
-              <p className="tarjeta-marca__rol">Representante</p>
-            </div>
-            <div className="tarjeta-marca__contacto">
-              <span>WhatsApp</span>
-              <strong>985 649 922</strong>
-            </div>
-          </div>
-        </div>
+        <TarjetaMarca />
 
         <div className="acceso__pie">
           <p>Pedidos · Producción · Almacén · Ventas · Cobranza · Costos</p>

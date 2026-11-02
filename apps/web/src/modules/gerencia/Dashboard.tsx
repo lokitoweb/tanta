@@ -1,200 +1,136 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
+import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
-import { useApp } from '@/core/app-state';
-import { money, moneyShort, num, pct, semaforo, eje } from '@/core/format';
+import { money, moneyShort, num, pct } from '@/core/format';
 import { AreaSerie, BarrasH, Dona } from '@/ui/charts';
-import { Boton, Encabezado, Insignia, Kpi, Progreso, Segmentado, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
-import { desdeIso } from '@/core/fecha';
+import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Dialogo } from '@/ui/Dialogo';
+import { BarraFiltros, aQuery, rango, useEnVivo, type Filtros } from '@/ui/Filtros';
+import { TablaReporte, type ColRep } from '@/ui/TablaReporte';
 
-type Periodo = 'mes' | 'semana' | 'anio';
+interface Fila { [k: string]: string | number }
+interface Datos {
+  kpis: Array<{ indicador: string; actual: number; anterior: number; variacion: number }>;
+  puntoEquilibrio: { margenContribucion: number; puntoEquilibrio: number; cubierto: boolean };
+  cxc: { totalPorCobrar: number; vencido: number; diasPromedioCobro: number; tramos: Array<{ tramo: string; saldo: number }> };
+  serie: Array<{ fecha: string; ventas: number; utilidad: number; tickets: number }>;
+  categorias: Fila[]; top: Fila[]; bottom: Fila[];
+  alertas: Array<{ producto: string; margen: number; objetivo: number }>;
+}
+interface Ficha { titulo: string; columnas: ColRep[]; filas: Array<Record<string, unknown>>; resumen: Record<string, number | string> }
 
+const TONO = { verde: 'ok', ambar: 'warn', rojo: 'danger' } as const;
+
+/** Dashboard gerencial (PDF §5.4): datos reales del período, comparados con el anterior. */
 export function Dashboard() {
-  const { dataset } = useApp();
-  const [periodo, setPeriodo] = useState<Periodo>('mes');
+  const [filtros, setFiltros] = useState<Filtros>(rango(30));
+  const [d, setD] = useState<Datos | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [ficha, setFicha] = useState<Ficha | null>(null);
+  const [lista, setLista] = useState<'top' | 'bottom'>('top');
 
-  const serie = useMemo(() => {
-    const n = periodo === 'semana' ? 7 : periodo === 'mes' ? 30 : 30;
-    return dataset.dias.slice(-n).map((d) => ({ label: desdeIso(d.fecha), a: d.ventasNetas, b: d.costo }));
-  }, [dataset.dias, periodo]);
+  const hace = useEnVivo(async () => {
+    try { setD(await api<Datos>(`/dashboard${aQuery(filtros)}`)); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cargar.'); }
+  }, [JSON.stringify(filtros)], 30);
 
-  const k = dataset.kpis;
-  const brecha = k.margen - k.margenObjetivo;
+  const abrirFicha = async (nombre: string) => {
+    const op = await api<{ productos: Array<{ id: string; nombre: string }> }>('/reportes-filtros');
+    const id = op.productos.find((p) => p.nombre === nombre)?.id;
+    if (id) setFicha(await api<Ficha>(`/reportes/M-01?producto=${id}`));
+  };
 
-  const categorias = dataset.categorias.map((c) => ({
-    label: c.nombre,
-    valor: c.margen,
-    nota: `obj. ${pct(c.margenObjetivo, 0)}`,
-    tono: semaforo(c.margen, c.margenObjetivo),
-  }));
+  if (error && !d) return <Vacio titulo="No se pudo cargar el dashboard" detalle={error} icono="chart" />;
+  if (!d) return <div className="tabla-cargando">Calculando indicadores…</div>;
 
-  const sobreMeta = brecha >= 0;
-  const hoyIso = new Date().toISOString().slice(0, 10);
-  const hoyEnCurso = dataset.dias[dataset.dias.length - 1]?.fecha === hoyIso;
-  const alertas = [
-    sobreMeta
-      ? { tono: 'ok' as const, titulo: 'Margen sobre objetivo', detalle: `${pct(k.margen)} frente a ${pct(k.margenObjetivo, 0)} meta · +${(brecha * 100).toFixed(1)} pp`, accion: 'Ver G-01' }
-      : { tono: 'danger' as const, titulo: 'Margen bajo objetivo', detalle: `${pct(k.margen)} frente a ${pct(k.margenObjetivo, 0)} meta · ${(Math.abs(brecha) * 100).toFixed(1)} pp por debajo`, accion: 'Ver G-01' },
-    { tono: 'warn' as const, titulo: 'Cartera vencida', detalle: `${money(k.vencido)} por cobrar fuera de plazo`, accion: 'Ver cobranza' },
-    { tono: 'info' as const, titulo: 'Período abierto', detalle: 'CIF provisional · se congela al cierre del mes', accion: 'Ver CIF' },
-  ];
+  const k = Object.fromEntries(d.kpis.map((x) => [x.indicador, x]));
+  const delta = (x?: { variacion: number }, esPuntos = false) => x && ({
+    delta: `${x.variacion >= 0 ? '+' : ''}${esPuntos ? (x.variacion * 100).toFixed(1) + ' pts' : pct(x.variacion)}`,
+    deltaTono: (Math.abs(x.variacion) < 0.001 ? 'flat' : x.variacion > 0 ? 'up' : 'down') as 'up' | 'down' | 'flat',
+  });
+  const pe = d.puntoEquilibrio;
+  const ventas = k['Ventas netas']?.actual ?? 0;
+  const productos = lista === 'top' ? d.top : d.bottom;
 
   return (
     <>
-      <Encabezado
-        titulo="Costos y márgenes"
-        descripcion={`${dataset.periodo.etiqueta} · datos ${dataset.periodo.estado === 'PROVISIONAL' ? 'provisionales hasta el cierre del período' : 'definitivos'}${hoyEnCurso ? ' · el día de hoy aún está en curso' : ''}`}
-        acciones={
-          <>
-            <Segmentado
-              opciones={[{ id: 'semana', etiqueta: '7 días' }, { id: 'mes', etiqueta: '30 días' }, { id: 'anio', etiqueta: 'Año' }]}
-              valor={periodo}
-              onChange={setPeriodo}
-            />
-            <Boton icono="download" onClick={() => exportarExcel('rentabilidad-productos', dataset.topProductos.map((p) => ({ ...p })))}>Excel</Boton>
-            <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
-          </>
-        }
-      />
+      <Encabezado titulo="Costos, rentabilidad y márgenes"
+        descripcion={`En vivo · ${hace === null ? 'cargando' : `actualizado hace ${hace} s`} · montos sin IGV`}
+        acciones={<>
+          <Boton icono="download" onClick={() => exportarExcel('dashboard-productos', [...d.top, ...d.bottom])}>Excel</Boton>
+          <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
+        </>} />
+
+      <Tarjeta><BarraFiltros valor={filtros} onChange={setFiltros} campos={['categoria', 'vendedor']} /></Tarjeta>
 
       <div className="grid grid--4">
-        <Kpi label="Ventas netas" valor={moneyShort(k.ventasNetas)} delta={pct(k.variacionVentas)} deltaTono="up" nota="vs. mes anterior" icono="up" />
-        <Kpi label="Costo de ventas" valor={moneyShort(k.costoVentas)} nota={`${pct(k.costoVentas / k.ventasNetas)} de la venta`} icono="box" />
-        <Kpi label="Utilidad bruta" valor={moneyShort(k.utilidadBruta)} delta={`${pct(k.margen)} de margen`} deltaTono="up" nota="sobre ventas netas" icono="spark" />
-        <Kpi
-          label="Margen de utilidad"
-          valor={pct(k.margen)}
-          delta={sobreMeta ? `${(brecha * 100).toFixed(1)} pp sobre meta` : `${(Math.abs(brecha) * 100).toFixed(1)} pp bajo meta`}
-          deltaTono={sobreMeta ? 'up' : 'down'}
-          nota={`objetivo ${pct(k.margenObjetivo, 0)}`}
-          icono="chart"
-        />
+        <Kpi label="Ventas netas" valor={money(ventas)} {...delta(k['Ventas netas'])} nota="vs. período anterior" icono="chart" />
+        <Kpi label="Utilidad bruta" valor={money(k['Utilidad bruta']?.actual ?? 0)} {...delta(k['Utilidad bruta'])} nota={`costo ${money(k['Costo de ventas']?.actual ?? 0)}`} icono="wallet" />
+        <Kpi label="Margen bruto" valor={pct(k['Margen bruto %']?.actual ?? 0)} {...delta(k['Margen bruto %'], true)} nota="utilidad ÷ ventas netas" icono="spark" />
+        <Kpi label="Tickets" valor={num(k.Tickets?.actual ?? 0)} {...delta(k.Tickets)} nota={`ticket promedio ${money(ventas / Math.max(1, k.Tickets?.actual ?? 1))}`} icono="report" />
       </div>
+
+      {d.alertas.length > 0 && (
+        <div className="aviso aviso--danger" role="alert">
+          <span className="aviso__icono">!</span>
+          <div><strong>{d.alertas.length} productos por debajo de su margen objetivo</strong>
+            <p>{d.alertas.slice(0, 6).map((a) => `${a.producto} (${pct(a.margen)} vs ${pct(a.objetivo)})`).join(' · ')}</p></div>
+        </div>
+      )}
 
       <div className="grid grid--12">
         <Tarjeta className="col-8">
-          <TarjetaTitulo
-            titulo="Ventas netas frente a costo de lo vendido"
-            subtitulo={`${serie.length} días · la distancia entre las líneas es la utilidad bruta`}
-            accion={<Insignia tono={k.margen >= k.margenObjetivo ? 'ok' : 'warn'}>{pct(k.margen)} margen</Insignia>}
-          />
-          <AreaSerie datos={serie} etiquetaA="Ventas netas" etiquetaB="Costo de ventas" alto={260} formato={eje} />
+          <TarjetaTitulo titulo="Ventas y utilidad por día" subtitulo={`${filtros.desde} a ${filtros.hasta}`} />
+          {d.serie.some((s) => s.ventas > 0)
+            ? <AreaSerie datos={d.serie.map((s) => ({ label: s.fecha.slice(5), a: s.ventas, b: s.utilidad }))} etiquetaA="Ventas netas" etiquetaB="Utilidad" formato={moneyShort} />
+            : <Vacio titulo="Sin ventas en el rango" icono="chart" />}
         </Tarjeta>
-
         <Tarjeta className="col-4">
-          <TarjetaTitulo titulo="Participación por categoría" subtitulo="Sobre ventas netas del período" />
-          <Dona
-            partes={dataset.categorias.map((c) => ({ label: c.nombre, valor: c.ventas }))}
-            centro={moneyShort(k.ventasNetas)}
-            sub="ventas netas"
-          />
-        </Tarjeta>
-
-        <Tarjeta className="col-7">
-          <TarjetaTitulo titulo="Margen por categoría" subtitulo="Contra el objetivo definido en Maestros · semáforo de márgenes" />
-          <BarrasH
-            filas={categorias.map((c) => ({ ...c, valor: c.valor }))}
-            formato={(n) => pct(n, 1)}
-          />
-          <div className="semaforo">
-            <span><i className="dot dot--ok" /> En objetivo</span>
-            <span><i className="dot dot--warn" /> Hasta 5 pp debajo</span>
-            <span><i className="dot dot--danger" /> Más de 5 pp debajo</span>
-          </div>
-          <div className="resumen-margen">
-            <div>
-              <span>Margen global</span>
-              <b>{pct(k.margen)}</b>
-            </div>
-            <div>
-              <span>Objetivo ponderado</span>
-              <b>{pct(k.margenObjetivo, 0)}</b>
-            </div>
-            <div>
-              <span>Brecha</span>
-              <b className={sobreMeta ? 't-pos' : 't-neg'}>
-                {sobreMeta ? '+' : '−'}{(Math.abs(brecha) * 100).toFixed(1)} pp
-              </b>
-            </div>
-            <div>
-              <span>Soles en juego</span>
-              <b>{moneyShort(k.ventasNetas * Math.abs(brecha))}</b>
-            </div>
-          </div>
-        </Tarjeta>
-
-        <Tarjeta className="col-5">
-          <TarjetaTitulo titulo="Alertas del período" subtitulo="Lo que requiere una decisión esta semana" />
-          <ul className="alertas">
-            {alertas.map((a) => (
-              <li key={a.titulo} className={`alerta alerta--${a.tono}`}>
-                <span className="alerta__marca" />
-                <div>
-                  <p className="alerta__titulo">{a.titulo}</p>
-                  <p className="alerta__detalle">{a.detalle}</p>
-                </div>
-                <span className="alerta__accion">{a.accion}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="mini-kpis">
-            <div>
-              <span>Por cobrar</span>
-              <b>{money(k.porCobrar)}</b>
-              <Progreso valor={k.vencido / Math.max(k.porCobrar, 1)} tono="danger" />
-              <small>{money(k.vencido)} vencido</small>
-            </div>
-            <div>
-              <span>Merma valorizada</span>
-              <b>{money(k.mermaValorizada)}</b>
-              <Progreso valor={k.mermaPct / 0.05} tono="warn" />
-              <small>{pct(k.mermaPct)} de la producción</small>
-            </div>
-          </div>
-        </Tarjeta>
-
-        <Tarjeta className="col-12" padding="none">
-          <div className="card__head card__head--padded">
-            <div>
-              <h3 className="card__title">Productos por aporte a la utilidad</h3>
-              <p className="card__sub">Ordenados por utilidad del período · {num(k.tickets)} tickets procesados</p>
-            </div>
-            <Boton variant="ghost" iconoDer="chevron">Ver G-02</Boton>
-          </div>
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Producto</th>
-                  <th>Categoría</th>
-                  <th className="t-right">Unidades</th>
-                  <th className="t-right">Ventas</th>
-                  <th className="t-right">Utilidad</th>
-                  <th className="t-right">Margen</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {dataset.topProductos.map((p) => {
-                  const s = semaforo(p.margen, p.margenObjetivo);
-                  return (
-                    <tr key={p.id}>
-                      <td><strong>{p.nombre}</strong></td>
-                      <td className="t-muted">{dataset.categorias.find((c) => c.id === p.categoria)?.nombre}</td>
-                      <td className="t-right">{num(p.unidades)}</td>
-                      <td className="t-right">{money(p.ventas)}</td>
-                      <td className="t-right">{money(p.utilidad)}</td>
-                      <td className="t-right">
-                        <Insignia tono={s === 'ok' ? 'ok' : s === 'warn' ? 'warn' : 'danger'}>{pct(p.margen)}</Insignia>
-                      </td>
-                      <td className="t-right t-muted">{pct(p.margenObjetivo, 0)} obj.</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <TarjetaTitulo titulo="Punto de equilibrio" subtitulo="Costos fijos ÷ margen de contribución" />
+          <div className="equilibrio">
+            <b>{money(pe.puntoEquilibrio)}</b>
+            <span>ventas mínimas para no perder</span>
+            <Progreso valor={pe.puntoEquilibrio ? Math.min(1, ventas / pe.puntoEquilibrio / 2) : 0} tono={pe.cubierto ? 'ok' : 'danger'} />
+            <Insignia tono={pe.cubierto ? 'ok' : 'danger'} punto>{pe.cubierto ? `Cubierto · margen de seguridad ${money(ventas - pe.puntoEquilibrio)}` : 'Por debajo del equilibrio'}</Insignia>
+            <span className="t-muted">Margen de contribución {pct(pe.margenContribucion)}</span>
           </div>
         </Tarjeta>
       </div>
+
+      <div className="grid grid--12">
+        <Tarjeta className="col-7">
+          <TarjetaTitulo titulo="Margen por categoría" subtitulo="Semáforo contra el objetivo definido en Maestros" />
+          <BarrasH formato={(n) => pct(n)} filas={d.categorias.map((c) => ({
+            label: String(c.nombre), valor: Number(c.margen), nota: `objetivo ${pct(Number(c.objetivo))} · ${money(Number(c.ventas))}`,
+            tono: TONO[c.semaforo as keyof typeof TONO],
+          }))} />
+        </Tarjeta>
+        <Tarjeta className="col-5">
+          <TarjetaTitulo titulo="Cuentas por cobrar" subtitulo={`${money(d.cxc.vencido)} vencido · cobro en ${d.cxc.diasPromedioCobro} días promedio`} />
+          <Dona centro={moneyShort(d.cxc.totalPorCobrar)} sub="por cobrar" partes={d.cxc.tramos.map((t) => ({ label: t.tramo, valor: t.saldo }))} />
+        </Tarjeta>
+      </div>
+
+      <Tarjeta padding="none">
+        <div className="card__head card__head--padded">
+          <div><h3 className="card__title">Rentabilidad por producto</h3><p className="card__sub">Clic en un producto para ver su ficha de costo</p></div>
+          <div className="segmentado" role="group">
+            <button className={lista === 'top' ? 'is-active' : ''} onClick={() => setLista('top')}>10 más rentables</button>
+            <button className={lista === 'bottom' ? 'is-active' : ''} onClick={() => setLista('bottom')}>10 menos rentables</button>
+          </div>
+        </div>
+        <TablaReporte onFila={(f) => void abrirFicha(String(f.nombre))} filas={productos} columnas={[
+          { key: 'nombre', label: 'Producto' }, { key: 'categoria', label: 'Categoría' }, { key: 'unidades', label: 'Unidades', tipo: 'num' },
+          { key: 'ventas', label: 'Ventas', tipo: 'dinero' }, { key: 'utilidad', label: 'Utilidad', tipo: 'dinero' },
+          { key: 'margen', label: 'Margen', tipo: 'pct' }, { key: 'semaforo', label: 'Estado', tipo: 'semaforo' },
+        ]} />
+      </Tarjeta>
+
+      <Dialogo abierto={ficha !== null} titulo={`Ficha de costo · ${ficha?.resumen.producto ?? ''}`}
+        descripcion={ficha ? `Receta v${ficha.resumen.version} · rinde ${ficha.resumen.rendimiento} u · margen ${pct(Number(ficha.resumen.margen))} · markup ${pct(Number(ficha.resumen.markup))}` : ''}
+        onCerrar={() => setFicha(null)} acciones={<Boton variant="primary" onClick={() => setFicha(null)}>Cerrar</Boton>}>
+        {ficha && <TablaReporte columnas={ficha.columnas} filas={ficha.filas} />}
+      </Dialogo>
     </>
   );
 }

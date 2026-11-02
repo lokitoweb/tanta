@@ -285,7 +285,7 @@ export async function rutasAdmin(app: FastifyInstance) {
 
   /** Verifica la cadena de auditoría: si alguien tocó un evento, se detecta aquí. */
   app.get('/auditoria/verificar', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'usuarios.gestionar')) return;
+    if (!exigir(req, reply, 'auditoria.ver')) return;
     const r = await verificarCadena();
     const ultimo = await ultimoEvento();
     return reply.code(r.ok ? 200 : 409).send({ ...r, ultimo });

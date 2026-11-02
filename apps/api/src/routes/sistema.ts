@@ -150,7 +150,30 @@ export async function enviarPush(usuarioId: string, titulo: string, cuerpo: stri
   return enviados;
 }
 
+/** Datos del negocio (tarjeta del login, comprobantes, contacto). Viven en core.negocio. */
+const Negocio = z.object({
+  nombre: z.string().trim().min(2).max(120), ruc: z.string().trim().regex(/^(\d{11})?$/, 'RUC de 11 dígitos'),
+  direccion: z.string().trim().max(200), telefono: z.string().trim().max(30), whatsapp: z.string().trim().max(30),
+  email: z.union([z.literal(''), z.string().trim().email()]), representante: z.string().trim().max(120), claim: z.string().trim().max(60),
+});
+const leerNegocio = () => recordar('cfg:negocio', 30_000, async () =>
+  (await uno<Record<string, string>>('SELECT nombre, ruc, direccion, telefono, whatsapp, email, representante, claim FROM core.negocio WHERE id = 1')) ?? {});
+
 export async function rutasSistema(app: FastifyInstance) {
+  app.put('/sistema/negocio', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const p = Negocio.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(' · ')));
+    const d = p.data;
+    await q(`INSERT INTO core.negocio (id, nombre, ruc, direccion, telefono, whatsapp, email, representante, claim) VALUES (1,$1,$2,$3,$4,$5,$6,$7,$8)
+             ON CONFLICT (id) DO UPDATE SET nombre=$1, ruc=$2, direccion=$3, telefono=$4, whatsapp=$5, email=$6, representante=$7, claim=$8, actualizado_en=now()`,
+      [d.nombre, d.ruc, d.direccion, d.telefono, d.whatsapp, d.email, d.representante, d.claim]);
+    invalidar('cfg:negocio');
+    invalidar('negocio');
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'NEGOCIO_ACTUALIZADO', entidad: 'negocio', detalle: d, ip: req.ip });
+    return d;
+  });
+
   const fallo = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, e: unknown) => {
     const err = e as Error & { status?: number; codigo?: string };
     if (!err.status) throw e;
@@ -160,12 +183,12 @@ export async function rutasSistema(app: FastifyInstance) {
   /* --------------------------------------- configuración pública (sin sesión) */
   // Lo que la pantalla de login y la app necesitan antes de autenticarse. Nada secreto.
   app.get('/config/publica', async (_req, reply) => {
-    const [marca, movil, legal, fb] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase')]);
+    const [marca, movil, legal, fb, negocio] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase'), leerNegocio()]);
     const f = fb as Record<string, unknown>;
     // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
     reply.header('Cache-Control', 'no-cache');
     return {
-      marca, movil, legal,
+      marca, movil, legal, negocio,
       // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
       firebase: f.habilitado ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
     };

@@ -82,6 +82,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-productos', 'Maestros', 'Productos', '/maestros/productos', 'bread', 'maestros.ver', 1, 3],
   ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 3],
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
+  ['n-categorias', 'Maestros', 'Categorías', '/maestros/categorias', 'clipboard', 'maestros.editar', 3, 3],
   ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 3],
   ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 3],
   ['n-usuarios', 'Maestros', 'Usuarios y roles', '/seguridad/usuarios', 'shield', 'usuarios.gestionar', 6, 3],

@@ -43,13 +43,15 @@ export interface ConfigPublica {
   marca: { nombreApp: string; colorPrimario: string; colorAcento: string; logoId: string | null; iconoId: string | null };
   movil: { versionActual: string; versionMinima: string };
   legal: { urlPrivacidad: string; urlTerminos: string; correoSoporte: string };
+  negocio: { nombre: string; ruc: string; direccion: string; telefono: string; whatsapp: string; email: string; representante: string; claim: string };
 }
 
 // Una sola petición por carga de página; el superadmin la renueva tras guardar.
 let configPublica: Promise<ConfigPublica> | null = null;
 export function leerConfigPublica(renovar = false): Promise<ConfigPublica> {
   if (renovar || !configPublica) {
-    configPublica = api<ConfigPublica>('/config/publica', { sinAuth: true });
+    // Si falla (API reiniciando, sin red) no se guarda el error: el próximo uso reintenta.
+    configPublica = api<ConfigPublica>('/config/publica', { sinAuth: true }).catch((e) => { configPublica = null; throw e; });
     // Avisa a logo, título, etc. que la marca cambió, sin recargar la página.
     if (renovar) void configPublica.then(() => window.dispatchEvent(new Event('tanta:config')));
   }

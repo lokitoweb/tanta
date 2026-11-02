@@ -21,7 +21,18 @@ export function Configuracion() {
   const [guardando, setGuardando] = useState(false);
   const [dispositivos, setDispositivos] = useState<Dispositivo[]>([]);
 
-  const cargar = async () => setCfg(await api<Datos>('/sistema/config'));
+  const [negocio, setNegocio] = useState<Record<string, string> | null>(null);
+  const cargar = async () => {
+    setCfg(await api<Datos>('/sistema/config'));
+    setNegocio({ ...(await leerConfigPublica(true)).negocio });
+  };
+  const guardarNegocio = async () => {
+    setGuardando(true);
+    setAviso(null);
+    try { await api('/sistema/negocio', { method: 'PUT', body: negocio }); await leerConfigPublica(true); setAviso({ tono: 'ok', texto: 'Datos del negocio guardados: ya se ven en el ingreso y en los comprobantes.' }); }
+    catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo guardar.' }); }
+    finally { setGuardando(false); }
+  };
   useEffect(() => { void cargar(); void api<Dispositivo[]>('/sistema/dispositivos').then(setDispositivos).catch(() => {}); }, []);
 
   const campo = (s: string, k: string, v: unknown) => setCfg((c) => c && { ...c, [s]: { ...c[s], [k]: v } });
@@ -63,6 +74,18 @@ export function Configuracion() {
 
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'danger' ? '!' : '✓'}</span><div><p>{aviso.texto}</p></div></div>}
 
+      {tab === 'marca' && negocio && (
+        <Tarjeta>
+          <TarjetaTitulo titulo="Datos del negocio" subtitulo="Aparecen en la tarjeta de ingreso, en los comprobantes y en el contacto de la app" />
+          <div className="form form--2col">
+            {([['nombre', 'Nombre comercial'], ['ruc', 'RUC'], ['claim', 'Lema (tarjeta)'], ['representante', 'Representante'],
+              ['telefono', 'Teléfono'], ['whatsapp', 'WhatsApp'], ['email', 'Correo'], ['direccion', 'Dirección']] as Array<[string, string]>).map(([k, l]) => (
+              <Campo key={k} etiqueta={l}><input className="field__input" value={negocio[k] ?? ''} onChange={(e) => setNegocio({ ...negocio, [k]: e.target.value })} /></Campo>
+            ))}
+          </div>
+          <div className="form__acciones"><Boton variant="primary" onClick={() => void guardarNegocio()} disabled={guardando}>Guardar datos del negocio</Boton></div>
+        </Tarjeta>
+      )}
       {tab === 'marca' && (
         <Tarjeta>
           <TarjetaTitulo titulo="Identidad" subtitulo="Logo y nombre que ven la pantalla de ingreso, el menú y la app" />
