@@ -46,9 +46,13 @@ const PERMISOS: Array<[string, string, string]> = [
   ['catalogo.ver', 'Cliente', 'Ver catálogo y precios de venta'],
   ['parametros.gestionar', 'Seguridad', 'Cambiar parámetros de negocio'],
   ['periodos.cerrar', 'Gerencia', 'Calcular y cerrar el período de costos'],
+  ['config.gestionar', 'Seguridad', 'Configurar marca, app móvil, integraciones y legal'],
+  ['roles.gestionar', 'Seguridad', 'Editar los permisos de cada rol'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
+  ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
+    PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
     ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
@@ -78,6 +82,8 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
   ['n-usuarios', 'Maestros', 'Usuarios y roles', '/seguridad/usuarios', 'shield', 'usuarios.gestionar', 4, 3],
   ['n-parametros', 'Maestros', 'Parámetros', '/seguridad/parametros', 'settings', 'parametros.gestionar', 5, 3],
+  ['n-roles', 'Sistema', 'Roles y permisos', '/sistema/roles', 'shield', 'roles.gestionar', 1, 9],
+  ['n-config', 'Sistema', 'Configuración', '/sistema/configuracion', 'settings', 'config.gestionar', 2, 9],
   ['n-dashboard', 'Gerencia', 'Costos y márgenes', '/gerencia/dashboard', 'chart', 'dashboard.ver', 1, 4],
   ['n-reportes', 'Gerencia', 'Reportes', '/gerencia/reportes', 'report', 'reportes.ver', 2, 4],
   ['n-periodos', 'Gerencia', 'Períodos de costo', '/gerencia/periodos', 'report', 'periodos.cerrar', 3, 4],
@@ -162,6 +168,7 @@ const USUARIOS: Array<[string, string, string]> = [
   ['Carlos Medina', 'cmedina', 'VENDEDOR'],
   ['María Fernández', 'mfernandez', 'CLIENTE'],
   ['Soporte eSolutionsNet', 'soporte', 'SOPORTE'],
+  ['Superadministrador', 'superadmin', 'SUPERADMIN'],
 ];
 
 async function main() {

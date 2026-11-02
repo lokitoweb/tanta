@@ -4,6 +4,7 @@ import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
+import { emitirEvento, enviarPush } from './sistema.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -354,6 +355,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
         accion: 'VENTA_REGISTRADA', entidad: 'venta', entidadId: venta.ventaId,
         detalle: { codigo: venta.codigo, monto: venta.ventasNetas, margen: venta.margen }, ip: req.ip,
       });
+      void emitirEvento('venta.creada', venta);
       return reply.code(201).send(venta);
     } catch (e) {
       const err = e as Error & { status?: number };
@@ -409,6 +411,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
         accion: 'COBRANZA_REGISTRADA', entidad: 'cuenta_por_cobrar', entidadId: cxcId,
         detalle: { monto, medio }, ip: req.ip,
       });
+      void emitirEvento('cobro.registrado', res);
       return reply.code(201).send(res);
     } catch (e) {
       const err = e as Error & { status?: number };
@@ -476,12 +479,19 @@ export async function rutasOperaciones(app: FastifyInstance) {
         `No se puede pasar de ${pedido.estado} a ${destino}.`));
     }
 
-    await q('UPDATE core.pedido SET estado = $1 WHERE id = $2', [destino, pedido.id]);
+    // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
+    const cambio = await q('UPDATE core.pedido SET estado = $1 WHERE id = $2 AND estado = $3 RETURNING id', [destino, pedido.id, pedido.estado]);
+    if (!cambio.length) return reply.code(409).send(error(409, 'PEDIDO_CAMBIADO', 'Otro usuario cambió este pedido. Recarga e intenta de nuevo.'));
     await auditar({
       actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
       accion: `PEDIDO_${destino}`, entidad: 'pedido', entidadId: codigo,
       detalle: { de: pedido.estado, a: destino, cliente: pedido.cliente }, ip: req.ip,
     });
+    void emitirEvento('pedido.estado', { codigo, de: pedido.estado, a: destino });
+    // PDF 3.2: el cliente recibe push cuando su pedido cambia de estado.
+    void uno<{ id: string }>(
+      'SELECT u.id FROM core.usuario u JOIN core.pedido p ON p.cliente_id = u.cliente_id WHERE p.id = $1 LIMIT 1', [pedido.id],
+    ).then((u) => u && enviarPush(u.id, `Pedido ${codigo}`, `Tu pedido ahora está: ${destino.replace('_', ' ').toLowerCase()}`)).catch(() => {});
     return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino });
   });
 
@@ -547,6 +557,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
         }),
       );
       invalidar('cat:insumos'); // el stock nuevo se ve al instante, no tras el TTL
+      void emitirEvento('inventario.movimiento', resultado);
       await auditar({
         actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
         accion: `INVENTARIO_${m.tipo}`, entidad: 'insumo', entidadId: m.insumoId, detalle: m, ip: req.ip,

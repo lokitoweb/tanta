@@ -9,6 +9,7 @@ import { rutasAuth } from './routes/auth.js';
 import { rutasDatos } from './routes/datos.js';
 import { rutasOperaciones } from './routes/operaciones.js';
 import { rutasAdmin } from './routes/admin.js';
+import { rutasSistema } from './routes/sistema.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
 const ORIGENES = (process.env.CORS_ORIGINS ??
@@ -123,6 +124,7 @@ export async function construir() {
     await api.register(rutasDatos);
     await api.register(rutasOperaciones);
     await api.register(rutasAdmin);
+    await api.register(rutasSistema);
   }, { prefix: '/api/v1' });
 
   return app;

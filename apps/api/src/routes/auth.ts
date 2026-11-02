@@ -19,7 +19,7 @@ const Ticket = z.object({ ticket: z.string().min(10) });
 const VerificarMfa = z.object({ ticket: z.string().min(10), codigo: z.string().min(6).max(20) });
 
 /** Perfiles que pueden mover dinero, precios o usuarios: exigen segundo factor. */
-const ROLES_CON_MFA = new Set(['GERENTE', 'ADMINISTRADOR']);
+const ROLES_CON_MFA = new Set(['SUPERADMIN', 'GERENTE', 'ADMINISTRADOR']);
 
 const COOKIE = 'tanta_refresh';
 const ES_PROD = process.env.NODE_ENV === 'production';

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error, hashClave } from '../seguridad.js';
@@ -9,6 +9,16 @@ import { auditar, verificarCadena, ultimoEvento } from '../auditoria.js';
  * Todo lo que el cliente puede cambiar sin tocar código: parámetros de negocio,
  * usuarios, precios y cierre de períodos de costo.
  */
+/** Solo un Superadmin crea, bloquea o cambia la clave de otro Superadmin (evita autoelevarse). */
+async function protegeSuperadmin(req: FastifyRequest, reply: FastifyReply, objetivo: { rol?: string; usuarioId?: string }) {
+  if (req.usuario!.rol === 'SUPERADMIN') return true;
+  const esSuper = objetivo.rol === 'SUPERADMIN' || (objetivo.usuarioId && await uno(
+    "SELECT 1 FROM core.usuario_rol WHERE usuario_id = $1 AND rol_id = 'SUPERADMIN'", [objetivo.usuarioId]));
+  if (!esSuper) return true;
+  reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo el Superadministrador gestiona cuentas de Superadministrador.'));
+  return false;
+}
+
 export async function rutasAdmin(app: FastifyInstance) {
   /* ------------------------------------------------------- parámetros */
   const TIPOS = new Set(['texto', 'numero', 'porcentaje', 'booleano']);
@@ -80,6 +90,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     }
     const d = parseo.data;
 
+    if (!(await protegeSuperadmin(req, reply, { rol: d.rol }))) return;
     const rolExiste = await uno('SELECT 1 FROM core.rol WHERE id = $1', [d.rol]);
     if (!rolExiste) return reply.code(422).send(error(422, 'ROL_INEXISTENTE', 'El rol indicado no existe.'));
 
@@ -111,6 +122,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     const parseo = Estado.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Estado inválido.'));
 
+    if (!(await protegeSuperadmin(req, reply, { usuarioId: id }))) return;
     if (id === req.usuario!.id && parseo.data.estado === 'BLOQUEADO') {
       return reply.code(409).send(error(409, 'NO_PUEDES_BLOQUEARTE', 'No puedes bloquear tu propia cuenta.'));
     }
@@ -137,6 +149,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const parseo = NuevaClave.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'CLAVE_CORTA', 'La contraseña debe tener al menos 8 caracteres.'));
+    if (!(await protegeSuperadmin(req, reply, { usuarioId: id }))) return;
 
     await q('UPDATE core.usuario SET clave_hash = $1 WHERE id = $2', [hashClave(parseo.data.clave), id]);
     await q('UPDATE core.refresh_token SET revocado_en = now() WHERE usuario_id = $1 AND revocado_en IS NULL', [id]);

@@ -1,0 +1,364 @@
+import type { FastifyInstance } from 'fastify';
+import { createHmac } from 'node:crypto';
+import { importPKCS8, SignJWT } from 'jose';
+import { z } from 'zod';
+import { q, tx, uno } from '../db.js';
+import { autenticar, exigir, error, hashClave, verificarClave } from '../seguridad.js';
+import { auditar } from '../auditoria.js';
+import { recordar, invalidar } from '../cache.js';
+
+/**
+ * Sistema: todo lo que el superadministrador cambia sin desplegar.
+ * Marca (logo, colores), versión mínima de la app, legal, Firebase, webhook,
+ * permisos por rol; y el perfil propio de cada usuario.
+ */
+
+type Config = Record<string, unknown>;
+const SECCIONES = ['marca', 'movil', 'legal', 'firebase', 'webhook'] as const;
+type Seccion = (typeof SECCIONES)[number];
+// Campos que nunca salen del servidor: se devuelven como "••••" si tienen valor.
+const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'] };
+const MASCARA = '••••••••';
+
+export async function leerConfig(seccion: Seccion): Promise<Config> {
+  return recordar(`cfg:${seccion}`, 30_000, async () =>
+    (await uno<{ valor: Config }>('SELECT valor FROM core.configuracion WHERE clave = $1', [seccion]))?.valor ?? {});
+}
+
+const enmascarar = (s: Seccion, v: Config) =>
+  Object.fromEntries(Object.entries(v).map(([k, x]) => [k, SECRETOS[s]?.includes(k) && x ? MASCARA : x]));
+
+/* ------------------------------------------------------------ validación */
+const semver = z.string().regex(/^\d+\.\d+\.\d+$/, 'Formato 1.2.3');
+const urlHttps = z.union([z.literal(''), z.string().url().startsWith('https://', 'Debe usar https://')]);
+const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
+const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
+  marca: z.object({ nombreApp: z.string().trim().min(2).max(40), colorPrimario: color, colorAcento: color,
+    logoId: z.string().uuid().nullable(), iconoId: z.string().uuid().nullable() }),
+  movil: z.object({ versionActual: semver, versionMinima: semver, urlAndroid: urlHttps, urlIos: urlHttps,
+    mensajeActualizacion: z.string().trim().min(5).max(200) }),
+  legal: z.object({ urlPrivacidad: urlHttps, urlTerminos: urlHttps, correoSoporte: z.union([z.literal(''), z.string().email()]) }),
+  firebase: z.object({ habilitado: z.boolean(), projectId: z.string().max(100), apiKey: z.string().max(100),
+    appIdAndroid: z.string().max(100), appIdIos: z.string().max(100), senderId: z.string().max(40),
+    cuentaServicio: z.string().max(10_000) }),
+  webhook: z.object({ habilitado: z.boolean(), url: urlHttps, secreto: z.string().max(200),
+    eventos: z.array(z.enum(['venta.creada', 'cobro.registrado', 'pedido.estado', 'inventario.movimiento', 'usuario.eliminado'])) }),
+};
+
+/** a < b en semver. */
+export function versionMenor(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
+  return false;
+}
+
+/** Tipo real por "números mágicos": no se confía en el mime que declara el cliente. */
+function mimeReal(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | null {
+  if (b.length > 8 && b.readUInt32BE(0) === 0x89504e47) return 'image/png';
+  if (b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+async function guardarImagen(base64: string, usuarioId: string): Promise<string> {
+  const datos = Buffer.from(base64.replace(/^data:[^,]+,/, ''), 'base64');
+  const mime = mimeReal(datos);
+  if (!mime) throw Object.assign(new Error('Solo imágenes PNG, JPEG o WebP.'), { status: 415, codigo: 'IMAGEN_INVALIDA' });
+  if (datos.length > 1_048_576) throw Object.assign(new Error('La imagen supera 1 MB.'), { status: 413, codigo: 'IMAGEN_GRANDE' });
+  const f = await uno<{ id: string }>('INSERT INTO core.archivo (mime, datos, creado_por) VALUES ($1,$2,$3) RETURNING id', [mime, datos, usuarioId]);
+  return f!.id;
+}
+
+/* -------------------------------------------------------------- webhook */
+/** Notifica a un sistema externo. Firma HMAC-SHA256 del cuerpo en X-Tanta-Firma. Nunca bloquea la operación. */
+export async function emitirEvento(evento: string, datos: unknown): Promise<void> {
+  try {
+    const cfg = await leerConfig('webhook') as { habilitado?: boolean; url?: string; secreto?: string; eventos?: string[] };
+    if (!cfg.habilitado || !cfg.url || !cfg.eventos?.includes(evento)) return;
+    const cuerpo = JSON.stringify({ evento, ocurridoEn: new Date().toISOString(), datos });
+    const firma = createHmac('sha256', cfg.secreto ?? '').update(cuerpo).digest('hex');
+    await fetch(cfg.url, {
+      method: 'POST', body: cuerpo, redirect: 'error', signal: AbortSignal.timeout(5000),
+      headers: { 'Content-Type': 'application/json', 'X-Tanta-Evento': evento, 'X-Tanta-Firma': `sha256=${firma}` },
+    });
+  } catch { /* ponytail: sin reintentos; agregar cola persistente si el receptor es crítico */ }
+}
+
+/* ------------------------------------------------------------ push FCM */
+let tokenGoogle: { valor: string; expira: number } | null = null;
+
+async function accesoGoogle(cuenta: { client_email: string; private_key: string }): Promise<string> {
+  if (tokenGoogle && tokenGoogle.expira > Date.now() + 60_000) return tokenGoogle.valor;
+  const llave = await importPKCS8(cuenta.private_key, 'RS256');
+  const jwt = await new SignJWT({ scope: 'https://www.googleapis.com/auth/firebase.messaging' })
+    .setProtectedHeader({ alg: 'RS256' }).setIssuer(cuenta.client_email).setAudience('https://oauth2.googleapis.com/token')
+    .setIssuedAt().setExpirationTime('1h').sign(llave);
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: AbortSignal.timeout(8000),
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
+  });
+  if (!r.ok) throw new Error(`Google rechazó la cuenta de servicio (${r.status})`);
+  const d = await r.json() as { access_token: string; expires_in: number };
+  tokenGoogle = { valor: d.access_token, expira: Date.now() + d.expires_in * 1000 };
+  return d.access_token;
+}
+
+/** Push a todos los dispositivos de un usuario (FCM HTTP v1). Devuelve cuántos se enviaron. */
+export async function enviarPush(usuarioId: string, titulo: string, cuerpo: string): Promise<number> {
+  const cfg = await leerConfig('firebase') as { habilitado?: boolean; projectId?: string; cuentaServicio?: string };
+  if (!cfg.habilitado || !cfg.projectId || !cfg.cuentaServicio) return 0;
+  const acceso = await accesoGoogle(JSON.parse(cfg.cuentaServicio));
+  const tokens = await q<{ token_push: string }>('SELECT token_push FROM core.dispositivo WHERE usuario_id = $1 AND token_push IS NOT NULL', [usuarioId]);
+  let enviados = 0;
+  for (const { token_push } of tokens) {
+    const r = await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}/messages:send`, {
+      method: 'POST', signal: AbortSignal.timeout(8000),
+      headers: { Authorization: `Bearer ${acceso}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: { token: token_push, notification: { title: titulo, body: cuerpo } } }),
+    });
+    if (r.ok) enviados++;
+    else if (r.status === 404 || r.status === 400) await q('UPDATE core.dispositivo SET token_push = NULL WHERE token_push = $1', [token_push]);
+  }
+  return enviados;
+}
+
+export async function rutasSistema(app: FastifyInstance) {
+  const fallo = (reply: { code: (n: number) => { send: (b: unknown) => unknown } }, e: unknown) => {
+    const err = e as Error & { status?: number; codigo?: string };
+    if (!err.status) throw e;
+    return reply.code(err.status).send(error(err.status, err.codigo ?? 'ERROR', err.message));
+  };
+
+  /* --------------------------------------- configuración pública (sin sesión) */
+  // Lo que la pantalla de login y la app necesitan antes de autenticarse. Nada secreto.
+  app.get('/config/publica', async (_req, reply) => {
+    const [marca, movil, legal, fb] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase')]);
+    const f = fb as Record<string, unknown>;
+    reply.header('Cache-Control', 'public, max-age=60');
+    return {
+      marca, movil, legal,
+      // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
+      firebase: f.habilitado ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
+    };
+  });
+
+  app.get('/archivos/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!z.string().uuid().safeParse(id).success) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Archivo no encontrado.'));
+    const f = await uno<{ mime: string; datos: Buffer }>('SELECT mime, datos FROM core.archivo WHERE id = $1', [id]);
+    if (!f) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Archivo no encontrado.'));
+    // El id es inmutable (un archivo nuevo = id nuevo): se puede cachear para siempre.
+    return reply.header('Content-Type', f.mime).header('Cache-Control', 'public, max-age=31536000, immutable')
+      .header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', "default-src 'none'").send(f.datos);
+  });
+
+  /* ------------------------------------------------- configuración (admin) */
+  app.get('/sistema/config', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const todo = await Promise.all(SECCIONES.map(async (s) => [s, enmascarar(s, await leerConfig(s))]));
+    return Object.fromEntries(todo);
+  });
+
+  app.put('/sistema/config/:seccion', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const { seccion } = req.params as { seccion: Seccion };
+    if (!SECCIONES.includes(seccion)) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Sección inexistente.'));
+    const anterior = await leerConfig(seccion);
+    const entrada = { ...(req.body as Config) };
+    // Un secreto que vuelve enmascarado significa "no lo cambié".
+    for (const k of SECRETOS[seccion] ?? []) if (entrada[k] === MASCARA) entrada[k] = anterior[k] ?? '';
+    const p = ESQUEMAS[seccion].safeParse(entrada);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(' · ')));
+    if (seccion === 'movil' && versionMenor(p.data.versionActual, p.data.versionMinima)) {
+      return reply.code(422).send(error(422, 'VERSION_INVALIDA', 'La versión mínima no puede ser mayor que la actual.'));
+    }
+    if (seccion === 'firebase' && p.data.cuentaServicio) {
+      try {
+        const c = JSON.parse(p.data.cuentaServicio);
+        if (!c.client_email || !c.private_key) throw new Error();
+      } catch { return reply.code(422).send(error(422, 'CUENTA_SERVICIO_INVALIDA', 'Pega el JSON completo de la cuenta de servicio de Firebase.')); }
+      tokenGoogle = null;
+    }
+    await q('UPDATE core.configuracion SET valor = $1, actualizado_en = now(), actualizado_por = $2 WHERE clave = $3', [p.data, req.usuario!.id, seccion]);
+    invalidar(`cfg:${seccion}`);
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CONFIG_CAMBIADA',
+      entidad: 'configuracion', entidadId: seccion, detalle: enmascarar(seccion, p.data), ip: req.ip });
+    return enmascarar(seccion, p.data);
+  });
+
+  app.post('/sistema/archivos', { preHandler: autenticar, bodyLimit: 1_500_000 }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const p = z.object({ base64: z.string().min(10) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Falta la imagen.'));
+    try { return reply.code(201).send({ id: await guardarImagen(p.data.base64, req.usuario!.id) }); } catch (e) { return fallo(reply, e); }
+  });
+
+  app.post('/sistema/webhook/probar', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const cfg = await leerConfig('webhook') as { url?: string; secreto?: string };
+    if (!cfg.url) return reply.code(422).send(error(422, 'SIN_URL', 'Configura primero la URL del webhook.'));
+    const cuerpo = JSON.stringify({ evento: 'prueba', ocurridoEn: new Date().toISOString(), datos: {} });
+    try {
+      const r = await fetch(cfg.url, { method: 'POST', body: cuerpo, redirect: 'error', signal: AbortSignal.timeout(5000),
+        headers: { 'Content-Type': 'application/json', 'X-Tanta-Evento': 'prueba',
+          'X-Tanta-Firma': `sha256=${createHmac('sha256', cfg.secreto ?? '').update(cuerpo).digest('hex')}` } });
+      return { ok: r.ok, status: r.status };
+    } catch (e) { return { ok: false, status: 0, detalle: (e as Error).message }; }
+  });
+
+  app.post('/sistema/push/probar', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    try { return { enviados: await enviarPush(req.usuario!.id, 'Tanta', 'Notificación de prueba') }; }
+    catch (e) { return reply.code(502).send(error(502, 'FIREBASE_ERROR', (e as Error).message)); }
+  });
+
+  app.get('/sistema/dispositivos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const movil = await leerConfig('movil') as { versionMinima?: string };
+    const filas = await q<Record<string, string>>(`
+      SELECT d.plataforma, d.version_app, d.ultimo_uso, (d.token_push IS NOT NULL) AS push, u.nombre, u.usuario
+      FROM core.dispositivo d JOIN core.usuario u ON u.id = d.usuario_id ORDER BY d.ultimo_uso DESC LIMIT 500`);
+    return filas.map((f) => ({ ...f, desactualizada: versionMenor(f.version_app, movil.versionMinima ?? '0.0.0') }));
+  });
+
+  /* ------------------------------------------------------ roles y permisos */
+  app.get('/sistema/roles', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'roles.gestionar')) return;
+    const [roles, permisos, asignados] = await Promise.all([
+      q('SELECT id, nombre, descripcion, perfil FROM core.rol ORDER BY orden'),
+      q('SELECT id, grupo, descripcion FROM core.permiso ORDER BY grupo, id'),
+      q<{ rol_id: string; permiso_id: string }>('SELECT rol_id, permiso_id FROM core.rol_permiso'),
+    ]);
+    return { roles, permisos, asignados: asignados.map((a) => `${a.rol_id}:${a.permiso_id}`) };
+  });
+
+  app.put('/sistema/roles/:id/permisos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'roles.gestionar')) return;
+    const { id } = req.params as { id: string };
+    // El superadmin siempre conserva todo: nadie (ni él mismo) puede dejar el sistema sin administrador.
+    if (id === 'SUPERADMIN') return reply.code(409).send(error(409, 'ROL_PROTEGIDO', 'El Superadministrador siempre tiene todos los permisos.'));
+    const p = z.object({ permisos: z.array(z.string().max(60)).max(200) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Lista de permisos inválida.'));
+    // Solo un superadmin reparte los permisos de sistema: evita que un rol se autoeleve.
+    const sistema = ['config.gestionar', 'roles.gestionar'];
+    if (req.usuario!.rol !== 'SUPERADMIN' && p.data.permisos.some((x) => sistema.includes(x))) {
+      return reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo el Superadministrador asigna permisos de sistema.'));
+    }
+    const antes = await q<{ permiso_id: string }>('SELECT permiso_id FROM core.rol_permiso WHERE rol_id = $1', [id]);
+    await tx(async (c) => {
+      if (!(await c.query('SELECT 1 FROM core.rol WHERE id = $1', [id])).rowCount) throw Object.assign(new Error('El rol no existe.'), { status: 404 });
+      await c.query('DELETE FROM core.rol_permiso WHERE rol_id = $1', [id]);
+      await c.query('INSERT INTO core.rol_permiso (rol_id, permiso_id) SELECT $1, id FROM core.permiso WHERE id = ANY($2::text[])', [id, p.data.permisos]);
+    }).catch((e) => fallo(reply, e));
+    if (reply.sent) return;
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'ROL_PERMISOS_CAMBIADOS',
+      entidad: 'rol', entidadId: id, detalle: { antes: antes.map((a) => a.permiso_id), despues: p.data.permisos }, ip: req.ip });
+    return { id, permisos: p.data.permisos };
+  });
+
+  /* ----------------------------------------------------------- mi perfil */
+  app.get('/perfil', { preHandler: autenticar }, async (req) => {
+    const u = await uno<Record<string, string>>(
+      `SELECT u.id, u.nombre, u.usuario, u.email, u.telefono, u.foto_id, u.creado_en, u.ultimo_acceso, r.nombre AS rol,
+              (SELECT count(*) FROM core.mfa_codigo m WHERE m.usuario_id = u.id AND m.usado_en IS NULL) AS codigos_mfa
+       FROM core.usuario u JOIN core.rol r ON r.id = $2 WHERE u.id = $1`, [req.usuario!.id, req.usuario!.rol]);
+    return { ...u, fotoUrl: u?.foto_id ? `/archivos/${u.foto_id}` : null };
+  });
+
+  const DatosPerfil = z.object({
+    nombre: z.string().trim().min(3).max(120),
+    email: z.union([z.literal(''), z.string().trim().email().max(160)]),
+    telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Solo números, espacios, +, ( ) y -'),
+  });
+
+  app.patch('/perfil', { preHandler: autenticar }, async (req, reply) => {
+    const p = DatosPerfil.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
+    await q('UPDATE core.usuario SET nombre = $1, email = $2, telefono = $3 WHERE id = $4', [p.data.nombre, p.data.email, p.data.telefono, req.usuario!.id]);
+    invalidar(`sesion:${req.usuario!.id}`);
+    await auditar({ actorId: req.usuario!.id, actor: p.data.nombre, rol: req.usuario!.rol, accion: 'PERFIL_ACTUALIZADO', entidad: 'usuario', entidadId: req.usuario!.id, ip: req.ip });
+    return p.data;
+  });
+
+  app.post('/perfil/clave', {
+    preHandler: autenticar,
+    config: { rateLimit: { max: Number(process.env.LOGIN_RATE_MAX ?? 8), timeWindow: '1 minute' } },
+  }, async (req, reply) => {
+    const p = z.object({ actual: z.string().min(1).max(128), nueva: z.string().min(10).max(128) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'CLAVE_DEBIL', 'La nueva contraseña debe tener al menos 10 caracteres.'));
+    if (p.data.actual === p.data.nueva) return reply.code(422).send(error(422, 'CLAVE_IGUAL', 'La nueva contraseña debe ser distinta.'));
+    const u = await uno<{ clave_hash: string }>('SELECT clave_hash FROM core.usuario WHERE id = $1', [req.usuario!.id]);
+    if (!u || !verificarClave(p.data.actual, u.clave_hash)) {
+      return reply.code(403).send(error(403, 'CLAVE_ACTUAL_INCORRECTA', 'La contraseña actual no es correcta.'));
+    }
+    await q('UPDATE core.usuario SET clave_hash = $1 WHERE id = $2', [hashClave(p.data.nueva), req.usuario!.id]);
+    // Cierra las sesiones en otros dispositivos: si alguien robó la clave, queda fuera.
+    await q('UPDATE core.refresh_token SET revocado_en = now() WHERE usuario_id = $1 AND revocado_en IS NULL', [req.usuario!.id]);
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CLAVE_CAMBIADA', entidad: 'usuario', entidadId: req.usuario!.id, ip: req.ip });
+    return { ok: true, sesionesCerradas: true };
+  });
+
+  app.put('/perfil/foto', { preHandler: autenticar, bodyLimit: 1_500_000 }, async (req, reply) => {
+    const p = z.object({ base64: z.string().min(10) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Falta la imagen.'));
+    try {
+      const id = await guardarImagen(p.data.base64, req.usuario!.id);
+      const previa = await uno<{ foto_id: string | null }>('SELECT foto_id FROM core.usuario WHERE id = $1', [req.usuario!.id]);
+      await q('UPDATE core.usuario SET foto_id = $1 WHERE id = $2', [id, req.usuario!.id]);
+      if (previa?.foto_id) await q('DELETE FROM core.archivo WHERE id = $1', [previa.foto_id]);
+      return { fotoUrl: `/archivos/${id}` };
+    } catch (e) { return fallo(reply, e); }
+  });
+
+  /**
+   * Eliminar mi cuenta (exigido por App Store 5.1.1(v) y Google Play).
+   * Los datos personales se borran; ventas y cobros se conservan anonimizados porque
+   * son registros contables (obligación tributaria, Ley 29733 art. 18 excepciones).
+   */
+  app.delete('/perfil', {
+    preHandler: autenticar,
+    config: { rateLimit: { max: Number(process.env.LOGIN_RATE_MAX ?? 8), timeWindow: '1 minute' } },
+  }, async (req, reply) => {
+    const p = z.object({ clave: z.string().min(1).max(128) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Confirma con tu contraseña.'));
+    if (req.usuario!.rol === 'SUPERADMIN') return reply.code(409).send(error(409, 'ROL_PROTEGIDO', 'El Superadministrador no puede eliminarse a sí mismo.'));
+    const u = await uno<{ clave_hash: string; foto_id: string | null }>('SELECT clave_hash, foto_id FROM core.usuario WHERE id = $1', [req.usuario!.id]);
+    if (!u || !verificarClave(p.data.clave, u.clave_hash)) return reply.code(403).send(error(403, 'CLAVE_ACTUAL_INCORRECTA', 'La contraseña no es correcta.'));
+    const id = req.usuario!.id;
+    await tx(async (c) => {
+      await c.query(`UPDATE core.usuario SET nombre = 'Cuenta eliminada', usuario = 'eliminado-' || left(id::text, 8),
+        email = '', telefono = '', foto_id = NULL, estado = 'BLOQUEADO', eliminado_en = now(), clave_hash = $2 WHERE id = $1`,
+        [id, hashClave(crypto.randomUUID())]);
+      if (u.foto_id) await c.query('DELETE FROM core.archivo WHERE id = $1', [u.foto_id]);
+      await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE usuario_id = $1 AND revocado_en IS NULL', [id]);
+      await c.query('DELETE FROM core.dispositivo WHERE usuario_id = $1', [id]);
+    });
+    invalidar(`sesion:${id}`);
+    await auditar({ actorId: id, actor: 'Cuenta eliminada', rol: req.usuario!.rol, accion: 'CUENTA_ELIMINADA', entidad: 'usuario', entidadId: id, ip: req.ip });
+    void emitirEvento('usuario.eliminado', { usuarioId: id });
+    return { ok: true };
+  });
+
+  /* ------------------------------------------- dispositivo y versión de app */
+  // La app lo llama al abrir: registra su versión (y token push) y recibe si debe actualizarse.
+  app.post('/dispositivo', { preHandler: autenticar }, async (req, reply) => {
+    const p = z.object({
+      instalacion: z.string().min(8).max(64), plataforma: z.enum(['android', 'ios', 'web']),
+      versionApp: semver, tokenPush: z.string().max(4096).nullable().optional(),
+    }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Datos del dispositivo inválidos.'));
+    const d = p.data;
+    await q(`INSERT INTO core.dispositivo (usuario_id, instalacion, plataforma, version_app, token_push)
+             VALUES ($1,$2,$3,$4,$5)
+             ON CONFLICT (usuario_id, instalacion) DO UPDATE SET plataforma = EXCLUDED.plataforma,
+               version_app = EXCLUDED.version_app, token_push = coalesce(EXCLUDED.token_push, core.dispositivo.token_push), ultimo_uso = now()`,
+      [req.usuario!.id, d.instalacion, d.plataforma, d.versionApp, d.tokenPush ?? null]);
+    const movil = await leerConfig('movil') as { versionMinima: string; versionActual: string; urlAndroid: string; urlIos: string; mensajeActualizacion: string };
+    return {
+      actualizacionObligatoria: versionMenor(d.versionApp, movil.versionMinima),
+      actualizacionDisponible: versionMenor(d.versionApp, movil.versionActual),
+      url: d.plataforma === 'ios' ? movil.urlIos : movil.urlAndroid,
+      mensaje: movil.mensajeActualizacion,
+    };
+  });
+}
