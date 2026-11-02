@@ -1,0 +1,67 @@
+name: APK de pruebas
+
+# Se lanza a mano desde GitHub → Actions → "APK de pruebas" → Run workflow,
+# o con: gh workflow run apk-pruebas.yml -f api_url=https://xxxx.trycloudflare.com
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Servidor (https://…trycloudflare.com). Se puede cambiar luego desde el login de la app.'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-pruebas
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Compilar APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar servidor
+        # Se pasa por variable de entorno, nunca interpolado en el script (evita inyección de comandos).
+        env:
+          API_URL: ${{ inputs.api_url }}
+        run: |
+          [[ "$API_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] || { echo "::error::Usa solo https://dominio"; exit 1; }
+          echo "API=${API_URL%/}/api/v1" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Análisis
+        run: flutter analyze
+
+      - name: Pruebas
+        run: flutter test
+
+      # Build de pruebas: firmada con la llave de debug (instalable a mano, no para Play)
+      # y con el servidor editable desde el login.
+      - name: Compilar
+        run: flutter build apk --release --dart-define=API_URL="$API" --dart-define=PRUEBAS=true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tanta-pruebas-apk
+          path: apps/mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14

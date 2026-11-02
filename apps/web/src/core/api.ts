@@ -7,8 +7,8 @@
  *   así un XSS no se lleva la sesión. Por eso todas las llamadas usan `credentials: 'include'`.
  */
 
-const BASE = import.meta.env.VITE_API_URL
-  ?? (import.meta.env.DEV ? 'http://127.0.0.1:3001/api/v1' : '/api/v1');
+// Mismo origen siempre: en desarrollo lo reenvía Vite, en producción Caddy.
+const BASE = import.meta.env.VITE_API_URL ?? '/api/v1';
 
 const CLAVE = 'tanta.acceso.v3';
 

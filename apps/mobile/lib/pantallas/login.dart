@@ -50,6 +50,34 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// Build de pruebas: apuntar la app a otro servidor (p. ej. un túnel de Cloudflare).
+  Future<void> _cambiarServidor() async {
+    final c = TextEditingController(text: Api.base.replaceAll('/api/v1', ''));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Servidor'),
+        content: TextField(
+          controller: c,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(labelText: 'https://…trycloudflare.com'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Usar')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Api.instancia.cambiarServidor(c.text);
+      if (mounted) setState(() => _error = null);
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -135,6 +163,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                 child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.cream50))
                             : const Text('Entrar al sistema'),
                       ),
+                      if (Api.pruebas) ...[
+                        const SizedBox(height: 14),
+                        TextButton.icon(
+                          onPressed: _cambiarServidor,
+                          icon: const Icon(Icons.dns_outlined, size: 18),
+                          label: Text('Servidor: ${Uri.tryParse(Api.base)?.host ?? Api.base}',
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
                       if (_esDemo) ...[
                         const SizedBox(height: 24),
                         const Text('ACCESO RÁPIDO DE DEMOSTRACIÓN',

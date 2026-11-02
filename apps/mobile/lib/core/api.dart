@@ -14,10 +14,16 @@ class Api {
   Api._();
   static final Api instancia = Api._();
 
-  static const String base = String.fromEnvironment(
+  static const String _baseCompilada = String.fromEnvironment(
     'API_URL',
     defaultValue: 'http://127.0.0.1:3001/api/v1',
   );
+
+  /// Build de pruebas (--dart-define=PRUEBAS=true): el servidor se cambia desde el login,
+  /// útil con túneles cuya URL cambia. En la build de tienda no existe esta opción.
+  static const bool pruebas = bool.fromEnvironment('PRUEBAS');
+
+  static String base = _baseCompilada;
 
   String? _acceso;
   String? _refresco;
@@ -42,6 +48,7 @@ class Api {
   static const _limite = Duration(seconds: 20);
 
   Future<void> cargarSesion() async {
+    if (pruebas) base = await _seguro.read(key: 'servidor') ?? _baseCompilada;
     // En producción solo HTTPS: un token nunca viaja en claro.
     if (kReleaseMode && !base.startsWith('https://')) {
       throw StateError('API_URL debe usar https:// en producción');
@@ -268,6 +275,20 @@ class Api {
       throw SinConexion();
     }
     return _decodificar(r);
+  }
+
+  /// Solo en la build de pruebas. Acepta "https://x.trycloudflare.com" y completa /api/v1.
+  /// Cambiar de servidor cierra la sesión: los tokens de otro servidor no sirven aquí.
+  Future<void> cambiarServidor(String url) async {
+    if (!pruebas) return;
+    var u = url.trim().replaceAll(RegExp(r'/+$'), '');
+    if (!u.startsWith('https://') && kReleaseMode) throw ApiException(422, 'El servidor debe usar https://');
+    if (Uri.tryParse(u)?.host.isEmpty ?? true) throw ApiException(422, 'Dirección inválida');
+    if (!u.endsWith('/api/v1')) u = '$u/api/v1';
+    await cerrarSesion();
+    base = u;
+    await _seguro.write(key: 'servidor', value: u);
+    await cargarConfig();
   }
 
   /* --------------------------------------------- configuración y perfil */
