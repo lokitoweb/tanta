@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/cola.dart';
+import '../core/comprobante.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
@@ -71,6 +72,20 @@ class _PedidosState extends State<Pedidos> {
             ? '${p['codigo']} → ${_etiqueta[destino]}'
             : 'Sin conexión · guardado, se enviará al volver la red'),
         backgroundColor: enviadas > 0 ? TantaColors.stateOk : TantaColors.stateWarn,
+        action: destino == 'DESPACHADO'
+            ? SnackBarAction(
+                label: 'Guía PDF',
+                textColor: Colors.white,
+                onPressed: () => compartirComprobante(
+                  titulo: 'Guía de despacho',
+                  numero: '${p['codigo']}',
+                  cliente: '${p['cliente'] ?? '-'}',
+                  lineas: [('Pedido ${p['codigo']}', dinero(((p['total'] as num?) ?? 0).toDouble()))],
+                  total: dinero(((p['total'] as num?) ?? 0).toDouble()),
+                  vendedor: Api.instancia.nombre,
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -261,6 +276,18 @@ class _CobranzaState extends State<Cobranza> {
         SnackBar(
           content: Text('Pago de ${dinero(monto)} registrado'),
           backgroundColor: TantaColors.stateOk,
+          action: SnackBarAction(
+            label: 'Recibo PDF',
+            textColor: Colors.white,
+            onPressed: () => compartirComprobante(
+              titulo: 'Recibo de cobro',
+              numero: 'REC-${DateTime.now().millisecondsSinceEpoch}',
+              cliente: '${c['cliente']}',
+              lineas: [('Pago ${medio.value}', dinero(monto))],
+              total: dinero(monto),
+              vendedor: Api.instancia.nombre,
+            ),
+          ),
         ),
       );
     } else {

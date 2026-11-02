@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Cliente HTTP del API de Tanta.
@@ -26,18 +28,34 @@ class Api {
 
   bool get autenticado => _acceso != null;
 
+  /// Tokens en Keychain (iOS) / Keystore (Android), nunca en SharedPreferences (texto plano).
+  static const _seguro = FlutterSecureStorage();
+
+  /// Tiempo máximo por petición: con mala señal la app avisa en vez de quedarse colgada.
+  static const _limite = Duration(seconds: 20);
+
   Future<void> cargarSesion() async {
+    // En producción solo HTTPS: un token nunca viaja en claro.
+    if (kReleaseMode && !base.startsWith('https://')) {
+      throw StateError('API_URL debe usar https:// en producción');
+    }
+    _acceso = await _seguro.read(key: 'acceso');
+    _refresco = await _seguro.read(key: 'refresco');
+    // Migración única desde versiones que guardaban en SharedPreferences.
     final p = await SharedPreferences.getInstance();
-    _acceso = p.getString('acceso');
-    _refresco = p.getString('refresco');
+    final viejo = p.getString('refresco');
+    if (_refresco == null && viejo != null) {
+      await _guardar(p.getString('acceso') ?? '', viejo);
+    }
+    await p.remove('acceso');
+    await p.remove('refresco');
   }
 
   Future<void> _guardar(String acceso, String refresco) async {
     _acceso = acceso;
     _refresco = refresco;
-    final p = await SharedPreferences.getInstance();
-    await p.setString('acceso', acceso);
-    await p.setString('refresco', refresco);
+    await _seguro.write(key: 'acceso', value: acceso);
+    await _seguro.write(key: 'refresco', value: refresco);
   }
 
   Future<void> cerrarSesion() async {
@@ -47,9 +65,8 @@ class Api {
     rol = '';
     permisos = const [];
     menu = const [];
-    final p = await SharedPreferences.getInstance();
-    await p.remove('acceso');
-    await p.remove('refresco');
+    await _seguro.delete(key: 'acceso');
+    await _seguro.delete(key: 'refresco');
   }
 
   Map<String, String> _cabeceras({bool conCuerpo = false}) => {
@@ -70,7 +87,12 @@ class Api {
     return Future.value(jsonDecode(r.body));
   }
 
-  Future<bool> _refrescar() async {
+  // Un solo refresco en vuelo: el servidor rota el token y detecta reuso, así que dos
+  // refrescos paralelos (cola offline + pantalla) cerrarían la sesión.
+  Future<bool>? _refrescando;
+  Future<bool> _refrescar() => _refrescando ??= _hacerRefresco().whenComplete(() => _refrescando = null);
+
+  Future<bool> _hacerRefresco() async {
     final actual = _refresco;
     if (actual == null || actual.isEmpty) return false;
     late http.Response r;
@@ -79,7 +101,7 @@ class Api {
         Uri.parse('$base/auth/refresh'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'refreshToken': actual}),
-      );
+      ).timeout(_limite);
     } catch (_) {
       return false; // sin red: se reintenta cuando vuelva
     }
@@ -95,9 +117,9 @@ class Api {
   Future<dynamic> _get(String ruta, {bool reintentar = true}) async {
     late http.Response r;
     try {
-      r = await http.get(Uri.parse('$base$ruta'), headers: _cabeceras());
+      r = await http.get(Uri.parse('$base$ruta'), headers: _cabeceras()).timeout(_limite);
       if (r.statusCode == 401 && reintentar && await _refrescar()) {
-        r = await http.get(Uri.parse('$base$ruta'), headers: _cabeceras());
+        r = await http.get(Uri.parse('$base$ruta'), headers: _cabeceras()).timeout(_limite);
       }
     } on ApiException {
       rethrow;
@@ -127,9 +149,9 @@ class Api {
 
     late http.Response r;
     try {
-      r = await http.post(Uri.parse('$base$ruta'), headers: cabeceras(), body: jsonEncode(cuerpo));
+      r = await http.post(Uri.parse('$base$ruta'), headers: cabeceras(), body: jsonEncode(cuerpo)).timeout(_limite);
       if (r.statusCode == 401 && !sinAuth && reintentar && await _refrescar()) {
-        r = await http.post(Uri.parse('$base$ruta'), headers: cabeceras(), body: jsonEncode(cuerpo));
+        r = await http.post(Uri.parse('$base$ruta'), headers: cabeceras(), body: jsonEncode(cuerpo)).timeout(_limite);
       }
     } catch (_) {
       // Sin red: la operación queda pendiente y se reintenta sola.
@@ -224,7 +246,7 @@ class Api {
         Uri.parse('$base/pedidos/$codigo/estado'),
         headers: _cabeceras(conCuerpo: true),
         body: jsonEncode({'estado': estado}),
-      );
+      ).timeout(_limite);
     } catch (_) {
       throw SinConexion();
     }
