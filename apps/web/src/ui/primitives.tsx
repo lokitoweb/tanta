@@ -1,0 +1,174 @@
+import type { ReactNode } from 'react';
+import { Icon, type NombreIcono } from './icons';
+
+/* ---------- Marca ---------- */
+
+export function BrandMark({ variant = 'light', size = 'md' }: { variant?: 'light' | 'dark'; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
+  return (
+    <div className={`brandmark brandmark--${variant} brandmark--${size}`}>
+      <span className="brandmark__word">TANTA</span>
+      <span className="brandmark__pill">PAN DE CASA</span>
+    </div>
+  );
+}
+
+/* ---------- Botón ---------- */
+
+interface BtnProps {
+  children: ReactNode;
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  size?: 'sm' | 'md' | 'lg';
+  icono?: NombreIcono;
+  iconoDer?: NombreIcono;
+  full?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  type?: 'button' | 'submit';
+  title?: string;
+}
+
+export function Boton({ children, variant = 'secondary', size = 'md', icono, iconoDer, full, onClick, disabled, type = 'button', title }: BtnProps) {
+  return (
+    <button
+      type={type}
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={`btn btn--${variant} btn--${size} ${full ? 'btn--full' : ''}`}
+    >
+      {icono && <Icon name={icono} size={size === 'lg' ? 20 : 16} />}
+      <span>{children}</span>
+      {iconoDer && <Icon name={iconoDer} size={size === 'lg' ? 20 : 16} />}
+    </button>
+  );
+}
+
+/* ---------- Tarjeta ---------- */
+
+export function Tarjeta({ children, className = '', padding = 'normal' }: { children: ReactNode; className?: string; padding?: 'none' | 'normal' | 'amplio' }) {
+  return <section className={`card card--${padding} ${className}`}>{children}</section>;
+}
+
+export function TarjetaTitulo({ titulo, subtitulo, accion }: { titulo: string; subtitulo?: string; accion?: ReactNode }) {
+  return (
+    <header className="card__head">
+      <div>
+        <h3 className="card__title">{titulo}</h3>
+        {subtitulo && <p className="card__sub">{subtitulo}</p>}
+      </div>
+      {accion}
+    </header>
+  );
+}
+
+/* ---------- Insignia ---------- */
+
+export type Tono = 'ok' | 'warn' | 'danger' | 'info' | 'neutral' | 'ink';
+
+export function Insignia({ children, tono = 'neutral', punto = false }: { children: ReactNode; tono?: Tono; punto?: boolean }) {
+  return (
+    <span className={`badge badge--${tono}`}>
+      {punto && <i className="badge__dot" />}
+      {children}
+    </span>
+  );
+}
+
+/* ---------- KPI ---------- */
+
+export function Kpi({ label, valor, delta, deltaTono, nota, icono }: { label: string; valor: string; delta?: string; deltaTono?: 'up' | 'down' | 'flat'; nota?: string; icono?: NombreIcono }) {
+  return (
+    <div className="kpi">
+      <div className="kpi__top">
+        <span className="kpi__label">{label}</span>
+        {icono && <span className="kpi__icon"><Icon name={icono} size={16} /></span>}
+      </div>
+      <div className="kpi__value">{valor}</div>
+      <div className="kpi__foot">
+        {delta && (
+          <span className={`kpi__delta kpi__delta--${deltaTono ?? 'flat'}`}>
+            <Icon name={deltaTono === 'down' ? 'down' : 'up'} size={13} />
+            {delta}
+          </span>
+        )}
+        {nota && <span className="kpi__nota">{nota}</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Barra de progreso ---------- */
+
+export function Progreso({ valor, tono = 'ink' }: { valor: number; tono?: 'ink' | 'ok' | 'warn' | 'danger' }) {
+  const p = Math.max(0, Math.min(1, valor));
+  return (
+    <div className="progress">
+      <div className={`progress__fill progress__fill--${tono}`} style={{ width: `${p * 100}%` }} />
+    </div>
+  );
+}
+
+/* ---------- Segmentado ---------- */
+
+export function Segmentado<T extends string>({ opciones, valor, onChange }: { opciones: Array<{ id: T; etiqueta: string }>; valor: T; onChange: (v: T) => void }) {
+  return (
+    <div className="segmented" role="tablist">
+      {opciones.map((o) => (
+        <button key={o.id} role="tab" aria-selected={o.id === valor}
+          className={`segmented__item ${o.id === valor ? 'is-active' : ''}`}
+          onClick={() => onChange(o.id)}>
+          {o.etiqueta}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Buscador ---------- */
+
+export function Buscador({ valor, onChange, placeholder = 'Buscar…' }: { valor: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <label className="search">
+      <Icon name="search" size={16} />
+      <input value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+      {valor && (
+        <button className="search__clear" onClick={() => onChange('')} aria-label="Limpiar">
+          <Icon name="close" size={14} />
+        </button>
+      )}
+    </label>
+  );
+}
+
+/* ---------- Encabezado de página ---------- */
+
+export function Encabezado({ titulo, descripcion, acciones }: { titulo: string; descripcion?: string; acciones?: ReactNode }) {
+  return (
+    <div className="page-head">
+      <div>
+        <h1 className="page-head__title">{titulo}</h1>
+        {descripcion && <p className="page-head__desc">{descripcion}</p>}
+      </div>
+      {acciones && <div className="page-head__actions">{acciones}</div>}
+    </div>
+  );
+}
+
+/* ---------- Vacío ---------- */
+
+export function Vacio({ titulo, detalle, icono = 'box' }: { titulo: string; detalle?: string; icono?: NombreIcono }) {
+  return (
+    <div className="empty">
+      <div className="empty__icon"><Icon name={icono} size={22} /></div>
+      <p className="empty__title">{titulo}</p>
+      {detalle && <p className="empty__text">{detalle}</p>}
+    </div>
+  );
+}
+
+/* ---------- Avatar ---------- */
+
+export function Avatar({ nombre, size = 'md' }: { nombre: string; size?: 'sm' | 'md' }) {
+  const ini = nombre.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('');
+  return <span className={`avatar avatar--${size}`}>{ini}</span>;
+}

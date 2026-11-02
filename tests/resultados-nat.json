@@ -1,0 +1,100 @@
+{
+  "etiqueta": "nat",
+  "inicio": "2026-11-02T00:36:23.942Z",
+  "fin": "2026-11-02T00:36:42.109Z",
+  "duracionSeg": 15,
+  "config": {
+    "concurrencia": 5,
+    "duracion": 15,
+    "calentamiento": 2,
+    "base": "http://127.0.0.1:3001/api/v1",
+    "clave": "tanta",
+    "etiqueta": "nat",
+    "salida": "tests/resultados-nat.json",
+    "xff": "off",
+    "idempotencia": false,
+    "pausa": 0,
+    "timeout": 30000,
+    "semilla": 20261101,
+    "fixtures": "tests/fixtures.json",
+    "solo": [
+      "datos"
+    ]
+  },
+  "logins": [
+    {
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "ms": 336.7
+    },
+    {
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "ms": 270.3
+    },
+    {
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "ms": 209.4
+    },
+    {
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "ms": 168.2
+    }
+  ],
+  "usuariosPorPersona": {
+    "osquilcate": 2,
+    "rquispe": 1,
+    "cmedina": 1,
+    "jramos": 1
+  },
+  "mezclaObjetivo": {
+    "GET /datos": 60,
+    "GET /kardex/INS-001": 15,
+    "POST /ventas": 20,
+    "POST /cobranza": 5
+  },
+  "mezclaRealPct": {
+    "GET /datos": 100
+  },
+  "totales": {
+    "n": 5186,
+    "rps": 345.69,
+    "errores": 4989,
+    "tasaError": 96.2,
+    "p50": 4.8,
+    "p90": 9.9,
+    "p95": 22.8,
+    "p99": 276.3,
+    "max": 496
+  },
+  "endpoints": [
+    {
+      "endpoint": "GET /datos",
+      "n": 5186,
+      "rps": 345.69,
+      "p50": 4.8,
+      "p90": 9.9,
+      "p95": 22.8,
+      "p99": 276.3,
+      "max": 496,
+      "media": 14.4,
+      "errores": 4989,
+      "tasaError": 96.2,
+      "estados": {
+        "200": 197,
+        "429": 4989
+      },
+      "codigos": [
+        {
+          "status": 429,
+          "codigo": "ERROR_INTERNO",
+          "n": 4989,
+          "mensaje": "Rate limit exceeded, retry in 49 seconds"
+        }
+      ],
+      "kbytes": 6653.4
+    }
+  ]
+}

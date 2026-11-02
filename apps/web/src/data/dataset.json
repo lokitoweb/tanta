@@ -1,0 +1,1898 @@
+{
+  "generadoEn": "2026-11-01T08:00:00-05:00",
+  "periodo": {
+    "desde": "2026-10-02",
+    "hasta": "2026-10-31",
+    "etiqueta": "Octubre 2026",
+    "estado": "PROVISIONAL"
+  },
+  "negocio": {
+    "nombre": "Panadería Tanta",
+    "ruc": "20481234567",
+    "direccion": "Av. Los Álamos 452, Santiago de Surco, Lima",
+    "telefono": "985 649 922",
+    "representante": "Oscar Quilcate Rosell",
+    "igv": 0.18,
+    "moneda": "PEN",
+    "margenObjetivoGlobal": 0.52
+  },
+  "kpis": {
+    "ventasNetas": 77228.14,
+    "costoVentas": 43170.58,
+    "utilidadBruta": 34057.56,
+    "margen": 0.441,
+    "margenObjetivo": 0.52,
+    "tickets": 4199,
+    "ticketPromedio": 18.39,
+    "variacionVentas": 0.084,
+    "variacionMargen": -0.013,
+    "porCobrar": 1838.2,
+    "vencido": 536.8,
+    "mermaValorizada": 486.2,
+    "mermaPct": 0.019
+  },
+  "dias": [
+    {
+      "fecha": "2026-10-02",
+      "ventasNetas": 2237.2,
+      "costo": 1286.39,
+      "utilidad": 950.81,
+      "margen": 0.425,
+      "tickets": 122
+    },
+    {
+      "fecha": "2026-10-03",
+      "ventasNetas": 3290.11,
+      "costo": 1793.11,
+      "utilidad": 1497,
+      "margen": 0.455,
+      "tickets": 179
+    },
+    {
+      "fecha": "2026-10-04",
+      "ventasNetas": 3198.72,
+      "costo": 1759.3,
+      "utilidad": 1439.42,
+      "margen": 0.45,
+      "tickets": 174
+    },
+    {
+      "fecha": "2026-10-05",
+      "ventasNetas": 2427.6,
+      "costo": 1347.32,
+      "utilidad": 1080.28,
+      "margen": 0.445,
+      "tickets": 132
+    },
+    {
+      "fecha": "2026-10-06",
+      "ventasNetas": 2356.2,
+      "costo": 1319.47,
+      "utilidad": 1036.73,
+      "margen": 0.44,
+      "tickets": 128
+    },
+    {
+      "fecha": "2026-10-07",
+      "ventasNetas": 2284.8,
+      "costo": 1290.91,
+      "utilidad": 993.89,
+      "margen": 0.435,
+      "tickets": 124
+    },
+    {
+      "fecha": "2026-10-08",
+      "ventasNetas": 2213.4,
+      "costo": 1261.64,
+      "utilidad": 951.76,
+      "margen": 0.43,
+      "tickets": 120
+    },
+    {
+      "fecha": "2026-10-09",
+      "ventasNetas": 2546.6,
+      "costo": 1464.3,
+      "utilidad": 1082.3,
+      "margen": 0.425,
+      "tickets": 138
+    },
+    {
+      "fecha": "2026-10-10",
+      "ventasNetas": 3168.26,
+      "costo": 1726.7,
+      "utilidad": 1441.56,
+      "margen": 0.455,
+      "tickets": 172
+    },
+    {
+      "fecha": "2026-10-11",
+      "ventasNetas": 3076.86,
+      "costo": 1692.27,
+      "utilidad": 1384.59,
+      "margen": 0.45,
+      "tickets": 167
+    },
+    {
+      "fecha": "2026-10-12",
+      "ventasNetas": 2332.4,
+      "costo": 1294.48,
+      "utilidad": 1037.92,
+      "margen": 0.445,
+      "tickets": 127
+    },
+    {
+      "fecha": "2026-10-13",
+      "ventasNetas": 2261,
+      "costo": 1266.16,
+      "utilidad": 994.84,
+      "margen": 0.44,
+      "tickets": 123
+    },
+    {
+      "fecha": "2026-10-14",
+      "ventasNetas": 2189.6,
+      "costo": 1237.12,
+      "utilidad": 952.48,
+      "margen": 0.435,
+      "tickets": 119
+    },
+    {
+      "fecha": "2026-10-15",
+      "ventasNetas": 2522.8,
+      "costo": 1438,
+      "utilidad": 1084.8,
+      "margen": 0.43,
+      "tickets": 137
+    },
+    {
+      "fecha": "2026-10-16",
+      "ventasNetas": 2451.4,
+      "costo": 1409.56,
+      "utilidad": 1041.84,
+      "margen": 0.425,
+      "tickets": 133
+    },
+    {
+      "fecha": "2026-10-17",
+      "ventasNetas": 3046.4,
+      "costo": 1660.29,
+      "utilidad": 1386.11,
+      "margen": 0.455,
+      "tickets": 166
+    },
+    {
+      "fecha": "2026-10-18",
+      "ventasNetas": 2955.01,
+      "costo": 1625.26,
+      "utilidad": 1329.75,
+      "margen": 0.45,
+      "tickets": 161
+    },
+    {
+      "fecha": "2026-10-19",
+      "ventasNetas": 2237.2,
+      "costo": 1241.65,
+      "utilidad": 995.55,
+      "margen": 0.445,
+      "tickets": 122
+    },
+    {
+      "fecha": "2026-10-20",
+      "ventasNetas": 2570.4,
+      "costo": 1439.42,
+      "utilidad": 1130.98,
+      "margen": 0.44,
+      "tickets": 140
+    },
+    {
+      "fecha": "2026-10-21",
+      "ventasNetas": 2499,
+      "costo": 1411.94,
+      "utilidad": 1087.06,
+      "margen": 0.435,
+      "tickets": 136
+    },
+    {
+      "fecha": "2026-10-22",
+      "ventasNetas": 2427.6,
+      "costo": 1383.73,
+      "utilidad": 1043.87,
+      "margen": 0.43,
+      "tickets": 132
+    },
+    {
+      "fecha": "2026-10-23",
+      "ventasNetas": 2356.2,
+      "costo": 1354.82,
+      "utilidad": 1001.38,
+      "margen": 0.425,
+      "tickets": 128
+    },
+    {
+      "fecha": "2026-10-24",
+      "ventasNetas": 2924.54,
+      "costo": 1593.87,
+      "utilidad": 1330.67,
+      "margen": 0.455,
+      "tickets": 159
+    },
+    {
+      "fecha": "2026-10-25",
+      "ventasNetas": 2833.15,
+      "costo": 1558.23,
+      "utilidad": 1274.92,
+      "margen": 0.45,
+      "tickets": 154
+    },
+    {
+      "fecha": "2026-10-26",
+      "ventasNetas": 2546.6,
+      "costo": 1413.36,
+      "utilidad": 1133.24,
+      "margen": 0.445,
+      "tickets": 138
+    },
+    {
+      "fecha": "2026-10-27",
+      "ventasNetas": 2475.2,
+      "costo": 1386.11,
+      "utilidad": 1089.09,
+      "margen": 0.44,
+      "tickets": 135
+    },
+    {
+      "fecha": "2026-10-28",
+      "ventasNetas": 2403.8,
+      "costo": 1358.15,
+      "utilidad": 1045.65,
+      "margen": 0.435,
+      "tickets": 131
+    },
+    {
+      "fecha": "2026-10-29",
+      "ventasNetas": 2332.4,
+      "costo": 1329.47,
+      "utilidad": 1002.93,
+      "margen": 0.43,
+      "tickets": 127
+    },
+    {
+      "fecha": "2026-10-30",
+      "ventasNetas": 2261,
+      "costo": 1300.08,
+      "utilidad": 960.92,
+      "margen": 0.425,
+      "tickets": 123
+    },
+    {
+      "fecha": "2026-10-31",
+      "ventasNetas": 2802.69,
+      "costo": 1527.47,
+      "utilidad": 1275.22,
+      "margen": 0.455,
+      "tickets": 152
+    }
+  ],
+  "categorias": [
+    {
+      "id": "pan",
+      "nombre": "Pan",
+      "ventas": 2498.97,
+      "costo": 1475.4,
+      "utilidad": 1023.57,
+      "margen": 0.4096,
+      "margenObjetivo": 0.45,
+      "participacion": 0.03236
+    },
+    {
+      "id": "pasteleria",
+      "nombre": "Pastelería",
+      "ventas": 2415.77,
+      "costo": 1029.8,
+      "utilidad": 1385.97,
+      "margen": 0.57372,
+      "margenObjetivo": 0.6,
+      "participacion": 0.03128
+    },
+    {
+      "id": "tortas",
+      "nombre": "Tortas",
+      "ventas": 1291.53,
+      "costo": 617.9,
+      "utilidad": 673.63,
+      "margen": 0.52158,
+      "margenObjetivo": 0.55,
+      "participacion": 0.01672
+    },
+    {
+      "id": "bebidas",
+      "nombre": "Bebidas",
+      "ventas": 2906.79,
+      "costo": 1286,
+      "utilidad": 1620.79,
+      "margen": 0.55759,
+      "margenObjetivo": 0.5,
+      "participacion": 0.03764
+    }
+  ],
+  "productos": [
+    {
+      "id": "PRD-001",
+      "codigo": "P001",
+      "nombre": "Pan francés",
+      "categoriaId": "pan",
+      "unidad": "UNIDAD",
+      "precioConIgv": 0.5,
+      "precioNeto": 0.4237,
+      "costoUnitario": 0.36,
+      "margen": 0.1504,
+      "margenObjetivo": 0.45,
+      "vendidos30d": 1200,
+      "stock": 72,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-002",
+      "codigo": "P002",
+      "nombre": "Pan ciabatta",
+      "categoriaId": "pan",
+      "unidad": "UNIDAD",
+      "precioConIgv": 2.36,
+      "precioNeto": 2,
+      "costoUnitario": 0.9,
+      "margen": 0.55,
+      "margenObjetivo": 0.45,
+      "vendidos30d": 260,
+      "stock": 16,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-003",
+      "codigo": "P003",
+      "nombre": "Pan de yema",
+      "categoriaId": "pan",
+      "unidad": "UNIDAD",
+      "precioConIgv": 0.6,
+      "precioNeto": 0.5085,
+      "costoUnitario": 0.39,
+      "margen": 0.233,
+      "margenObjetivo": 0.45,
+      "vendidos30d": 540,
+      "stock": 32,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-004",
+      "codigo": "P004",
+      "nombre": "Pan integral de molde",
+      "categoriaId": "pan",
+      "unidad": "UNIDAD",
+      "precioConIgv": 9.9,
+      "precioNeto": 8.3898,
+      "costoUnitario": 5.1,
+      "margen": 0.39212,
+      "margenObjetivo": 0.45,
+      "vendidos30d": 48,
+      "stock": 3,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-005",
+      "codigo": "P005",
+      "nombre": "Bagguette artesanal",
+      "categoriaId": "pan",
+      "unidad": "UNIDAD",
+      "precioConIgv": 4.5,
+      "precioNeto": 3.8136,
+      "costoUnitario": 1.85,
+      "margen": 0.51489,
+      "margenObjetivo": 0.45,
+      "vendidos30d": 96,
+      "stock": 6,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-006",
+      "codigo": "P006",
+      "nombre": "Empanada de carne",
+      "categoriaId": "pasteleria",
+      "unidad": "UNIDAD",
+      "precioConIgv": 4.5,
+      "precioNeto": 3.8136,
+      "costoUnitario": 1.72,
+      "margen": 0.54898,
+      "margenObjetivo": 0.6,
+      "vendidos30d": 210,
+      "stock": 13,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-007",
+      "codigo": "P007",
+      "nombre": "Croissant de mantequilla",
+      "categoriaId": "pasteleria",
+      "unidad": "UNIDAD",
+      "precioConIgv": 5.5,
+      "precioNeto": 4.661,
+      "costoUnitario": 2.1,
+      "margen": 0.54945,
+      "margenObjetivo": 0.6,
+      "vendidos30d": 140,
+      "stock": 8,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-008",
+      "codigo": "P008",
+      "nombre": "Alfajor de manjar",
+      "categoriaId": "pasteleria",
+      "unidad": "UNIDAD",
+      "precioConIgv": 3.5,
+      "precioNeto": 2.9661,
+      "costoUnitario": 1.05,
+      "margen": 0.646,
+      "margenObjetivo": 0.6,
+      "vendidos30d": 180,
+      "stock": 11,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-009",
+      "codigo": "P009",
+      "nombre": "Pionono de lúcuma",
+      "categoriaId": "pasteleria",
+      "unidad": "PORCIÓN",
+      "precioConIgv": 7.9,
+      "precioNeto": 6.6949,
+      "costoUnitario": 2.9,
+      "margen": 0.56684,
+      "margenObjetivo": 0.6,
+      "vendidos30d": 64,
+      "stock": 4,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-010",
+      "codigo": "P010",
+      "nombre": "Torta de chocolate",
+      "categoriaId": "tortas",
+      "unidad": "UNIDAD",
+      "precioConIgv": 45,
+      "precioNeto": 38.1356,
+      "costoUnitario": 17.6,
+      "margen": 0.53849,
+      "margenObjetivo": 0.55,
+      "vendidos30d": 14,
+      "stock": 1,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-011",
+      "codigo": "P011",
+      "nombre": "Torta de tres leches",
+      "categoriaId": "tortas",
+      "unidad": "UNIDAD",
+      "precioConIgv": 42,
+      "precioNeto": 35.5932,
+      "costoUnitario": 17.9,
+      "margen": 0.4971,
+      "margenObjetivo": 0.55,
+      "vendidos30d": 11,
+      "stock": 1,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-012",
+      "codigo": "P012",
+      "nombre": "Cheesecake de maracuyá",
+      "categoriaId": "tortas",
+      "unidad": "UNIDAD",
+      "precioConIgv": 48,
+      "precioNeto": 40.678,
+      "costoUnitario": 19.4,
+      "margen": 0.52308,
+      "margenObjetivo": 0.55,
+      "vendidos30d": 9,
+      "stock": 1,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-013",
+      "codigo": "P013",
+      "nombre": "Café pasado",
+      "categoriaId": "bebidas",
+      "unidad": "VASO",
+      "precioConIgv": 5,
+      "precioNeto": 4.2373,
+      "costoUnitario": 1.6,
+      "margen": 0.6224,
+      "margenObjetivo": 0.5,
+      "vendidos30d": 320,
+      "stock": 19,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-014",
+      "codigo": "P014",
+      "nombre": "Chocolate caliente",
+      "categoriaId": "bebidas",
+      "unidad": "VASO",
+      "precioConIgv": 7,
+      "precioNeto": 5.9322,
+      "costoUnitario": 2.8,
+      "margen": 0.528,
+      "margenObjetivo": 0.5,
+      "vendidos30d": 150,
+      "stock": 9,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-015",
+      "codigo": "P015",
+      "nombre": "Jugo de naranja",
+      "categoriaId": "bebidas",
+      "unidad": "VASO",
+      "precioConIgv": 6.5,
+      "precioNeto": 5.5085,
+      "costoUnitario": 2.95,
+      "margen": 0.46446,
+      "margenObjetivo": 0.5,
+      "vendidos30d": 120,
+      "stock": 7,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "PRD-016",
+      "codigo": "P016",
+      "nombre": "Pan de masa madre",
+      "categoriaId": "pan",
+      "unidad": "UNIDAD",
+      "precioConIgv": 12,
+      "precioNeto": 10.1695,
+      "costoUnitario": 4.2,
+      "margen": 0.587,
+      "margenObjetivo": 0.45,
+      "vendidos30d": 42,
+      "stock": 3,
+      "mermaPct": 0.03,
+      "estado": "ACTIVO"
+    }
+  ],
+  "recetas": [
+    {
+      "id": "REC-001",
+      "productoId": "PRD-001",
+      "producto": "Pan francés",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.053,
+          "cpp": 3.95,
+          "costo": 0.2094
+        },
+        {
+          "insumoId": "INS-004",
+          "insumo": "Levadura fresca",
+          "unidad": "KG",
+          "cantidad": 0.001,
+          "cpp": 12.5,
+          "costo": 0.0125
+        },
+        {
+          "insumoId": "INS-008",
+          "insumo": "Sal",
+          "unidad": "KG",
+          "cantidad": 0.001,
+          "cpp": 1.1,
+          "costo": 0.0011
+        }
+      ],
+      "costoInsumos": 0.223,
+      "costoConMerma": 0.2299,
+      "cifUnit": 0.1301,
+      "costoUnitario": 0.36,
+      "margen": 0.1504
+    },
+    {
+      "id": "REC-002",
+      "productoId": "PRD-002",
+      "producto": "Pan ciabatta",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.102,
+          "cpp": 3.95,
+          "costo": 0.4029
+        },
+        {
+          "insumoId": "INS-004",
+          "insumo": "Levadura fresca",
+          "unidad": "KG",
+          "cantidad": 0.003,
+          "cpp": 12.5,
+          "costo": 0.0375
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.004,
+          "cpp": 28.9,
+          "costo": 0.1156
+        },
+        {
+          "insumoId": "INS-008",
+          "insumo": "Sal",
+          "unidad": "KG",
+          "cantidad": 0.001,
+          "cpp": 1.1,
+          "costo": 0.0011
+        }
+      ],
+      "costoInsumos": 0.5571,
+      "costoConMerma": 0.5743,
+      "cifUnit": 0.3257,
+      "costoUnitario": 0.9,
+      "margen": 0.55
+    },
+    {
+      "id": "REC-003",
+      "productoId": "PRD-003",
+      "producto": "Pan de yema",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.036,
+          "cpp": 3.95,
+          "costo": 0.1422
+        },
+        {
+          "insumoId": "INS-007",
+          "insumo": "Huevos",
+          "unidad": "UNIDAD",
+          "cantidad": 0.009,
+          "cpp": 0.62,
+          "costo": 0.0056
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.004,
+          "cpp": 3.2,
+          "costo": 0.0128
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.003,
+          "cpp": 28.9,
+          "costo": 0.0867
+        }
+      ],
+      "costoInsumos": 0.2473,
+      "costoConMerma": 0.2549,
+      "cifUnit": 0.1351,
+      "costoUnitario": 0.39,
+      "margen": 0.233
+    },
+    {
+      "id": "REC-004",
+      "productoId": "PRD-004",
+      "producto": "Pan integral de molde",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-002",
+          "insumo": "Harina integral",
+          "unidad": "KG",
+          "cantidad": 0.417,
+          "cpp": 4.2,
+          "costo": 1.7514
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.033,
+          "cpp": 3.2,
+          "costo": 0.1056
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.042,
+          "cpp": 28.9,
+          "costo": 1.2138
+        },
+        {
+          "insumoId": "INS-004",
+          "insumo": "Levadura fresca",
+          "unidad": "KG",
+          "cantidad": 0.008,
+          "cpp": 12.5,
+          "costo": 0.1
+        }
+      ],
+      "costoInsumos": 3.1708,
+      "costoConMerma": 3.2689,
+      "cifUnit": 1.8311,
+      "costoUnitario": 5.1,
+      "margen": 0.39212
+    },
+    {
+      "id": "REC-005",
+      "productoId": "PRD-005",
+      "producto": "Bagguette artesanal",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.273,
+          "cpp": 3.95,
+          "costo": 1.0784
+        },
+        {
+          "insumoId": "INS-004",
+          "insumo": "Levadura fresca",
+          "unidad": "KG",
+          "cantidad": 0.005,
+          "cpp": 12.5,
+          "costo": 0.0625
+        },
+        {
+          "insumoId": "INS-008",
+          "insumo": "Sal",
+          "unidad": "KG",
+          "cantidad": 0.002,
+          "cpp": 1.1,
+          "costo": 0.0022
+        }
+      ],
+      "costoInsumos": 1.1431,
+      "costoConMerma": 1.1785,
+      "cifUnit": 0.6715,
+      "costoUnitario": 1.85,
+      "margen": 0.51489
+    },
+    {
+      "id": "REC-006",
+      "productoId": "PRD-006",
+      "producto": "Empanada de carne",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.115,
+          "cpp": 3.95,
+          "costo": 0.4543
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.021,
+          "cpp": 28.9,
+          "costo": 0.6069
+        },
+        {
+          "insumoId": "INS-007",
+          "insumo": "Huevos",
+          "unidad": "UNIDAD",
+          "cantidad": 0.023,
+          "cpp": 0.62,
+          "costo": 0.0143
+        },
+        {
+          "insumoId": "INS-008",
+          "insumo": "Sal",
+          "unidad": "KG",
+          "cantidad": 0.001,
+          "cpp": 1.1,
+          "costo": 0.0011
+        }
+      ],
+      "costoInsumos": 1.0766,
+      "costoConMerma": 1.1099,
+      "cifUnit": 0.6101,
+      "costoUnitario": 1.72,
+      "margen": 0.54898
+    },
+    {
+      "id": "REC-007",
+      "productoId": "PRD-007",
+      "producto": "Croissant de mantequilla",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.074,
+          "cpp": 3.95,
+          "costo": 0.2923
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.033,
+          "cpp": 28.9,
+          "costo": 0.9537
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.007,
+          "cpp": 3.2,
+          "costo": 0.0224
+        },
+        {
+          "insumoId": "INS-004",
+          "insumo": "Levadura fresca",
+          "unidad": "KG",
+          "cantidad": 0.001,
+          "cpp": 12.5,
+          "costo": 0.0125
+        }
+      ],
+      "costoInsumos": 1.2809,
+      "costoConMerma": 1.3205,
+      "cifUnit": 0.7795,
+      "costoUnitario": 2.1,
+      "margen": 0.54945
+    },
+    {
+      "id": "REC-008",
+      "productoId": "PRD-008",
+      "producto": "Alfajor de manjar",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.055,
+          "cpp": 3.95,
+          "costo": 0.2173
+        },
+        {
+          "insumoId": "INS-009",
+          "insumo": "Manjar blanco",
+          "unidad": "KG",
+          "cantidad": 0.028,
+          "cpp": 14.5,
+          "costo": 0.406
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.011,
+          "cpp": 3.2,
+          "costo": 0.0352
+        }
+      ],
+      "costoInsumos": 0.6585,
+      "costoConMerma": 0.6789,
+      "cifUnit": 0.3711,
+      "costoUnitario": 1.05,
+      "margen": 0.646
+    },
+    {
+      "id": "REC-009",
+      "productoId": "PRD-009",
+      "producto": "Pionono de lúcuma",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.094,
+          "cpp": 3.95,
+          "costo": 0.3713
+        },
+        {
+          "insumoId": "INS-011",
+          "insumo": "Lúcuma pulpa",
+          "unidad": "KG",
+          "cantidad": 0.051,
+          "cpp": 26,
+          "costo": 1.326
+        },
+        {
+          "insumoId": "INS-007",
+          "insumo": "Huevos",
+          "unidad": "UNIDAD",
+          "cantidad": 0.028,
+          "cpp": 0.62,
+          "costo": 0.0174
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.023,
+          "cpp": 3.2,
+          "costo": 0.0736
+        }
+      ],
+      "costoInsumos": 1.7883,
+      "costoConMerma": 1.8436,
+      "cifUnit": 1.0564,
+      "costoUnitario": 2.9,
+      "margen": 0.56684
+    },
+    {
+      "id": "REC-010",
+      "productoId": "PRD-010",
+      "producto": "Torta de chocolate",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.383,
+          "cpp": 3.95,
+          "costo": 1.5129
+        },
+        {
+          "insumoId": "INS-010",
+          "insumo": "Cacao en polvo",
+          "unidad": "KG",
+          "cantidad": 0.134,
+          "cpp": 32,
+          "costo": 4.288
+        },
+        {
+          "insumoId": "INS-007",
+          "insumo": "Huevos",
+          "unidad": "UNIDAD",
+          "cantidad": 0.23,
+          "cpp": 0.62,
+          "costo": 0.1426
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.153,
+          "cpp": 28.9,
+          "costo": 4.4217
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.172,
+          "cpp": 3.2,
+          "costo": 0.5504
+        }
+      ],
+      "costoInsumos": 10.9156,
+      "costoConMerma": 11.2532,
+      "cifUnit": 6.3468,
+      "costoUnitario": 17.6,
+      "margen": 0.53849
+    },
+    {
+      "id": "REC-011",
+      "productoId": "PRD-011",
+      "producto": "Torta de tres leches",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.948,
+          "cpp": 3.95,
+          "costo": 3.7446
+        },
+        {
+          "insumoId": "INS-006",
+          "insumo": "Leche evaporada",
+          "unidad": "L",
+          "cantidad": 0.853,
+          "cpp": 6.8,
+          "costo": 5.8004
+        },
+        {
+          "insumoId": "INS-007",
+          "insumo": "Huevos",
+          "unidad": "UNIDAD",
+          "cantidad": 0.569,
+          "cpp": 0.62,
+          "costo": 0.3528
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.379,
+          "cpp": 3.2,
+          "costo": 1.2128
+        }
+      ],
+      "costoInsumos": 11.1106,
+      "costoConMerma": 11.4542,
+      "cifUnit": 6.4458,
+      "costoUnitario": 17.9,
+      "margen": 0.4971
+    },
+    {
+      "id": "REC-012",
+      "productoId": "PRD-012",
+      "producto": "Cheesecake de maracuyá",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.607,
+          "cpp": 3.95,
+          "costo": 2.3977
+        },
+        {
+          "insumoId": "INS-005",
+          "insumo": "Mantequilla",
+          "unidad": "KG",
+          "cantidad": 0.304,
+          "cpp": 28.9,
+          "costo": 8.7856
+        },
+        {
+          "insumoId": "INS-007",
+          "insumo": "Huevos",
+          "unidad": "UNIDAD",
+          "cantidad": 0.304,
+          "cpp": 0.62,
+          "costo": 0.1885
+        },
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.213,
+          "cpp": 3.2,
+          "costo": 0.6816
+        }
+      ],
+      "costoInsumos": 12.0534,
+      "costoConMerma": 12.4262,
+      "cifUnit": 6.9738,
+      "costoUnitario": 19.4,
+      "margen": 0.52308
+    },
+    {
+      "id": "REC-013",
+      "productoId": "PRD-013",
+      "producto": "Café pasado",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-010",
+          "insumo": "Cacao en polvo",
+          "unidad": "KG",
+          "cantidad": 0.031,
+          "cpp": 32,
+          "costo": 0.992
+        }
+      ],
+      "costoInsumos": 0.992,
+      "costoConMerma": 1.0227,
+      "cifUnit": 0.5773,
+      "costoUnitario": 1.6,
+      "margen": 0.6224
+    },
+    {
+      "id": "REC-014",
+      "productoId": "PRD-014",
+      "producto": "Chocolate caliente",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-010",
+          "insumo": "Cacao en polvo",
+          "unidad": "KG",
+          "cantidad": 0.015,
+          "cpp": 32,
+          "costo": 0.48
+        },
+        {
+          "insumoId": "INS-006",
+          "insumo": "Leche evaporada",
+          "unidad": "L",
+          "cantidad": 0.184,
+          "cpp": 6.8,
+          "costo": 1.2512
+        }
+      ],
+      "costoInsumos": 1.7312,
+      "costoConMerma": 1.7847,
+      "cifUnit": 1.0153,
+      "costoUnitario": 2.8,
+      "margen": 0.528
+    },
+    {
+      "id": "REC-015",
+      "productoId": "PRD-015",
+      "producto": "Jugo de naranja",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-003",
+          "insumo": "Azúcar rubia",
+          "unidad": "KG",
+          "cantidad": 0.572,
+          "cpp": 3.2,
+          "costo": 1.8304
+        }
+      ],
+      "costoInsumos": 1.8304,
+      "costoConMerma": 1.887,
+      "cifUnit": 1.063,
+      "costoUnitario": 2.95,
+      "margen": 0.46446
+    },
+    {
+      "id": "REC-016",
+      "productoId": "PRD-016",
+      "producto": "Pan de masa madre",
+      "version": 1,
+      "estado": "VIGENTE",
+      "rendimiento": 24,
+      "mermaEstandar": 0.03,
+      "lineas": [
+        {
+          "insumoId": "INS-001",
+          "insumo": "Harina de trigo sin preparar",
+          "unidad": "KG",
+          "cantidad": 0.629,
+          "cpp": 3.95,
+          "costo": 2.4846
+        },
+        {
+          "insumoId": "INS-004",
+          "insumo": "Levadura fresca",
+          "unidad": "KG",
+          "cantidad": 0.009,
+          "cpp": 12.5,
+          "costo": 0.1125
+        },
+        {
+          "insumoId": "INS-008",
+          "insumo": "Sal",
+          "unidad": "KG",
+          "cantidad": 0.004,
+          "cpp": 1.1,
+          "costo": 0.0044
+        }
+      ],
+      "costoInsumos": 2.6015,
+      "costoConMerma": 2.682,
+      "cifUnit": 1.518,
+      "costoUnitario": 4.2,
+      "margen": 0.587
+    }
+  ],
+  "usuarios": [
+    {
+      "id": "USR-001",
+      "nombre": "Oscar Quilcate Rosell",
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "estado": "ACTIVO",
+      "ultimoAcceso": "2026-11-01 07:42"
+    },
+    {
+      "id": "USR-002",
+      "nombre": "Lucía Bermúdez",
+      "usuario": "lbermudez",
+      "rol": "ADMINISTRADOR",
+      "estado": "ACTIVO",
+      "ultimoAcceso": "2026-11-01 07:15"
+    },
+    {
+      "id": "USR-003",
+      "nombre": "Rosa Quispe",
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "estado": "ACTIVO",
+      "ultimoAcceso": "2026-11-01 04:58"
+    },
+    {
+      "id": "USR-004",
+      "nombre": "Julio Ramos",
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "estado": "ACTIVO",
+      "ultimoAcceso": "2026-11-01 06:22"
+    },
+    {
+      "id": "USR-005",
+      "nombre": "Carlos Medina",
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "estado": "ACTIVO",
+      "ultimoAcceso": "2026-11-01 08:03"
+    },
+    {
+      "id": "USR-006",
+      "nombre": "María Fernández",
+      "usuario": "mfernandez",
+      "rol": "CLIENTE",
+      "estado": "ACTIVO",
+      "ultimoAcceso": "2026-10-31 19:40"
+    },
+    {
+      "id": "USR-007",
+      "nombre": "Soporte eSolutionsNet",
+      "usuario": "soporte",
+      "rol": "SOPORTE",
+      "estado": "BLOQUEADO",
+      "ultimoAcceso": "2026-10-12 11:00"
+    }
+  ],
+  "topProductos": [
+    {
+      "id": "PRD-013",
+      "nombre": "Café pasado",
+      "categoria": "bebidas",
+      "ventas": 1355.94,
+      "utilidad": 843.94,
+      "margen": 0.6224,
+      "margenObjetivo": 0.5,
+      "unidades": 320
+    },
+    {
+      "id": "PRD-014",
+      "nombre": "Chocolate caliente",
+      "categoria": "bebidas",
+      "ventas": 889.83,
+      "utilidad": 469.83,
+      "margen": 0.528,
+      "margenObjetivo": 0.5,
+      "unidades": 150
+    },
+    {
+      "id": "PRD-006",
+      "nombre": "Empanada de carne",
+      "categoria": "pasteleria",
+      "ventas": 800.86,
+      "utilidad": 439.66,
+      "margen": 0.54898,
+      "margenObjetivo": 0.6,
+      "unidades": 210
+    },
+    {
+      "id": "PRD-015",
+      "nombre": "Jugo de naranja",
+      "categoria": "bebidas",
+      "ventas": 661.02,
+      "utilidad": 307.02,
+      "margen": 0.46446,
+      "margenObjetivo": 0.5,
+      "unidades": 120
+    },
+    {
+      "id": "PRD-007",
+      "nombre": "Croissant de mantequilla",
+      "categoria": "pasteleria",
+      "ventas": 652.54,
+      "utilidad": 358.54,
+      "margen": 0.54945,
+      "margenObjetivo": 0.6,
+      "unidades": 140
+    },
+    {
+      "id": "PRD-010",
+      "nombre": "Torta de chocolate",
+      "categoria": "tortas",
+      "ventas": 533.9,
+      "utilidad": 287.5,
+      "margen": 0.53849,
+      "margenObjetivo": 0.55,
+      "unidades": 14
+    },
+    {
+      "id": "PRD-008",
+      "nombre": "Alfajor de manjar",
+      "categoria": "pasteleria",
+      "ventas": 533.9,
+      "utilidad": 344.9,
+      "margen": 0.646,
+      "margenObjetivo": 0.6,
+      "unidades": 180
+    },
+    {
+      "id": "PRD-002",
+      "nombre": "Pan ciabatta",
+      "categoria": "pan",
+      "ventas": 520,
+      "utilidad": 286,
+      "margen": 0.55,
+      "margenObjetivo": 0.45,
+      "unidades": 260
+    }
+  ],
+  "insumos": [
+    {
+      "id": "INS-001",
+      "nombre": "Harina de trigo sin preparar",
+      "unidad": "KG",
+      "cpp": 3.95,
+      "stock": 128.5,
+      "minimo": 40,
+      "proveedor": "Molino del Sur",
+      "estado": "OK",
+      "valorizado": 507.58
+    },
+    {
+      "id": "INS-002",
+      "nombre": "Harina integral",
+      "unidad": "KG",
+      "cpp": 4.2,
+      "stock": 42,
+      "minimo": 15,
+      "proveedor": "Molino del Sur",
+      "estado": "OK",
+      "valorizado": 176.4
+    },
+    {
+      "id": "INS-003",
+      "nombre": "Azúcar rubia",
+      "unidad": "KG",
+      "cpp": 3.2,
+      "stock": 61,
+      "minimo": 20,
+      "proveedor": "Distribuidora Lima",
+      "estado": "OK",
+      "valorizado": 195.2
+    },
+    {
+      "id": "INS-004",
+      "nombre": "Levadura fresca",
+      "unidad": "KG",
+      "cpp": 12.5,
+      "stock": 7.4,
+      "minimo": 3,
+      "proveedor": "Fermentos SAC",
+      "estado": "OK",
+      "valorizado": 92.5
+    },
+    {
+      "id": "INS-005",
+      "nombre": "Mantequilla",
+      "unidad": "KG",
+      "cpp": 28.9,
+      "stock": 14.2,
+      "minimo": 5,
+      "proveedor": "Lácteos Andinos",
+      "estado": "OK",
+      "valorizado": 410.38
+    },
+    {
+      "id": "INS-006",
+      "nombre": "Leche evaporada",
+      "unidad": "L",
+      "cpp": 6.8,
+      "stock": 22,
+      "minimo": 8,
+      "proveedor": "Gloria",
+      "estado": "OK",
+      "valorizado": 149.6
+    },
+    {
+      "id": "INS-007",
+      "nombre": "Huevos",
+      "unidad": "UNIDAD",
+      "cpp": 0.62,
+      "stock": 180,
+      "minimo": 60,
+      "proveedor": "Granja Sur",
+      "estado": "OK",
+      "valorizado": 111.6
+    },
+    {
+      "id": "INS-008",
+      "nombre": "Sal",
+      "unidad": "KG",
+      "cpp": 1.1,
+      "stock": 8.5,
+      "minimo": 2,
+      "proveedor": "Distribuidora Lima",
+      "estado": "OK",
+      "valorizado": 9.35
+    },
+    {
+      "id": "INS-009",
+      "nombre": "Manjar blanco",
+      "unidad": "KG",
+      "cpp": 14.5,
+      "stock": 9.5,
+      "minimo": 4,
+      "proveedor": "Lácteos Andinos",
+      "estado": "OK",
+      "valorizado": 137.75
+    },
+    {
+      "id": "INS-010",
+      "nombre": "Cacao en polvo",
+      "unidad": "KG",
+      "cpp": 32,
+      "stock": 4.2,
+      "minimo": 2,
+      "proveedor": "Cacao del Perú",
+      "estado": "OK",
+      "valorizado": 134.4
+    },
+    {
+      "id": "INS-011",
+      "nombre": "Lúcuma pulpa",
+      "unidad": "KG",
+      "cpp": 26,
+      "stock": 3.1,
+      "minimo": 2,
+      "proveedor": "Frutas Andinas",
+      "estado": "OK",
+      "valorizado": 80.6
+    },
+    {
+      "id": "INS-012",
+      "nombre": "Gas GLP",
+      "unidad": "BALON",
+      "cpp": 68,
+      "stock": 6,
+      "minimo": 2,
+      "proveedor": "Repsol",
+      "estado": "OK",
+      "valorizado": 408
+    }
+  ],
+  "ops": [
+    {
+      "codigo": "OP-2026-000312",
+      "producto": "Pan ciabatta",
+      "cantidad": 240,
+      "estado": "EN_PROCESO",
+      "entrega": "2026-11-01",
+      "responsable": "Rosa Quispe",
+      "avance": 0.62,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000313",
+      "producto": "Pan francés",
+      "cantidad": 1800,
+      "estado": "PENDIENTE",
+      "entrega": "2026-11-01",
+      "responsable": "Rosa Quispe",
+      "avance": 0.4,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000314",
+      "producto": "Croissant de mantequilla",
+      "cantidad": 320,
+      "estado": "PENDIENTE",
+      "entrega": "2026-11-01",
+      "responsable": "Julio Ramos",
+      "avance": 0.7,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000315",
+      "producto": "Torta de chocolate",
+      "cantidad": 18,
+      "estado": "EN_PROCESO",
+      "entrega": "2026-11-02",
+      "responsable": "Milagros Vega",
+      "avance": 0.85,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000316",
+      "producto": "Pan de yema",
+      "cantidad": 600,
+      "estado": "TERMINADA",
+      "entrega": "2026-10-31",
+      "responsable": "Rosa Quispe",
+      "avance": 1,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000317",
+      "producto": "Empanada de carne",
+      "cantidad": 400,
+      "estado": "TERMINADA",
+      "entrega": "2026-10-31",
+      "responsable": "Julio Ramos",
+      "avance": 1,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000318",
+      "producto": "Bagguette artesanal",
+      "cantidad": 150,
+      "estado": "TERMINADA",
+      "entrega": "2026-10-31",
+      "responsable": "Milagros Vega",
+      "avance": 1,
+      "mermaEsperada": 0.03
+    },
+    {
+      "codigo": "OP-2026-000319",
+      "producto": "Cheesecake de maracuyá",
+      "cantidad": 12,
+      "estado": "PENDIENTE",
+      "entrega": "2026-11-02",
+      "responsable": "Milagros Vega",
+      "avance": 0.15,
+      "mermaEsperada": 0.03
+    }
+  ],
+  "pedidos": [
+    {
+      "codigo": "PED-2026-000441",
+      "cliente": "Bodega Doña Rosa",
+      "estado": "EN_PRODUCCION",
+      "total": 486,
+      "fechaEntrega": "2026-11-01",
+      "vendedor": "Carlos Medina"
+    },
+    {
+      "codigo": "PED-2026-000442",
+      "cliente": "Cafetería El Molino",
+      "estado": "REGISTRADO",
+      "total": 312.5,
+      "fechaEntrega": "2026-11-02",
+      "vendedor": "Carlos Medina"
+    },
+    {
+      "codigo": "PED-2026-000443",
+      "cliente": "María Fernández",
+      "estado": "REGISTRADO",
+      "total": 68.4,
+      "fechaEntrega": "2026-11-02",
+      "vendedor": "—"
+    },
+    {
+      "codigo": "PED-2026-000444",
+      "cliente": "Restaurante La Brasa",
+      "estado": "LISTO",
+      "total": 742,
+      "fechaEntrega": "2026-11-01",
+      "vendedor": "Carlos Medina"
+    },
+    {
+      "codigo": "PED-2026-000445",
+      "cliente": "Minimarket San Juan",
+      "estado": "DESPACHADO",
+      "total": 528.9,
+      "fechaEntrega": "2026-10-31",
+      "vendedor": "Carlos Medina"
+    },
+    {
+      "codigo": "PED-2026-000446",
+      "cliente": "Colegio Santa Ana",
+      "estado": "ENTREGADO",
+      "total": 1240,
+      "fechaEntrega": "2026-10-30",
+      "vendedor": "Carlos Medina"
+    },
+    {
+      "codigo": "PED-2026-000447",
+      "cliente": "Ana Torres",
+      "estado": "CANCELADO",
+      "total": 45,
+      "fechaEntrega": "2026-10-30",
+      "vendedor": "—"
+    },
+    {
+      "codigo": "PED-2026-000448",
+      "cliente": "Bodega Doña Rosa",
+      "estado": "ENTREGADO",
+      "total": 620,
+      "fechaEntrega": "2026-10-29",
+      "vendedor": "Carlos Medina"
+    }
+  ],
+  "clientes": [
+    {
+      "id": "CLI-001",
+      "nombre": "Bodega Doña Rosa",
+      "docTipo": "RUC",
+      "saldo": 528.9,
+      "vencido": 128.4,
+      "diasPromedio": 12,
+      "limiteCredito": 1500,
+      "listaPrecio": "MAYORISTA"
+    },
+    {
+      "id": "CLI-002",
+      "nombre": "Cafetería El Molino",
+      "docTipo": "RUC",
+      "saldo": 312.5,
+      "vencido": 0,
+      "diasPromedio": 8,
+      "limiteCredito": 900,
+      "listaPrecio": "MAYORISTA"
+    },
+    {
+      "id": "CLI-003",
+      "nombre": "Restaurante La Brasa",
+      "docTipo": "RUC",
+      "saldo": 742,
+      "vencido": 340,
+      "diasPromedio": 31,
+      "limiteCredito": 1200,
+      "listaPrecio": "MAYORISTA"
+    },
+    {
+      "id": "CLI-004",
+      "nombre": "Minimarket San Juan",
+      "docTipo": "RUC",
+      "saldo": 186.4,
+      "vencido": 0,
+      "diasPromedio": 5,
+      "limiteCredito": 600,
+      "listaPrecio": "MAYORISTA"
+    },
+    {
+      "id": "CLI-005",
+      "nombre": "Colegio Santa Ana",
+      "docTipo": "RUC",
+      "saldo": 0,
+      "vencido": 0,
+      "diasPromedio": 0,
+      "limiteCredito": 2000,
+      "listaPrecio": "MAYORISTA"
+    },
+    {
+      "id": "CLI-006",
+      "nombre": "María Fernández",
+      "docTipo": "DNI",
+      "saldo": 68.4,
+      "vencido": 68.4,
+      "diasPromedio": 22,
+      "limiteCredito": 200,
+      "listaPrecio": "MINORISTA"
+    }
+  ],
+  "movimientos": [
+    {
+      "fecha": "2026-10-28 07:00",
+      "tipo": "APERTURA",
+      "documento": "Acta 001",
+      "cantidad": 100,
+      "costo": 2.1,
+      "costoUnitario": 2.1,
+      "valor": 210,
+      "saldoCantidad": 100,
+      "saldoValor": 210,
+      "cpp": 2.1
+    },
+    {
+      "fecha": "2026-10-28 08:15",
+      "tipo": "COMPRA",
+      "documento": "Factura F-001",
+      "cantidad": 50,
+      "costo": 2.36,
+      "costoUnitario": 2.36,
+      "valor": 118,
+      "saldoCantidad": 150,
+      "saldoValor": 328,
+      "cpp": 2.1867
+    },
+    {
+      "fecha": "2026-10-28 09:40",
+      "tipo": "CONSUMO_OP",
+      "documento": "OP-2026-000312",
+      "cantidad": -60,
+      "costo": null,
+      "costoUnitario": 2.1867,
+      "valor": -131.2,
+      "saldoCantidad": 90,
+      "saldoValor": 196.8,
+      "cpp": 2.1867
+    },
+    {
+      "fecha": "2026-10-29 11:05",
+      "tipo": "COMPRA",
+      "documento": "Boleta B-014",
+      "cantidad": 40,
+      "costo": 2.42,
+      "costoUnitario": 2.42,
+      "valor": 96.8,
+      "saldoCantidad": 130,
+      "saldoValor": 293.6,
+      "cpp": 2.2585
+    },
+    {
+      "fecha": "2026-10-29 14:30",
+      "tipo": "CONSUMO_OP",
+      "documento": "OP-2026-000313",
+      "cantidad": -100,
+      "costo": null,
+      "costoUnitario": 2.2585,
+      "valor": -225.8462,
+      "saldoCantidad": 30,
+      "saldoValor": 67.7538,
+      "cpp": 2.2585
+    },
+    {
+      "fecha": "2026-10-30 06:50",
+      "tipo": "COMPRA",
+      "documento": "Factura F-009",
+      "cantidad": 150,
+      "costo": 2.55,
+      "costoUnitario": 2.55,
+      "valor": 382.5,
+      "saldoCantidad": 180,
+      "saldoValor": 450.2538,
+      "cpp": 2.5014
+    },
+    {
+      "fecha": "2026-10-30 08:10",
+      "tipo": "CONSUMO_OP",
+      "documento": "OP-2026-000316",
+      "cantidad": -85,
+      "costo": null,
+      "costoUnitario": 2.5014,
+      "valor": -212.6198,
+      "saldoCantidad": 95,
+      "saldoValor": 237.634,
+      "cpp": 2.5014
+    },
+    {
+      "fecha": "2026-10-31 07:20",
+      "tipo": "MERMA",
+      "documento": "OP-2026-000316",
+      "cantidad": -4.5,
+      "costo": null,
+      "costoUnitario": 2.5014,
+      "valor": -11.2563,
+      "saldoCantidad": 90.5,
+      "saldoValor": 226.3777,
+      "cpp": 2.5014
+    },
+    {
+      "fecha": "2026-10-31 09:00",
+      "tipo": "CONSUMO_OP",
+      "documento": "OP-2026-000317",
+      "cantidad": -62,
+      "costo": null,
+      "costoUnitario": 2.5014,
+      "valor": -155.0874,
+      "saldoCantidad": 28.5,
+      "saldoValor": 71.2903,
+      "cpp": 2.5014
+    },
+    {
+      "fecha": "2026-11-01 06:40",
+      "tipo": "COMPRA",
+      "documento": "Factura F-012",
+      "cantidad": 80,
+      "costo": 2.61,
+      "costoUnitario": 2.61,
+      "valor": 208.8,
+      "saldoCantidad": 108.5,
+      "saldoValor": 280.0903,
+      "cpp": 2.5815
+    },
+    {
+      "fecha": "2026-11-01 07:30",
+      "tipo": "CONSUMO_OP",
+      "documento": "OP-2026-000312",
+      "cantidad": -38,
+      "costo": null,
+      "costoUnitario": 2.5815,
+      "valor": -98.0961,
+      "saldoCantidad": 70.5,
+      "saldoValor": 181.9942,
+      "cpp": 2.5815
+    }
+  ],
+  "aging": [
+    {
+      "rango": "0 a 7 días",
+      "monto": 605.9,
+      "documentos": 4
+    },
+    {
+      "rango": "8 a 15 días",
+      "monto": 312.5,
+      "documentos": 2
+    },
+    {
+      "rango": "16 a 30 días",
+      "monto": 412.4,
+      "documentos": 3
+    },
+    {
+      "rango": "Más de 30 días",
+      "monto": 507.4,
+      "documentos": 2
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# Base de datos de desarrollo para Tanta.
+# Uso:  docker compose -f infra/compose/docker-compose.dev.yml up -d
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: tanta-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PGUSER:-tanta}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-tanta_dev_2026}
+      POSTGRES_DB: ${PGDATABASE:-tanta}
+      # El dinero no se negocia: locale y zona horaria de negocio fijos.
+      TZ: America/Lima
+      PGTZ: America/Lima
+    ports:
+      - "${PGPORT:-5433}:5432"
+    volumes:
+      - tanta_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-tanta} -d ${PGDATABASE:-tanta}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=200
+
+volumes:
+  tanta_pgdata:

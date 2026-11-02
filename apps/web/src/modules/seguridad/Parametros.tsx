@@ -1,0 +1,172 @@
+import { useEffect, useState } from 'react';
+import { api } from '@/core/api';
+import { useApp } from '@/core/app-state';
+import { Boton, Encabezado, Insignia, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Icon } from '@/ui/icons';
+
+interface Parametro { clave: string; valor: string; tipo: string; descripcion: string }
+
+const ETIQUETAS: Record<string, string> = {
+  igv: 'IGV vigente',
+  moneda: 'Moneda',
+  margen_objetivo_global: 'Margen objetivo global',
+  permitir_saldo_negativo: 'Permitir saldo negativo',
+};
+
+export function Parametros() {
+  const { refrescarDatos } = useApp();
+  const [filas, setFilas] = useState<Parametro[]>([]);
+  const [editando, setEditando] = useState<string | null>(null);
+  const [valor, setValor] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const [cargando, setCargando] = useState(true);
+
+  const cargar = async () => {
+    try {
+      setFilas(await api<Parametro[]>('/parametros'));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudieron cargar los parámetros.');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => { void cargar(); }, []);
+
+  const abrir = (p: Parametro) => {
+    setEditando(p.clave);
+    setValor(p.valor);
+    setError(null);
+  };
+
+  const guardar = async () => {
+    if (!editando) return;
+    setGuardando(true);
+    setError(null);
+    try {
+      await api(`/parametros/${editando}`, { method: 'PATCH', body: { valor } });
+      setEditando(null);
+      await cargar();
+      await refrescarDatos();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo guardar.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const formatear = (p: Parametro) => {
+    if (p.tipo === 'porcentaje') return `${(Number(p.valor) * 100).toFixed(2)} %`;
+    if (p.tipo === 'booleano') return p.valor === 'true' ? 'Sí' : 'No';
+    return p.valor;
+  };
+
+  return (
+    <>
+      <Encabezado
+        titulo="Parámetros del sistema"
+        descripcion="Lo que se cambia aquí afecta a todo el sistema de inmediato. Cada cambio queda registrado con su valor anterior."
+      />
+
+      {error && <div className="aviso aviso--danger"><span className="aviso__icono">!</span><div><strong>No se pudo aplicar</strong><p>{error}</p></div></div>}
+
+      <div className="grid grid--12">
+        <Tarjeta className="col-8" padding="none">
+          <div className="card__head card__head--padded">
+            <div>
+              <h3 className="card__title">Valores vigentes</h3>
+              <p className="card__sub">{filas.length} parámetros · el IGV se aplica a toda venta nueva</p>
+            </div>
+            <Boton variant="ghost" icono="sync" onClick={() => void cargar()}>Recargar</Boton>
+          </div>
+
+          {cargando ? (
+            <div className="tabla-cargando">Cargando parámetros…</div>
+          ) : (
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Parámetro</th>
+                    <th>Clave</th>
+                    <th className="t-right">Valor</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filas.map((p) => (
+                    <tr key={p.clave}>
+                      <td>
+                        <div className="celda-doble">
+                          <strong>{ETIQUETAS[p.clave] ?? p.clave}</strong>
+                          <span>{p.descripcion}</span>
+                        </div>
+                      </td>
+                      <td><span className="mono t-muted">{p.clave}</span></td>
+                      <td className="t-right">
+                        {editando === p.clave ? (
+                          <input
+                            className="field__input field__input--mini"
+                            value={valor}
+                            onChange={(e) => setValor(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') void guardar(); }}
+                            autoFocus
+                          />
+                        ) : (
+                          <strong>{formatear(p)}</strong>
+                        )}
+                      </td>
+                      <td className="t-right">
+                        {editando === p.clave ? (
+                          <div className="acciones-fila">
+                            <Boton size="sm" variant="primary" onClick={() => void guardar()} disabled={guardando}>
+                              {guardando ? '…' : 'Guardar'}
+                            </Boton>
+                            <Boton size="sm" variant="ghost" onClick={() => setEditando(null)}>Cancelar</Boton>
+                          </div>
+                        ) : (
+                          <Boton size="sm" icono="settings" onClick={() => abrir(p)}>Editar</Boton>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Tarjeta>
+
+        <Tarjeta className="col-4">
+          <TarjetaTitulo titulo="Cómo funciona" subtitulo="Diseño que protege al negocio" />
+          <ul className="notas">
+            <li>
+              <Icon name="shield" size={16} />
+              <div>
+                <strong>Los porcentajes se guardan como fracción</strong>
+                <p>0,18 es 18 %. Si escribes 18 se rechaza: evita un IGV de 1800 %.</p>
+              </div>
+            </li>
+            <li>
+              <Icon name="ledger" size={16} />
+              <div>
+                <strong>Historial completo</strong>
+                <p>Cada cambio guarda el valor anterior, el nuevo y quién lo hizo.</p>
+              </div>
+            </li>
+            <li>
+              <Icon name="alert" size={16} />
+              <div>
+                <strong>El IGV afecta ventas nuevas</strong>
+                <p>Las ventas ya registradas conservan su precio neto congelado.</p>
+              </div>
+            </li>
+          </ul>
+          <div className="notas__pie">
+            <Insignia tono="ok" punto>Cambios auditados</Insignia>
+          </div>
+        </Tarjeta>
+      </div>
+    </>
+  );
+}

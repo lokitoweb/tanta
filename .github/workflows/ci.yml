@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  JWT_SECRET: ci-secret-que-solo-vive-en-el-runner-0123456789
+
+jobs:
+  calidad:
+    name: Tipos, pruebas y build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: tanta
+          POSTGRES_PASSWORD: tanta_ci
+          POSTGRES_DB: tanta
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U tanta"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Generar tokens de diseño
+        run: pnpm tokens
+
+      - name: Verificar tipos
+        run: pnpm typecheck
+
+      - name: Base de datos
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: tanta
+          PGPASSWORD: tanta_ci
+          PGDATABASE: tanta
+        run: |
+          pnpm --filter @tanta/api build
+          node apps/api/dist/db/migrate.js
+          node apps/api/dist/db/seed.js
+
+      - name: Levantar API
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: tanta
+          PGPASSWORD: tanta_ci
+          PGDATABASE: tanta
+          LOGIN_RATE_MAX: '500'
+          RATE_MAX: '20000'
+        run: |
+          node apps/api/dist/src/server.js &
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3001/api/v1/health/ready > /dev/null; then
+              echo "API lista"; break
+            fi
+            sleep 1
+          done
+
+      - name: Pruebas funcionales
+        run: node --test tests/api.test.mjs
+
+      - name: Concurrencia del correlativo (0 colisiones)
+        run: node tests/concurrencia-ventas.mjs 12
+
+      - name: Build de producción de la web
+        run: pnpm --filter @tanta/web build
+
+      - name: Sin credenciales de demostración en el bundle
+        run: |
+          if grep -rIl --include='*.js' -e 'osquilcate' -e '"tanta"' apps/web/dist/assets; then
+            echo "::error::El bundle de producción contiene credenciales de demostración"
+            exit 1
+          fi
+          echo "Bundle limpio"
+
+      - name: Flutter analyze
+        run: |
+          if [ -d apps/mobile ]; then
+            cd apps/mobile && flutter pub get && flutter analyze
+          else
+            echo "Sin app móvil; se omite"
+          fi
+        continue-on-error: true

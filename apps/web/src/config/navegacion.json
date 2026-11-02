@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "nota": "El menú no se escribe en los componentes: se genera desde aquí filtrando por permisos del rol activo. Cada ítem declara el permiso que lo habilita.",
+  "grupos": [
+    {
+      "titulo": "Operación",
+      "items": [
+        { "id": "panel", "etiqueta": "Panel", "ruta": "/panel", "icono": "home", "permiso": "panel.ver" },
+        { "id": "produccion", "etiqueta": "Producción", "ruta": "/produccion", "icono": "oven", "permiso": "produccion.ver" },
+        { "id": "almacen", "etiqueta": "Almacén", "ruta": "/almacen", "icono": "box", "permiso": "inventario.ver" },
+        { "id": "kardex", "etiqueta": "Kárdex", "ruta": "/almacen/kardex", "icono": "ledger", "permiso": "inventario.ver" }
+      ]
+    },
+    {
+      "titulo": "Comercial",
+      "items": [
+        { "id": "pedidos", "etiqueta": "Pedidos", "ruta": "/ventas/pedidos", "icono": "clipboard", "permiso": "pedidos.ver" },
+        { "id": "cobranza", "etiqueta": "Cobranza", "ruta": "/ventas/cobranza", "icono": "wallet", "permiso": "cobranza.ver" },
+        { "id": "catalogo", "etiqueta": "Catálogo", "ruta": "/catalogo", "icono": "bread", "permiso": "catalogo.ver" }
+      ]
+    },
+    {
+      "titulo": "Maestros",
+      "items": [
+        { "id": "productos", "etiqueta": "Productos", "ruta": "/maestros/productos", "icono": "bread", "permiso": "maestros.ver" },
+        { "id": "insumos", "etiqueta": "Insumos", "ruta": "/maestros/insumos", "icono": "sack", "permiso": "maestros.ver" },
+        { "id": "recetas", "etiqueta": "Recetas", "ruta": "/maestros/recetas", "icono": "recipe", "permiso": "recetas.ver" },
+        { "id": "usuarios", "etiqueta": "Usuarios y roles", "ruta": "/seguridad/usuarios", "icono": "shield", "permiso": "usuarios.gestionar" }
+      ]
+    },
+    {
+      "titulo": "Gerencia",
+      "items": [
+        { "id": "dashboard", "etiqueta": "Costos y márgenes", "ruta": "/gerencia/dashboard", "icono": "chart", "permiso": "dashboard.ver" },
+        { "id": "reportes", "etiqueta": "Reportes", "ruta": "/gerencia/reportes", "icono": "report", "permiso": "reportes.ver" }
+      ]
+    }
+  ]
+}

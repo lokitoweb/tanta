@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "nota": "Los roles y permisos viven aquí y no en el código. Cuando exista la API, este archivo se reemplaza por GET /api/v1/config/sesion sin tocar un solo componente.",
+  "permisos": [
+    { "id": "panel.ver", "grupo": "Panel", "descripcion": "Ver el panel de inicio" },
+    { "id": "dashboard.ver", "grupo": "Gerencia", "descripcion": "Ver dashboard de costos y márgenes" },
+    { "id": "costos.ver", "grupo": "Gerencia", "descripcion": "Ver costo unitario, margen y markup" },
+    { "id": "maestros.ver", "grupo": "Maestros", "descripcion": "Consultar productos, insumos y recetas" },
+    { "id": "maestros.editar", "grupo": "Maestros", "descripcion": "Crear y editar maestros" },
+    { "id": "recetas.ver", "grupo": "Maestros", "descripcion": "Consultar recetas sin columnas de costo" },
+    { "id": "recetas.editar", "grupo": "Maestros", "descripcion": "Crear versiones de receta" },
+    { "id": "inventario.ver", "grupo": "Almacén", "descripcion": "Consultar stock y kárdex" },
+    { "id": "inventario.mover", "grupo": "Almacén", "descripcion": "Registrar bajas, ajustes y recepciones" },
+    { "id": "produccion.ver", "grupo": "Producción", "descripcion": "Ver el tablero de órdenes" },
+    { "id": "produccion.ejecutar", "grupo": "Producción", "descripcion": "Iniciar, cerrar y reportar merma" },
+    { "id": "pedidos.ver", "grupo": "Ventas", "descripcion": "Ver pedidos" },
+    { "id": "pedidos.gestionar", "grupo": "Ventas", "descripcion": "Cambiar estado y despachar pedidos" },
+    { "id": "ventas.registrar", "grupo": "Ventas", "descripcion": "Registrar venta a terceros" },
+    { "id": "cobranza.ver", "grupo": "Cobranza", "descripcion": "Ver cartera y deudas" },
+    { "id": "cobranza.registrar", "grupo": "Cobranza", "descripcion": "Registrar pagos totales o parciales" },
+    { "id": "clientes.ver", "grupo": "Ventas", "descripcion": "Ver ficha de clientes" },
+    { "id": "reportes.ver", "grupo": "Gerencia", "descripcion": "Ver y exportar reportes" },
+    { "id": "usuarios.gestionar", "grupo": "Seguridad", "descripcion": "Alta, baja y bloqueo de usuarios" },
+    { "id": "catalogo.ver", "grupo": "Cliente", "descripcion": "Ver catálogo y precios de venta" }
+  ],
+  "roles": [
+    {
+      "id": "GERENTE",
+      "nombre": "Gerente",
+      "corto": "Gerencia",
+      "descripcion": "Costos, rentabilidad y márgenes",
+      "perfil": "web",
+      "icono": "chart",
+      "inicio": "/panel",
+      "permisos": ["panel.ver", "dashboard.ver", "costos.ver", "reportes.ver", "maestros.ver", "inventario.ver", "pedidos.ver", "cobranza.ver"]
+    },
+    {
+      "id": "ADMINISTRADOR",
+      "nombre": "Administrador",
+      "corto": "Maestros",
+      "descripcion": "Productos, recetas, costos y usuarios",
+      "perfil": "web",
+      "icono": "settings",
+      "inicio": "/panel",
+      "permisos": ["panel.ver", "maestros.ver", "maestros.editar", "recetas.ver", "recetas.editar", "costos.ver", "inventario.ver", "usuarios.gestionar", "reportes.ver"]
+    },
+    {
+      "id": "PRODUCCION",
+      "nombre": "Producción",
+      "corto": "Producción",
+      "descripcion": "Órdenes de producción y merma",
+      "perfil": "tablet",
+      "icono": "oven",
+      "inicio": "/panel",
+      "permisos": ["panel.ver", "produccion.ver", "produccion.ejecutar", "recetas.ver", "inventario.ver"]
+    },
+    {
+      "id": "ALMACEN",
+      "nombre": "Almacén",
+      "corto": "Almacén",
+      "descripcion": "Stock, bajas y kárdex",
+      "perfil": "app",
+      "icono": "box",
+      "inicio": "/panel",
+      "permisos": ["panel.ver", "inventario.ver", "inventario.mover", "recetas.ver"]
+    },
+    {
+      "id": "VENDEDOR",
+      "nombre": "Vendedor",
+      "corto": "Ventas",
+      "descripcion": "Despacho, ventas a terceros y cobranza",
+      "perfil": "app",
+      "icono": "truck",
+      "inicio": "/panel",
+      "permisos": ["panel.ver", "pedidos.ver", "pedidos.gestionar", "ventas.registrar", "cobranza.ver", "cobranza.registrar", "clientes.ver"]
+    },
+    {
+      "id": "CLIENTE",
+      "nombre": "Cliente",
+      "corto": "Cliente",
+      "descripcion": "Catálogo, pedidos y saldo",
+      "perfil": "app",
+      "icono": "user",
+      "inicio": "/panel",
+      "permisos": ["panel.ver", "catalogo.ver"]
+    },
+    {
+      "id": "SOPORTE",
+      "nombre": "Soporte técnico",
+      "corto": "Soporte",
+      "descripcion": "Break-glass: sin datos de negocio",
+      "perfil": "web",
+      "icono": "shield",
+      "inicio": "/panel",
+      "permisos": ["panel.ver"]
+    }
+  ]
+}

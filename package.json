@@ -1,0 +1,33 @@
+{
+  "name": "tanta",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sistema Integral de Gestión — Panadería Tanta",
+  "packageManager": "pnpm@11.28.5",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "setup": "pnpm tokens && pnpm --filter @tanta/api build && pnpm db:up && pnpm db:migrate && pnpm db:seed",
+    "tokens": "pnpm --filter @tanta/tokens build",
+
+    "db:up": "docker compose -f infra/compose/docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -f infra/compose/docker-compose.dev.yml down",
+    "db:reset": "pnpm db:seed",
+    "db:migrate": "pnpm --filter @tanta/api migrate",
+    "db:seed": "pnpm --filter @tanta/api seed",
+
+    "api": "pnpm --filter @tanta/api start",
+    "web": "pnpm --filter @tanta/web dev",
+    "dev": "pnpm tokens && pnpm --filter @tanta/web dev",
+    "build": "pnpm tokens && pnpm --filter @tanta/web build",
+    "typecheck": "pnpm --filter @tanta/web typecheck && pnpm --filter @tanta/api typecheck",
+
+    "test": "node --test tests/api.test.mjs",
+    "test:carga": "node tests/carga.mjs --concurrencia=20 --duracion=20",
+
+    "prod:build": "docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml build",
+    "prod:up": "docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d",
+    "prod:logs": "docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml logs -f api",
+
+    "clean": "pnpm -r clean"
+  }
+}

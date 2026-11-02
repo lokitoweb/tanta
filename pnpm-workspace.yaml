@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+  - "apps/web"
+  - "apps/api"
+
+# pnpm 11 lee la configuración aquí, no en package.json ni en .npmrc
+nodeLinker: hoisted
+strictPeerDependencies: false
+confirmModulesPurge: false
+onlyBuiltDependencies:
+  - esbuild

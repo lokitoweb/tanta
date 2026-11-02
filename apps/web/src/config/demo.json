@@ -1,0 +1,13 @@
+{
+  "nota": "Usuarios de demostración que existen en la semilla de la base de datos. La contraseña es la misma para todos y solo sirve en entornos de desarrollo. Al conectar con producción esta lista se elimina.",
+  "clave": "tanta",
+  "usuarios": [
+    { "rol": "Gerente", "usuario": "osquilcate", "nombre": "Oscar Quilcate Rosell" },
+    { "rol": "Administrador", "usuario": "lbermudez", "nombre": "Lucía Bermúdez" },
+    { "rol": "Producción", "usuario": "rquispe", "nombre": "Rosa Quispe" },
+    { "rol": "Almacén", "usuario": "jramos", "nombre": "Julio Ramos" },
+    { "rol": "Vendedor", "usuario": "cmedina", "nombre": "Carlos Medina" },
+    { "rol": "Cliente", "usuario": "mfernandez", "nombre": "María Fernández" },
+    { "rol": "Soporte", "usuario": "soporte", "nombre": "Soporte eSolutionsNet" }
+  ]
+}

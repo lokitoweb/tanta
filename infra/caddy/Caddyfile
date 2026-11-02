@@ -1,0 +1,48 @@
+# Caddy: TLS automático (Let's Encrypt), cabeceras de seguridad y SPA.
+# Sustituye {$DOMINIO} por tantapanaderia.com en el .env.production.
+
+{$DOMINIO}, www.{$DOMINIO} {
+	encode zstd gzip
+
+	# --- Seguridad ---
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' https://{$DOMINIO}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+
+	# El certificado y la clave privada nunca se sirven.
+	@noPermitido path /.*\.(env|sql|log|pem|key)$
+	respond @noPermitido 404
+
+	# --- API ---
+	handle /api/* {
+		reverse_proxy api:3001 {
+			header_up X-Real-IP {remote_host}
+			health_uri /api/v1/health
+			health_interval 30s
+		}
+	}
+
+	# --- Aplicación web (SPA) ---
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+
+		# Los assets con hash se cachean para siempre; el index nunca.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@html path /index.html
+		header @html Cache-Control "no-cache"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

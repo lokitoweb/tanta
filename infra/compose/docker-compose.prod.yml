@@ -1,0 +1,117 @@
+# Producción de Tanta: PostgreSQL + API + Caddy (TLS automático) + respaldos.
+# Uso:  docker compose --env-file .env.production -f infra/compose/docker-compose.prod.yml up -d
+name: tanta
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${PGUSER}
+      POSTGRES_PASSWORD: ${PGPASSWORD}
+      POSTGRES_DB: ${PGDATABASE}
+      TZ: America/Lima
+      PGTZ: America/Lima
+    volumes:
+      - tanta_pgdata:/var/lib/postgresql/data
+      - tanta_wal:/var/lib/postgresql/wal-archive
+    # Sin puertos publicados: la base solo es alcanzable desde la red interna.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_connections=120
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /var/lib/postgresql/wal-archive/%f && cp %p /var/lib/postgresql/wal-archive/%f
+      - -c
+      - log_min_duration_statement=300
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER} -d ${PGDATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      LOGIN_RATE_MAX: ${LOGIN_RATE_MAX:-8}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      LOG_LEVEL: info
+    expose:
+      - "3001"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+      restart_policy:
+        condition: on-failure
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMINIO: ${DOMINIO}
+      CORREO: ${CORREO}
+    volumes:
+      - ./../../infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./../../apps/web/dist:/srv/web:ro
+      - caddy_data:/data
+      - caddy_config:/config
+  backup:
+    image: postgres:17-alpine
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${PGPASSWORD}
+      PGHOST: postgres
+      PGUSER: ${PGUSER}
+      PGDATABASE: ${PGDATABASE}
+      RETENCION_DIAS: ${RETENCION_DIAS:-30}
+    volumes:
+      - ./../../infra/backup:/scripts:ro
+      - tanta_backups:/backups
+    entrypoint: ["/bin/sh", "/scripts/loop.sh"]
+
+volumes:
+  tanta_pgdata:
+  tanta_wal:
+  tanta_backups:
+  caddy_data:
+  caddy_config:

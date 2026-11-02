@@ -1,0 +1,30 @@
+{
+  "name": "@tanta/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node --env-file-if-exists=../../.env dist/src/server.js",
+    "migrate": "node --env-file-if-exists=../../.env dist/db/migrate.js",
+    "seed": "node --env-file-if-exists=../../.env dist/db/seed.js",
+    "setup": "pnpm build && node dist/db/migrate.js && node dist/db/seed.js"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.5",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/helmet": "^13.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@noble/hashes": "^2.4.0",
+    "fastify": "^5.2.1",
+    "jose": "^5.9.6",
+    "pg": "^8.13.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.3"
+  }
+}

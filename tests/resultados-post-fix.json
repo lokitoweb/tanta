@@ -1,0 +1,161 @@
+{
+  "etiqueta": "post-fix",
+  "inicio": "2026-11-02T00:48:43.986Z",
+  "fin": "2026-11-02T00:49:08.438Z",
+  "duracionSeg": 20.07,
+  "config": {
+    "concurrencia": 20,
+    "duracion": 20,
+    "calentamiento": 3,
+    "base": "http://127.0.0.1:3001/api/v1",
+    "clave": "tanta",
+    "etiqueta": "post-fix",
+    "salida": "tests/resultados-post-fix.json",
+    "xff": "vu",
+    "idempotencia": false,
+    "pausa": 0,
+    "timeout": 30000,
+    "semilla": 20261101,
+    "fixtures": "tests/fixtures.json",
+    "solo": []
+  },
+  "logins": [
+    {
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "ms": 398.5
+    },
+    {
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "ms": 243.3
+    },
+    {
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "ms": 209.6
+    },
+    {
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "ms": 214.2
+    }
+  ],
+  "usuariosPorPersona": {
+    "rquispe": 4,
+    "osquilcate": 5,
+    "cmedina": 7,
+    "jramos": 4
+  },
+  "mezclaObjetivo": {
+    "GET /datos": 60,
+    "GET /kardex/INS-001": 15,
+    "POST /ventas": 20,
+    "POST /cobranza": 5
+  },
+  "mezclaRealPct": {
+    "GET /kardex/INS-001": 14.8,
+    "POST /ventas": 20.9,
+    "GET /datos": 59.7,
+    "POST /cobranza": 4.6
+  },
+  "totales": {
+    "n": 934,
+    "rps": 46.53,
+    "errores": 238,
+    "tasaError": 25.48,
+    "p50": 321.4,
+    "p90": 760.2,
+    "p95": 937.4,
+    "p99": 2711.5,
+    "max": 3401.8
+  },
+  "endpoints": [
+    {
+      "endpoint": "GET /datos",
+      "n": 558,
+      "rps": 27.8,
+      "p50": 420,
+      "p90": 868.6,
+      "p95": 1114.7,
+      "p99": 2799.1,
+      "max": 3401.8,
+      "media": 535.6,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 558
+      },
+      "codigos": [],
+      "kbytes": 9905.3
+    },
+    {
+      "endpoint": "POST /ventas",
+      "n": 195,
+      "rps": 9.71,
+      "p50": 221,
+      "p90": 497.6,
+      "p95": 648.2,
+      "p99": 2101.8,
+      "max": 2674.2,
+      "media": 284.2,
+      "errores": 195,
+      "tasaError": 100,
+      "estados": {
+        "404": 195
+      },
+      "codigos": [
+        {
+          "status": 404,
+          "codigo": "PRODUCTO_NO_EXISTE",
+          "n": 195,
+          "mensaje": "PRODUCTO_NO_EXISTE"
+        }
+      ],
+      "kbytes": 23.6
+    },
+    {
+      "endpoint": "GET /kardex/INS-001",
+      "n": 138,
+      "rps": 6.87,
+      "p50": 185.8,
+      "p90": 396.7,
+      "p95": 533.1,
+      "p99": 679.3,
+      "max": 867,
+      "media": 227.8,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 138
+      },
+      "codigos": [],
+      "kbytes": 287.7
+    },
+    {
+      "endpoint": "POST /cobranza",
+      "n": 43,
+      "rps": 2.14,
+      "p50": 309.4,
+      "p90": 550.1,
+      "p95": 690.7,
+      "p99": 2736.5,
+      "max": 2736.5,
+      "media": 352.4,
+      "errores": 43,
+      "tasaError": 100,
+      "estados": {
+        "404": 43
+      },
+      "codigos": [
+        {
+          "status": 404,
+          "codigo": "CXC_NO_EXISTE",
+          "n": 43,
+          "mensaje": "CXC_NO_EXISTE"
+        }
+      ],
+      "kbytes": 4.6
+    }
+  ]
+}

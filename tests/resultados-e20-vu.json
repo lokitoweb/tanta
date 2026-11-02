@@ -1,0 +1,155 @@
+{
+  "etiqueta": "e20-vu",
+  "inicio": "2026-11-02T00:30:59.412Z",
+  "fin": "2026-11-02T00:31:29.580Z",
+  "duracionSeg": 25.21,
+  "config": {
+    "concurrencia": 20,
+    "duracion": 25,
+    "calentamiento": 4,
+    "base": "http://127.0.0.1:3001/api/v1",
+    "clave": "tanta",
+    "etiqueta": "e20-vu",
+    "salida": "tests/resultados-e20-vu.json",
+    "xff": "req",
+    "idempotencia": false,
+    "pausa": 0,
+    "timeout": 30000,
+    "semilla": 20261101,
+    "fixtures": "tests/fixtures.json",
+    "solo": []
+  },
+  "logins": [
+    {
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "ms": 239.6
+    },
+    {
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "ms": 160.6
+    },
+    {
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "ms": 147.3
+    },
+    {
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "ms": 127.6
+    }
+  ],
+  "usuariosPorPersona": {
+    "rquispe": 4,
+    "osquilcate": 5,
+    "cmedina": 7,
+    "jramos": 4
+  },
+  "mezclaObjetivo": {
+    "GET /datos": 60,
+    "GET /kardex/INS-001": 15,
+    "POST /ventas": 20,
+    "POST /cobranza": 5
+  },
+  "mezclaRealPct": {
+    "GET /kardex/INS-001": 15.3,
+    "GET /datos": 66.2,
+    "POST /ventas": 15.1,
+    "POST /cobranza": 3.4
+  },
+  "totales": {
+    "n": 1119,
+    "rps": 44.38,
+    "errores": 17,
+    "tasaError": 1.52,
+    "p50": 432.8,
+    "p90": 655.5,
+    "p95": 728.1,
+    "p99": 894,
+    "max": 1149.3
+  },
+  "endpoints": [
+    {
+      "endpoint": "GET /datos",
+      "n": 741,
+      "rps": 29.39,
+      "p50": 435.3,
+      "p90": 608.7,
+      "p95": 679.4,
+      "p99": 804.3,
+      "max": 867,
+      "media": 450.4,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 741
+      },
+      "codigos": [],
+      "kbytes": 21828.2
+    },
+    {
+      "endpoint": "GET /kardex/INS-001",
+      "n": 171,
+      "rps": 6.78,
+      "p50": 252.8,
+      "p90": 396.7,
+      "p95": 432.3,
+      "p99": 495.3,
+      "max": 570.9,
+      "media": 266.1,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 171
+      },
+      "codigos": [],
+      "kbytes": 392.1
+    },
+    {
+      "endpoint": "POST /ventas",
+      "n": 169,
+      "rps": 6.7,
+      "p50": 593.7,
+      "p90": 824.5,
+      "p95": 951.6,
+      "p99": 1030.4,
+      "max": 1149.3,
+      "media": 600,
+      "errores": 17,
+      "tasaError": 10.06,
+      "estados": {
+        "201": 152,
+        "500": 17
+      },
+      "codigos": [
+        {
+          "status": 500,
+          "codigo": "duplicate key value violates unique constraint \"venta_codigo_key\"",
+          "n": 17,
+          "mensaje": "duplicate key value violates unique constraint \"venta_codigo_key\""
+        }
+      ],
+      "kbytes": 78.5
+    },
+    {
+      "endpoint": "POST /cobranza",
+      "n": 38,
+      "rps": 1.51,
+      "p50": 567.4,
+      "p90": 698.4,
+      "p95": 720.8,
+      "p99": 877.6,
+      "max": 877.6,
+      "media": 562.9,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "201": 38
+      },
+      "codigos": [],
+      "kbytes": 3.5
+    }
+  ]
+}

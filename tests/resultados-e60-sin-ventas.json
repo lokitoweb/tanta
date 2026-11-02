@@ -1,0 +1,132 @@
+{
+  "etiqueta": "e60-sin-ventas",
+  "inicio": "2026-11-02T00:35:54.303Z",
+  "fin": "2026-11-02T00:36:22.936Z",
+  "duracionSeg": 22.75,
+  "config": {
+    "concurrencia": 60,
+    "duracion": 20,
+    "calentamiento": 4,
+    "base": "http://127.0.0.1:3001/api/v1",
+    "clave": "tanta",
+    "etiqueta": "e60-sin-ventas",
+    "salida": "tests/resultados-e60-sin-ventas.json",
+    "xff": "req",
+    "idempotencia": false,
+    "pausa": 0,
+    "timeout": 30000,
+    "semilla": 20261101,
+    "fixtures": "tests/fixtures.json",
+    "solo": [
+      "datos",
+      "kardex",
+      "cobranza"
+    ]
+  },
+  "logins": [
+    {
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "ms": 239.5
+    },
+    {
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "ms": 118
+    },
+    {
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "ms": 115.9
+    },
+    {
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "ms": 166.6
+    }
+  ],
+  "usuariosPorPersona": {
+    "osquilcate": 20,
+    "rquispe": 13,
+    "jramos": 14,
+    "cmedina": 13
+  },
+  "mezclaObjetivo": {
+    "GET /datos": 60,
+    "GET /kardex/INS-001": 15,
+    "POST /ventas": 20,
+    "POST /cobranza": 5
+  },
+  "mezclaRealPct": {
+    "GET /kardex/INS-001": 17.8,
+    "GET /datos": 77.6,
+    "POST /cobranza": 4.5
+  },
+  "totales": {
+    "n": 814,
+    "rps": 35.78,
+    "errores": 0,
+    "tasaError": 0,
+    "p50": 1478.5,
+    "p90": 2161,
+    "p95": 2894.2,
+    "p99": 3709.7,
+    "max": 4232.6
+  },
+  "endpoints": [
+    {
+      "endpoint": "GET /datos",
+      "n": 632,
+      "rps": 27.78,
+      "p50": 1536.2,
+      "p90": 2131,
+      "p95": 2987.2,
+      "p99": 3715.1,
+      "max": 3757.4,
+      "media": 1682.9,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 632
+      },
+      "codigos": [],
+      "kbytes": 18680.4
+    },
+    {
+      "endpoint": "GET /kardex/INS-001",
+      "n": 145,
+      "rps": 6.37,
+      "p50": 996.2,
+      "p90": 1694.3,
+      "p95": 2468.1,
+      "p99": 2913.9,
+      "max": 3034.9,
+      "media": 1134.2,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 145
+      },
+      "codigos": [],
+      "kbytes": 332.5
+    },
+    {
+      "endpoint": "POST /cobranza",
+      "n": 37,
+      "rps": 1.63,
+      "p50": 1941.3,
+      "p90": 2649.8,
+      "p95": 3036.2,
+      "p99": 4232.6,
+      "max": 4232.6,
+      "media": 2102.8,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "201": 37
+      },
+      "codigos": [],
+      "kbytes": 3.4
+    }
+  ]
+}

@@ -1,0 +1,155 @@
+{
+  "etiqueta": "e60-vu",
+  "inicio": "2026-11-02T00:32:58.676Z",
+  "fin": "2026-11-02T00:33:30.399Z",
+  "duracionSeg": 26.23,
+  "config": {
+    "concurrencia": 60,
+    "duracion": 25,
+    "calentamiento": 4,
+    "base": "http://127.0.0.1:3001/api/v1",
+    "clave": "tanta",
+    "etiqueta": "e60-vu",
+    "salida": "tests/resultados-e60-vu.json",
+    "xff": "req",
+    "idempotencia": false,
+    "pausa": 0,
+    "timeout": 30000,
+    "semilla": 20261101,
+    "fixtures": "tests/fixtures.json",
+    "solo": []
+  },
+  "logins": [
+    {
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "ms": 243.3
+    },
+    {
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "ms": 146
+    },
+    {
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "ms": 108.4
+    },
+    {
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "ms": 108.8
+    }
+  ],
+  "usuariosPorPersona": {
+    "osquilcate": 15,
+    "rquispe": 11,
+    "jramos": 11,
+    "cmedina": 23
+  },
+  "mezclaObjetivo": {
+    "GET /datos": 60,
+    "GET /kardex/INS-001": 15,
+    "POST /ventas": 20,
+    "POST /cobranza": 5
+  },
+  "mezclaRealPct": {
+    "GET /kardex/INS-001": 16.2,
+    "GET /datos": 63.3,
+    "POST /ventas": 17,
+    "POST /cobranza": 3.6
+  },
+  "totales": {
+    "n": 1144,
+    "rps": 43.61,
+    "errores": 20,
+    "tasaError": 1.75,
+    "p50": 1318.7,
+    "p90": 1837.4,
+    "p95": 1999.4,
+    "p99": 2422.6,
+    "max": 2719.9
+  },
+  "endpoints": [
+    {
+      "endpoint": "GET /datos",
+      "n": 724,
+      "rps": 27.6,
+      "p50": 1316.7,
+      "p90": 1647.8,
+      "p95": 1837,
+      "p99": 1976.6,
+      "max": 2057.7,
+      "media": 1362.4,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 724
+      },
+      "codigos": [],
+      "kbytes": 21355.7
+    },
+    {
+      "endpoint": "POST /ventas",
+      "n": 194,
+      "rps": 7.4,
+      "p50": 1718.5,
+      "p90": 2317.9,
+      "p95": 2446.9,
+      "p99": 2660.7,
+      "max": 2719.9,
+      "media": 1745.1,
+      "errores": 20,
+      "tasaError": 10.31,
+      "estados": {
+        "201": 174,
+        "500": 20
+      },
+      "codigos": [
+        {
+          "status": 500,
+          "codigo": "duplicate key value violates unique constraint \"venta_codigo_key\"",
+          "n": 20,
+          "mensaje": "duplicate key value violates unique constraint \"venta_codigo_key\""
+        }
+      ],
+      "kbytes": 91
+    },
+    {
+      "endpoint": "GET /kardex/INS-001",
+      "n": 185,
+      "rps": 7.05,
+      "p50": 837.7,
+      "p90": 1137.3,
+      "p95": 1189,
+      "p99": 1280,
+      "max": 1333.4,
+      "media": 852.1,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "200": 185
+      },
+      "codigos": [],
+      "kbytes": 424.2
+    },
+    {
+      "endpoint": "POST /cobranza",
+      "n": 41,
+      "rps": 1.56,
+      "p50": 1714.5,
+      "p90": 2190.5,
+      "p95": 2343.6,
+      "p99": 2442,
+      "max": 2442,
+      "media": 1807.4,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "201": 41
+      },
+      "codigos": [],
+      "kbytes": 3.8
+    }
+  ]
+}
