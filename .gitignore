@@ -12,5 +12,4 @@ coverage/
 .dsh-work/
 apps/mobile/.dart_tool/
 apps/mobile/build/
-apps/web/public/fonts/*.woff2
 .pnpm-store/

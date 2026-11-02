@@ -78,19 +78,20 @@ services:
         condition: on-failure
 
   caddy:
-    image: caddy:2-alpine
+    # La web se compila dentro de la imagen (apps/web/Dockerfile): no hace falta Node en el servidor.
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
     restart: always
     depends_on:
       - api
     ports:
-      - "80:80"
-      - "443:443"
+      - "${PUERTO_HTTP:-80}:80"
+      - "${PUERTO_HTTPS:-443}:443"
     environment:
       DOMINIO: ${DOMINIO}
       CORREO: ${CORREO}
     volumes:
-      - ./../../infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./../../apps/web/dist:/srv/web:ro
       - caddy_data:/data
       - caddy_config:/config
   backup:

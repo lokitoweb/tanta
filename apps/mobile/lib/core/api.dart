@@ -48,7 +48,9 @@ class Api {
   static const _limite = Duration(seconds: 20);
 
   Future<void> cargarSesion() async {
-    if (pruebas) base = await _seguro.read(key: 'servidor') ?? _baseCompilada;
+    // Servidor vigente: el último que indicó el sistema (o el usuario en la build de pruebas).
+    // La dirección compilada solo se usa la primera vez.
+    base = await _seguro.read(key: 'servidor') ?? _baseCompilada;
     // En producción solo HTTPS: un token nunca viaja en claro.
     if (kReleaseMode && !base.startsWith('https://')) {
       throw StateError('API_URL debe usar https:// en producción');
@@ -298,7 +300,22 @@ class Api {
       final r = await http.get(Uri.parse('$base/config/publica')).timeout(const Duration(seconds: 5));
       if (r.statusCode == 200) config = jsonDecode(r.body) as Map<String, dynamic>;
     } catch (_) {/* sin red: se usa la marca por defecto */}
+    await _seguirServidorIndicado();
     return config;
+  }
+
+  /// Si el superadmin indicó otro servidor (Configuración → App móvil), la app se muda sola,
+  /// pero solo a https y solo si el nuevo responde: nunca queda apuntando a la nada.
+  Future<void> _seguirServidorIndicado() async {
+    final indicado = '${(config['movil'] as Map?)?['urlApi'] ?? ''}'.trim().replaceAll(RegExp(r'/+$'), '');
+    if (indicado.isEmpty || indicado == base || !indicado.startsWith('https://')) return;
+    try {
+      final r = await http.get(Uri.parse('$indicado/config/publica')).timeout(const Duration(seconds: 5));
+      if (r.statusCode != 200) return;
+      base = indicado;
+      config = jsonDecode(r.body) as Map<String, dynamic>;
+      await _seguro.write(key: 'servidor', value: indicado);
+    } catch (_) {/* el nuevo aún no responde: se reintenta en la próxima apertura */}
   }
 
   Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;

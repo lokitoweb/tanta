@@ -33,4 +33,6 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=4s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3001/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/src/server.js"]
+# Migra y arranca: una base nueva queda con tablas, roles, menú y parámetros antes de atender.
+# El migrador es idempotente y transaccional; si una migración falla, el API no arranca.
+CMD ["sh", "-c", "node dist/db/migrate.js && exec node dist/src/server.js"]

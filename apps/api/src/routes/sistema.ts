@@ -64,7 +64,9 @@ const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
   marca: z.object({ nombreApp: z.string().trim().min(2).max(40), colorPrimario: color, colorAcento: color,
     logoId: z.string().uuid().nullable(), iconoId: z.string().uuid().nullable() }),
   movil: z.object({ versionActual: semver, versionMinima: semver, urlAndroid: urlHttps, urlIos: urlHttps,
-    mensajeActualizacion: z.string().trim().min(5).max(200) }),
+    mensajeActualizacion: z.string().trim().min(5).max(200),
+    // Servidor que deben usar las apps instaladas: si cambia, se mudan solas al abrir.
+    urlApi: urlHttps.optional().default('') }),
   legal: z.object({ urlPrivacidad: urlHttps, urlTerminos: urlHttps, correoSoporte: z.union([z.literal(''), z.string().email()]) }),
   firebase: z.object({ habilitado: z.boolean(), projectId: z.string().max(100), apiKey: z.string().max(100),
     appIdAndroid: z.string().max(100), appIdIos: z.string().max(100), senderId: z.string().max(40),

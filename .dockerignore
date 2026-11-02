@@ -1,0 +1,16 @@
+# Solo lo necesario para construir API y web: builds rápidos y sin secretos en la imagen.
+.git
+**/node_modules
+.pnpm-store
+**/dist
+apps/mobile
+.dsh-work
+.shots
+diagrams
+docs
+tests
+.env
+.env.*
+!.env.example
+.claude
+.github

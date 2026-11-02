@@ -111,6 +111,11 @@ export function Configuracion() {
               <Campo etiqueta="Versión mínima permitida"><input className="field__input mono" placeholder="1.1.0" value={movil.versionMinima ?? ''} onChange={(e) => campo('movil', 'versionMinima', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Enlace Google Play"><input className="field__input" type="url" placeholder="https://play.google.com/store/apps/details?id=…" value={movil.urlAndroid ?? ''} onChange={(e) => campo('movil', 'urlAndroid', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Enlace App Store"><input className="field__input" type="url" placeholder="https://apps.apple.com/app/id…" value={movil.urlIos ?? ''} onChange={(e) => campo('movil', 'urlIos', e.target.value.trim())} /></Campo>
+              <Campo etiqueta="Servidor de las apps (URL del API)" ancho>
+                <input className="field__input" type="url" placeholder="https://www.tantapanaderia.com/api/v1" value={movil.urlApi ?? ''}
+                  onChange={(e) => campo('movil', 'urlApi', e.target.value.trim())} />
+              </Campo>
+              <p className="dialogo__nota field--ancho">Si mudas el sistema a otro dominio, escribe aquí el nuevo antes de apagar el actual: cada app lo lee al abrir, comprueba que responde y se cambia sola. Vacío = las apps siguen donde están.</p>
               <Campo etiqueta="Mensaje al pedir actualización" ancho><input className="field__input" maxLength={200} value={movil.mensajeActualizacion ?? ''} onChange={(e) => campo('movil', 'mensajeActualizacion', e.target.value)} /></Campo>
             </div>
             <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('movil')} disabled={guardando}>Guardar versiones</Boton></div>
