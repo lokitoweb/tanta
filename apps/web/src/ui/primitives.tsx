@@ -15,7 +15,7 @@ export function BrandMark({ variant = 'light', size = 'md' }: { variant?: 'light
     return () => window.removeEventListener('tanta:config', leer);
   }, []);
   if (cfg?.marca.logoId) {
-    return <img className={`brandmark-img brandmark-img--${size}`} src={urlApi(`/archivos/${cfg.marca.logoId}`)} alt={cfg.marca.nombreApp} />;
+    return <img className={`brandmark-img brandmark-img--${size} brandmark-img--${variant}`} src={urlApi(`/archivos/${cfg.marca.logoId}`)} alt={cfg.marca.nombreApp} />;
   }
   return (
     <div className={`brandmark brandmark--${variant} brandmark--${size}`}>

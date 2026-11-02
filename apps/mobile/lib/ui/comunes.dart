@@ -15,9 +15,11 @@ class Marca extends StatelessWidget {
     // Logo subido por el superadmin en Configuración → Marca; si no hay, el wordmark.
     final logoId = (Api.instancia.config['marca'] as Map?)?['logoId'];
     if (logoId != null) {
-      return Image.network(Api.instancia.urlArchivo('/archivos/$logoId'), height: 56 * escala, fit: BoxFit.contain,
+      final logo = Image.network(Api.instancia.urlArchivo('/archivos/$logoId'), height: 56 * escala, fit: BoxFit.contain,
           semanticLabel: '${(Api.instancia.config['marca'] as Map)['nombreApp'] ?? 'Tanta'}',
           errorBuilder: (_, __, ___) => _wordmark());
+      // Sobre fondo oscuro el logo se pinta en crema para que se lea.
+      return invertida ? ColorFiltered(colorFilter: const ColorFilter.mode(TantaColors.cream50, BlendMode.srcIn), child: logo) : logo;
     }
     return _wordmark();
   }
