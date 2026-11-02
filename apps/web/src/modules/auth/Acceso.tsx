@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import demo from '@/config/demo.json';
 import { ApiError, activarMfa, enrolarMfa, login, verificarMfa } from '@/core/api';
 import { Boton } from '@/ui/primitives';
 import { TarjetaMarca } from './TarjetaMarca';
+import { Recuperar } from './Recuperar';
+import { api } from '@/core/api';
 import { Icon } from '@/ui/icons';
 
 /** Mensaje claro para el usuario; nunca revela si el usuario existe. */
@@ -32,6 +34,11 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
   const [verClave, setVerClave] = useState(false);
   const [usarRecuperacion, setUsarRecuperacion] = useState(false);
   const [mayus, setMayus] = useState(false);
+  const [recuperando, setRecuperando] = useState(false);
+  const [avisoOk, setAvisoOk] = useState<string | null>(null);
+  // El enlace solo aparece si el Superadmin configuró el correo (si no, no serviría).
+  const [puedeRecuperar, setPuedeRecuperar] = useState(false);
+  useEffect(() => { api<{ disponible: boolean }>('/auth/recuperar/disponible', { sinAuth: true }).then((r) => setPuedeRecuperar(r.disponible)).catch(() => {}); }, []);
   const detectarMayus = (e: React.KeyboardEvent) => setMayus(e.getModifierState?.('CapsLock') ?? false);
 
   const entrar = async () => {
@@ -118,18 +125,20 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
         <div className="acceso__caja">
           <header className="acceso__head">
             <h1>
-              {paso.tipo === 'credenciales' ? 'Bienvenido de nuevo'
+              {recuperando ? 'Recuperar contraseña' : paso.tipo === 'credenciales' ? 'Iniciar sesión'
                 : paso.tipo === 'codigo' ? 'Verificación en dos pasos'
                   : 'Activa la verificación en dos pasos'}
             </h1>
             <p>
-              {paso.tipo === 'credenciales' ? 'Ingresa con tu cuenta para continuar.'
+              {recuperando ? 'Te enviaremos un código a tu correo registrado.' : paso.tipo === 'credenciales' ? 'Ingresa con tu usuario y contraseña.'
                 : paso.tipo === 'codigo' ? `Escribe el código de tu app autenticadora, ${paso.nombre}.`
                   : 'Tu perfil puede mover dinero y usuarios: protege la cuenta con un segundo factor.'}
             </p>
           </header>
 
-          {paso.tipo === 'credenciales' && (
+          {recuperando && <Recuperar onVolver={(aviso) => { setRecuperando(false); setAvisoOk(aviso ?? null); setClave(''); }} />}
+
+          {!recuperando && paso.tipo === 'credenciales' && (
             <form className="form" onSubmit={(e) => { e.preventDefault(); void entrar(); }}>
               <label className="field">
                 <span className="field__label">Usuario</span>
@@ -168,6 +177,10 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                 {mayus && <span className="field__aviso"><Icon name="alert" size={13} /> Bloq Mayús está activado</span>}
               </label>
 
+              {puedeRecuperar && (
+                <button type="button" className="acceso__olvido" onClick={() => { setError(undefined); setAvisoOk(null); setRecuperando(true); }}>¿Olvidaste tu contraseña?</button>
+              )}
+              {avisoOk && <p className="form__ok" role="status"><Icon name="check" size={15} /> {avisoOk}</p>}
               {error && (
                 <p className="form__error" role="alert">
                   <Icon name="alert" size={15} /> {error}

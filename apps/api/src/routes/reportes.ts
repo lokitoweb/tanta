@@ -63,7 +63,7 @@ const semaforo = (margen: number, objetivo: number) => (margen >= objetivo ? 've
 
 const REPORTES: Record<string, Reporte> = {
   'G-01': {
-    titulo: 'Resumen ejecutivo del período', permiso: 'reportes.ver',
+    titulo: 'Resumen ejecutivo del período', permiso: 'dashboard.ver',
     columnas: [{ key: 'indicador', label: 'Indicador' }, { key: 'actual', label: 'Período', tipo: 'dinero' }, { key: 'anterior', label: 'Período anterior', tipo: 'dinero' }, { key: 'variacion', label: 'Variación', tipo: 'pct' }],
     async calcular(f) {
       const dias = Math.max(1, Math.round((Date.parse(f.hasta) - Date.parse(f.desde)) / 86_400_000) + 1);
@@ -86,7 +86,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-02': {
-    titulo: 'Rentabilidad por producto', permiso: 'reportes.ver',
+    titulo: 'Rentabilidad por producto', permiso: 'dashboard.ver',
     columnas: [{ key: 'nombre', label: 'Producto' }, { key: 'categoria', label: 'Categoría' }, ...margenCols, { key: 'objetivo', label: 'Objetivo', tipo: 'pct' }, { key: 'semaforo', label: 'Estado', tipo: 'semaforo' }],
     async calcular(f) {
       const filas = (await agrupar(f, 'producto', 'max(categoria) categoria, max(margen_objetivo) objetivo,'))
@@ -95,7 +95,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-03': {
-    titulo: 'Rentabilidad por categoría', permiso: 'reportes.ver',
+    titulo: 'Rentabilidad por categoría', permiso: 'dashboard.ver',
     columnas: [{ key: 'nombre', label: 'Categoría' }, ...margenCols, { key: 'participacion', label: 'Aporte a ventas', tipo: 'pct' }, { key: 'objetivo', label: 'Objetivo', tipo: 'pct' }, { key: 'semaforo', label: 'Estado', tipo: 'semaforo' }],
     async calcular(f) {
       const filas = await agrupar(f, 'categoria', 'max(margen_objetivo) objetivo,');
@@ -104,7 +104,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-04': {
-    titulo: 'Rentabilidad por cliente', permiso: 'reportes.ver',
+    titulo: 'Rentabilidad por cliente', permiso: 'dashboard.ver',
     columnas: [{ key: 'nombre', label: 'Cliente' }, { key: 'tickets', label: 'Compras', tipo: 'num' }, ...margenCols, { key: 'alerta', label: 'Lectura' }],
     async calcular(f) {
       const filas = await agrupar(f, 'cliente', 'count(DISTINCT venta_id) tickets,');
@@ -114,7 +114,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-05': {
-    titulo: 'Rentabilidad por vendedor y canal', permiso: 'reportes.ver',
+    titulo: 'Rentabilidad por vendedor y canal', permiso: 'dashboard.ver',
     columnas: [{ key: 'nombre', label: 'Vendedor' }, { key: 'canal', label: 'Canal' }, { key: 'tickets', label: 'Ventas', tipo: 'num' }, ...margenCols.slice(1)],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`${LINEAS}
@@ -125,7 +125,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-06': {
-    titulo: 'Margen por venta (detalle)', permiso: 'reportes.ver',
+    titulo: 'Margen por venta (detalle)', permiso: 'dashboard.ver',
     columnas: [{ key: 'codigo', label: 'Venta' }, { key: 'fecha', label: 'Fecha', tipo: 'fecha' }, { key: 'cliente', label: 'Cliente' }, { key: 'vendedor', label: 'Vendedor' }, { key: 'ventas', label: 'Ingreso neto', tipo: 'dinero' }, { key: 'costo', label: 'Costo', tipo: 'dinero' }, { key: 'utilidad', label: 'Utilidad', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`${LINEAS}
@@ -137,7 +137,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-07': {
-    titulo: 'Estructura de costos', permiso: 'reportes.ver',
+    titulo: 'Estructura de costos', permiso: 'dashboard.ver',
     columnas: [{ key: 'concepto', label: 'Concepto' }, { key: 'tipo', label: 'Tipo' }, { key: 'monto', label: 'Monto', tipo: 'dinero' }, { key: 'sobreVentas', label: '% sobre ventas', tipo: 'pct' }],
     async calcular(f) {
       // Lo vendido descompuesto con la ficha vigente: insumos, merma y CIF (por concepto).
@@ -157,7 +157,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-08': {
-    titulo: 'Variación del costo de insumos', permiso: 'reportes.ver',
+    titulo: 'Variación del costo de insumos', permiso: 'dashboard.ver',
     columnas: [{ key: 'insumo', label: 'Insumo' }, { key: 'cppInicio', label: 'CPP inicial', tipo: 'dinero' }, { key: 'cppActual', label: 'CPP actual', tipo: 'dinero' }, { key: 'variacion', label: 'Variación', tipo: 'pct' }, { key: 'impactoMensual', label: 'Impacto en costo (mes)', tipo: 'dinero' }, { key: 'alerta', label: 'Alerta' }],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`
@@ -176,7 +176,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-09': {
-    titulo: 'Punto de equilibrio', permiso: 'reportes.ver',
+    titulo: 'Punto de equilibrio', permiso: 'dashboard.ver',
     columnas: [{ key: 'indicador', label: 'Indicador' }, { key: 'valor', label: 'Valor', tipo: 'dinero' }],
     async calcular(f) {
       const r = await uno<Record<string, string>>(`${LINEAS}
@@ -202,7 +202,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-10': {
-    titulo: 'Mermas y desperdicio', permiso: 'reportes.ver',
+    titulo: 'Mermas y desperdicio', permiso: 'dashboard.ver',
     columnas: [{ key: 'item', label: 'Ítem' }, { key: 'origen', label: 'Origen' }, { key: 'motivo', label: 'Motivo' }, { key: 'cantidad', label: 'Cantidad', tipo: 'num' }, { key: 'valor', label: 'Valor', tipo: 'dinero' }],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`
@@ -222,7 +222,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-11': {
-    titulo: 'Cuentas por cobrar', permiso: 'reportes.ver',
+    titulo: 'Cuentas por cobrar', permiso: 'dashboard.ver',
     columnas: [{ key: 'tramo', label: 'Antigüedad' }, { key: 'documentos', label: 'Documentos', tipo: 'num' }, { key: 'saldo', label: 'Saldo', tipo: 'dinero' }, { key: 'participacion', label: '%', tipo: 'pct' }],
     async calcular() {
       const filas = await q<Record<string, string>>(`
@@ -238,7 +238,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-12': {
-    titulo: 'Inventario valorizado', permiso: 'reportes.ver',
+    titulo: 'Inventario valorizado', permiso: 'dashboard.ver',
     columnas: [{ key: 'tipo', label: 'Tipo' }, { key: 'item', label: 'Ítem' }, { key: 'stock', label: 'Stock', tipo: 'num' }, { key: 'valor', label: 'Valor', tipo: 'dinero' }, { key: 'rotacion', label: 'Rotación (veces/mes)', tipo: 'num' }, { key: 'critico', label: 'Estado' }],
     async calcular() {
       const filas = await q<Record<string, string>>(`
@@ -256,7 +256,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'G-13': {
-    titulo: 'Producción vs. ventas', permiso: 'reportes.ver',
+    titulo: 'Producción vs. ventas', permiso: 'dashboard.ver',
     columnas: [{ key: 'producto', label: 'Producto' }, { key: 'planificado', label: 'Planificado', tipo: 'num' }, { key: 'producido', label: 'Producido real', tipo: 'num' }, { key: 'cumplimiento', label: 'Cumplimiento', tipo: 'pct' }, { key: 'vendido', label: 'Vendido', tipo: 'num' }],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`

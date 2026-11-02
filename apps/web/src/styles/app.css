@@ -1044,3 +1044,19 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 @media (prefers-reduced-motion: reduce) {
   .tarjeta3d__tarjeta, .tarjeta3d__sombra { animation: none; transition: none; }
 }
+
+.acceso__olvido { align-self: flex-end; font-size: .8125rem; font-weight: 600; color: var(--tanta-honey-600, #9A6A2F); margin-top: -4px; }
+.acceso__olvido:hover { text-decoration: underline; }
+.form__ok { display: flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--tanta-state-ok); background: var(--tanta-state-ok-bg); padding: 10px 12px; border-radius: var(--tanta-radius-sm); }
+.field__grupo--icono { position: relative; }
+.field__grupo--icono > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--tanta-text-muted); pointer-events: none; }
+.field__grupo--icono > .field__input { padding-left: 38px; }
+
+.activacion { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px 24px; align-items: center; margin-top: 14px; }
+.activacion img { border-radius: 10px; border: 1px solid var(--tanta-border-subtle); background: #fff; }
+.activacion__pasos { margin: 0; padding-left: 18px; font-size: .875rem; line-height: 1.7; }
+.activacion__enlace { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.activacion__enlace code { background: var(--tanta-cream-100, #F6F1EA); padding: 6px 10px; border-radius: 6px; font-size: .75rem; word-break: break-all; }
+.subida-firebase { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.subida-firebase label { cursor: pointer; }
+@media (max-width: 760px) { .activacion { grid-template-columns: 1fr; justify-items: center; } }

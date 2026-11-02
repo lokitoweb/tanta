@@ -105,12 +105,13 @@ export async function rutasOperaciones(app: FastifyInstance) {
           );
           const op = r.rows[0];
           if (!op) throw Object.assign(new Error('OP_NO_EXISTE'), { status: 404 });
-          if (op.estado !== 'EN_PROCESO' && op.estado !== 'PENDIENTE') {
-            throw Object.assign(new Error('OP_ESTADO_INVALIDO'), { status: 409 });
+          if (op.estado !== 'EN_PROCESO') {
+            throw Object.assign(new Error(op.estado === 'PENDIENTE' ? 'Primero inicia la orden (Pendiente → En proceso).' : 'OP_ESTADO_INVALIDO'), { status: 409 });
           }
 
           const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
-            'SELECT insumo_id, insumo, unidad, cantidad FROM core.receta_detalle WHERE receta_id = $1 ORDER BY orden',
+            `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento AS cantidad
+             FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
             [op.receta_id],
           );
 
@@ -203,6 +204,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
     })).min(1).max(50),
     formaPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'CREDITO']).default('EFECTIVO'),
     clienteId: z.string().uuid().optional(),
+    // Descuento autorizado (PDF §3.2): tope en Parámetros → descuento_maximo; queda auditado.
+    descuentoPct: z.number().min(0).max(0.9).default(0),
+    pedidoId: z.string().uuid().optional(),
   }).refine(
     // Una venta al crédito sin cliente no puede generar cuenta por cobrar.
     (v) => v.formaPago !== 'CREDITO' || !!v.clienteId,
@@ -214,14 +218,21 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = NuevaVenta.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Venta inválida.'));
 
-    const { items, formaPago, clienteId } = parseo.data;
+    const { items, formaPago, clienteId, descuentoPct, pedidoId } = parseo.data;
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {
       const venta = await conIdempotencia(clave, req.usuario!.id, 'crear-venta', () =>
         tx(async (c) => {
-          const param = await c.query<{ valor: string }>(`SELECT valor FROM core.parametro WHERE clave = 'igv'`);
-          const igv = Number(param.rows[0]?.valor ?? 0.18);
+          const param = await c.query<{ clave: string; valor: string }>(`SELECT clave, valor FROM core.parametro WHERE clave IN ('igv','descuento_maximo')`);
+          const igv = Number(param.rows.find((x) => x.clave === 'igv')?.valor ?? 0.18);
+          const tope = Number(param.rows.find((x) => x.clave === 'descuento_maximo')?.valor ?? 0);
+          if (descuentoPct > tope + 1e-9) throw Object.assign(new Error(`El descuento máximo autorizado es ${Math.round(tope * 100)} %.`), { status: 422 });
+          // El código se genera antes: cada movimiento de inventario queda trazado a su venta.
+          const codigo = (await c.query<{ n: string }>(
+            `SELECT 'VTA-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.venta_correlativo_seq')::text, 6, '0') AS n`,
+          )).rows[0].n;
+          let totalConIgv = 0;
 
           let netas = 0;
           let costoTotal = 0;
@@ -242,7 +253,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
             const prod = mapa.get(it.productoId);
             if (!prod) throw Object.assign(new Error('PRODUCTO_NO_EXISTE'), { status: 404 });
 
-            const netoLinea = Number(((Number(prod.precio_con_igv) / (1 + igv)) * it.cantidad).toFixed(4));
+            const netoLinea = Number(((Number(prod.precio_con_igv) * (1 - descuentoPct) / (1 + igv)) * it.cantidad).toFixed(4));
+            totalConIgv += Number(prod.precio_con_igv) * (1 - descuentoPct) * it.cantidad;
             const costoLinea = Number((Number(prod.costo_unitario) * it.cantidad).toFixed(4));
             const utilidad = Number((netoLinea - costoLinea).toFixed(4));
             const margen = netoLinea > 0 ? utilidad / netoLinea : 0;
@@ -268,10 +280,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
             await c.query(
               `INSERT INTO core.movimiento_inventario
                  (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
-               VALUES ('VENTA','PRODUCTO',$1,'VENTA',$2,$3,$4,$5,$6,$7)`,
+               VALUES ('VENTA','PRODUCTO',$1,$8,$2,$3,$4,$5,$6,$7)`,
               [prod.id, (-it.cantidad).toFixed(6), Number(prod.costo_unitario).toFixed(6),
                 (-costoLinea).toFixed(4), nuevoStock.toFixed(6), valorSaldo.toFixed(4),
-                Number(prod.costo_unitario).toFixed(6)],
+                Number(prod.costo_unitario).toFixed(6), codigo],
             );
             await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStock.toFixed(6), prod.id]);
           }
@@ -281,19 +293,16 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const utilidad = Number((netas - costoTotal).toFixed(4));
           const margen = netas > 0 ? utilidad / netas : 0;
 
-          // Secuencia atómica: cuesta O(1) y dos ventas simultáneas nunca obtienen el mismo código.
-          const numero = await c.query<{ n: string }>(
-            `SELECT 'VTA-' || to_char(now(),'YYYY') || '-' ||
-                    lpad(nextval('core.venta_correlativo_seq')::text, 6, '0') AS n`,
-          );
-          const codigo = numero.rows[0].n;
+          totalConIgv = Number(totalConIgv.toFixed(2));
 
           const v = await c.query<{ id: string }>(
-            `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key,vendedor_id,canal)
+            `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key,vendedor_id,canal,descuento_pct,total_con_igv,pedido_id)
              VALUES ($1,$2,$3,$4,$5,$6,$7,'CONFIRMADA',$8,$9,$10,
-                     CASE WHEN EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = $2) THEN 'APP' ELSE 'TERCEROS' END) RETURNING id`,
+                     CASE WHEN $13::uuid IS NOT NULL OR EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = $2) THEN 'APP' ELSE 'TERCEROS' END,
+                     $11,$12,$13) RETURNING id`,
             [codigo, clienteId ?? null, formaPago, netas.toFixed(4), costoTotal.toFixed(4),
-              utilidad.toFixed(4), margen.toFixed(6), req.usuario!.nombre, clave ?? null, req.usuario!.id],
+              utilidad.toFixed(4), margen.toFixed(6), req.usuario!.nombre, clave ?? null, req.usuario!.id,
+              descuentoPct.toFixed(6), totalConIgv.toFixed(4), pedidoId ?? null],
           );
           const ventaId = v.rows[0].id;
 
@@ -324,8 +333,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
           // si falla, la venta no existe. Antes el error se tragaba y se perdía la deuda.
           let cxcId: string | null = null;
           if (formaPago === 'CREDITO') {
-            const cliente = await c.query<{ limite_credito: string; deuda: string }>(
-              `SELECT c.limite_credito,
+            const cliente = await c.query<{ limite_credito: string; deuda: string; dias_credito: number }>(
+              `SELECT c.limite_credito, c.dias_credito,
                       coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x
                                 WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) AS deuda
                FROM core.cliente c WHERE c.id = $1`,
@@ -336,14 +345,14 @@ export async function rutasOperaciones(app: FastifyInstance) {
             }
             const limite = Number(cliente.rows[0].limite_credito);
             const deuda = Number(cliente.rows[0].deuda);
-            if (limite > 0 && deuda + netas > limite + 0.001) {
-              throw Object.assign(new Error('LIMITE_CREDITO_EXCEDIDO'), { status: 409 });
+            if (limite > 0 && deuda + totalConIgv > limite + 0.001) {
+              throw Object.assign(new Error(`Límite de crédito excedido: debe S/ ${deuda.toFixed(2)}, límite S/ ${limite.toFixed(2)} y esta venta suma S/ ${totalConIgv.toFixed(2)}.`), { status: 409 });
             }
 
             const cx = await c.query<{ id: string }>(
               `INSERT INTO core.cuenta_por_cobrar (cliente_id,venta_id,monto,saldo,vence_en,estado)
-               VALUES ($1,$2,$3,$3, current_date + 30, 'PENDIENTE') RETURNING id`,
-              [clienteId, ventaId, netas.toFixed(4)],
+               VALUES ($1,$2,$3,$3, current_date + $4::int, 'PENDIENTE') RETURNING id`,
+              [clienteId, ventaId, totalConIgv.toFixed(4), Number(cliente.rows[0].dias_credito) > 0 ? Number(cliente.rows[0].dias_credito) : 30],
             );
             cxcId = cx.rows[0].id;
           }

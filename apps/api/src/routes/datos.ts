@@ -380,6 +380,14 @@ export async function rutasDatos(app: FastifyInstance) {
       delete k.vencido;
     }
     if (!puede('usuarios.gestionar')) p.usuarios = [];
+    // Ventas del negocio (totales, tendencia, ranking): solo para quien ve dashboard o reportes.
+    if (!puede('dashboard.ver') && !puede('reportes.ver')) {
+      const k = p.kpis as Record<string, unknown>;
+      for (const c of ['ventasNetas', 'tickets', 'ticketPromedio', 'variacionVentas', 'mermaValorizada', 'mermaPct']) delete k[c];
+      p.dias = [];
+      p.categorias = [];
+      p.topProductos = [];
+    }
 
     // Si el usuario es un cliente, ve únicamente lo suyo: sus pedidos y su saldo.
     const vinculo = await uno<{ cliente_id: string | null }>(

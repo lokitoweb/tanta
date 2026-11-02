@@ -3,11 +3,13 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { q, uno, tx } from '../db.js';
 import {
-  ACCESO_MIN, REFRESCO_DIAS, autenticar, error, firmarAcceso, nuevoRefreshToken,
+  ACCESO_MIN, REFRESCO_DIAS, autenticar, error, firmarAcceso, firmarTicketMfa, verificarTicketMfa, nuevoRefreshToken,
   permisosDeRol, rolDeUsuario, sha256, verificarClaveDetalle, hashClave,
   generarSecretoMfa, verificarTotp, urlOtpauth,
 } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
+import { enviarCorreo, correoDisponible } from '../correo.js';
+import { invalidar } from '../cache.js';
 
 const Login = z.object({
   usuario: z.string().min(1).max(80),
@@ -129,14 +131,14 @@ export async function rutasAuth(app: FastifyInstance) {
 
     // Segundo factor: si ya está activo se pide; si es obligatorio y falta, se enrola.
     if (fila.mfa_activo) {
-      const ticket = await firmarAcceso({ sub: fila.id, nombre: fila.nombre, rol, pv: 0 });
+      const ticket = await firmarTicketMfa({ sub: fila.id, nombre: fila.nombre, rol });
       return reply.send({ mfaRequerido: true, ticket, usuario: { nombre: fila.nombre } });
     }
     // En producción el segundo factor es obligatorio para estos perfiles; en
     // desarrollo se puede desactivar con MFA_OBLIGATORIO=false para no frenar las pruebas.
     const mfaObligatorio = (process.env.MFA_OBLIGATORIO ?? (ES_PROD ? 'true' : 'false')) !== 'false';
     if (exigeMfa && mfaObligatorio) {
-      const ticket = await firmarAcceso({ sub: fila.id, nombre: fila.nombre, rol, pv: 0 });
+      const ticket = await firmarTicketMfa({ sub: fila.id, nombre: fila.nombre, rol });
       return reply.send({ mfaEnrolamiento: true, ticket, usuario: { nombre: fila.nombre } });
     }
 
@@ -309,6 +311,74 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/logout — revoca el refresco y borra la cookie. */
+  /* ------------------------------------------------ recuperar contraseña */
+  // Paso 1: pide el código. La respuesta es SIEMPRE la misma (exista o no la cuenta)
+  // para no revelar qué usuarios o correos están registrados.
+  const MSG_RECUPERAR = 'Si los datos corresponden a una cuenta con correo, te enviamos un código. Revisa tu bandeja.';
+
+  app.get('/auth/recuperar/disponible', async () => ({ disponible: await correoDisponible() }));
+
+  app.post('/auth/recuperar', { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }, async (req, reply) => {
+    const p = z.object({ identificador: z.string().trim().min(3).max(160) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Escribe tu usuario o correo.'));
+    const id = p.data.identificador.toLowerCase();
+    const u = await uno<{ id: string; nombre: string; email: string }>(
+      `SELECT id, nombre, email FROM core.usuario
+       WHERE (lower(usuario) = $1 OR lower(email) = $1) AND estado = 'ACTIVO' AND email <> '' AND eliminado_en IS NULL LIMIT 1`, [id]);
+    if (u) {
+      // Máximo 3 códigos por hora por cuenta: evita usar el sistema para inundar un correo.
+      const recientes = await uno<{ n: string }>("SELECT count(*) n FROM core.recuperacion WHERE usuario_id = $1 AND creado_en > now() - interval '1 hour'", [u.id]);
+      if (Number(recientes?.n ?? 0) < 3) {
+        const codigo = String(randomInt(0, 1_000_000)).padStart(6, '0');
+        await tx(async (c) => {
+          await c.query('UPDATE core.recuperacion SET usado_en = now() WHERE usuario_id = $1 AND usado_en IS NULL', [u.id]);
+          await c.query("INSERT INTO core.recuperacion (usuario_id, codigo_hash, expira_en) VALUES ($1, $2, now() + interval '15 minutes')", [u.id, sha256(codigo)]);
+        });
+        try {
+          await enviarCorreo(u.email, 'Código para restablecer tu contraseña',
+            [`Hola ${u.nombre.split(' ')[0]}:`, 'Usa este código para crear una contraseña nueva. Vence en 15 minutos y sirve una sola vez.'], codigo);
+          await auditar({ actorId: u.id, actor: u.nombre, rol: '', accion: 'RECUPERACION_SOLICITADA', entidad: 'usuario', entidadId: u.id, ip: req.ip });
+        } catch (e) {
+          req.log.error({ err: e }, 'no se pudo enviar el correo de recuperación');
+          // Sin correo configurado sí se avisa: es un problema del sistema, no revela la cuenta.
+          if (!(await correoDisponible())) return reply.code(503).send(error(503, 'CORREO_NO_CONFIGURADO', 'La recuperación por correo no está disponible. Contacta al administrador.'));
+        }
+      }
+    }
+    return { ok: true, mensaje: MSG_RECUPERAR };
+  });
+
+  // Paso 2: código + contraseña nueva. 5 intentos por código; luego hay que pedir otro.
+  app.post('/auth/restablecer', { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (req, reply) => {
+    const p = z.object({
+      identificador: z.string().trim().min(3).max(160), codigo: z.string().regex(/^\d{6}$/, 'El código tiene 6 dígitos'),
+      nueva: z.string().min(10, 'Mínimo 10 caracteres').max(128),
+    }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
+    const invalido = () => reply.code(400).send(error(400, 'CODIGO_INVALIDO', 'El código no es válido o ya venció. Pide uno nuevo.'));
+    const u = await uno<{ id: string; nombre: string; usuario: string; rol: string | null }>(
+      `SELECT u.id, u.nombre, u.usuario, (SELECT rol_id FROM core.usuario_rol WHERE usuario_id = u.id LIMIT 1) rol FROM core.usuario u
+       WHERE (lower(u.usuario) = $1 OR lower(u.email) = $1) AND u.estado = 'ACTIVO' LIMIT 1`, [p.data.identificador.toLowerCase()]);
+    if (!u) return invalido();
+    const r = await uno<{ id: string; codigo_hash: string; intentos: number }>(
+      'SELECT id, codigo_hash, intentos FROM core.recuperacion WHERE usuario_id = $1 AND usado_en IS NULL AND expira_en > now() ORDER BY id DESC LIMIT 1', [u.id]);
+    if (!r || r.intentos >= 5) return invalido();
+    if (r.codigo_hash !== sha256(p.data.codigo)) {
+      await q('UPDATE core.recuperacion SET intentos = intentos + 1 WHERE id = $1', [r.id]);
+      return invalido();
+    }
+    await tx(async (c) => {
+      await c.query('UPDATE core.recuperacion SET usado_en = now() WHERE id = $1', [r.id]);
+      await c.query('UPDATE core.usuario SET clave_hash = $1 WHERE id = $2', [hashClave(p.data.nueva), u.id]);
+      await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE usuario_id = $1 AND revocado_en IS NULL', [u.id]);
+      // Restablecer desbloquea la cuenta si estaba bloqueada por intentos fallidos.
+      await c.query('DELETE FROM core.intento_login WHERE lower(usuario) = lower($1)', [u.usuario]);
+    });
+    invalidar(`sesion:${u.id}`);
+    await auditar({ actorId: u.id, actor: u.nombre, rol: u.rol ?? '', accion: 'CLAVE_RESTABLECIDA_POR_CORREO', entidad: 'usuario', entidadId: u.id, ip: req.ip });
+    return { ok: true, mensaje: 'Contraseña actualizada. Ya puedes ingresar.' };
+  });
+
   app.post('/auth/logout', { preHandler: autenticar }, async (req, reply) => {
     const enCookie = (req as { cookies?: Record<string, string> }).cookies?.[COOKIE];
     const enCuerpo = (req.body as { refreshToken?: string } | undefined)?.refreshToken;
@@ -355,12 +425,8 @@ export async function rutasAuth(app: FastifyInstance) {
     return r.length > 0;
   }
 
-  async function verificarTicket(ticket: string) {
-    const { verificarAcceso } = await import('../seguridad.js');
-    const carga = await verificarAcceso(ticket);
-    // El ticket de MFA es un token de acceso recién emitido: si es válido, sirve.
-    return carga;
-  }
+  // Solo acepta tickets de MFA (audiencia propia); un token de acceso aquí no sirve, y viceversa.
+  const verificarTicket = (ticket: string) => verificarTicketMfa(ticket);
 
   async function emitirSesion(
     req: { ip: string; headers: Record<string, unknown> },

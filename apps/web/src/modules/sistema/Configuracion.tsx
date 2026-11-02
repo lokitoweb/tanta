@@ -3,8 +3,9 @@ import { api, leerConfigPublica, urlApi } from '@/core/api';
 import { imagenABase64 } from '@/core/imagen';
 import { relativa } from '@/core/format';
 import { Boton, Encabezado, Insignia, Segmentado, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { ActivacionApp, leerArchivoFirebase } from './Vinculos';
 
-type Seccion = 'marca' | 'movil' | 'legal' | 'integraciones';
+type Seccion = 'marca' | 'movil' | 'legal' | 'correo' | 'integraciones';
 type Datos = Record<string, Record<string, unknown>>;
 interface Dispositivo { nombre: string; usuario: string; plataforma: string; version_app: string; ultimo_uso: string; push: boolean; desactualizada: boolean }
 
@@ -59,7 +60,15 @@ export function Configuracion() {
   };
 
   if (!cfg) return <div className="tabla-cargando">Cargando configuración…</div>;
-  const { marca, movil, legal, firebase, webhook } = cfg as Record<string, Record<string, never>>;
+  const { marca, movil, legal, firebase, webhook, correo } = cfg as Record<string, Record<string, never>>;
+  const cargarFirebase = async (archivo?: File) => {
+    if (!archivo) return;
+    try {
+      const datos = await leerArchivoFirebase(archivo);
+      setCfg((c) => c && { ...c, firebase: { ...c.firebase, ...datos } });
+      setAviso({ tono: 'info', texto: `${archivo.name} leído: se completaron ${Object.keys(datos).length} campos. Revisa y pulsa «Guardar Firebase».` });
+    } catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'Archivo no válido.' }); }
+  };
   const desactualizados = dispositivos.filter((d) => d.desactualizada).length;
 
   return (
@@ -69,7 +78,7 @@ export function Configuracion() {
 
       <Segmentado<Seccion> valor={tab} onChange={(v) => { setTab(v); setAviso(null); }} opciones={[
         { id: 'marca', etiqueta: 'Marca' }, { id: 'movil', etiqueta: 'App móvil' },
-        { id: 'legal', etiqueta: 'Legal y soporte' }, { id: 'integraciones', etiqueta: 'Integraciones' },
+        { id: 'legal', etiqueta: 'Legal y soporte' }, { id: 'correo', etiqueta: 'Correo (SMTP)' }, { id: 'integraciones', etiqueta: 'Integraciones' },
       ]} />
 
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'danger' ? '!' : '✓'}</span><div><p>{aviso.texto}</p></div></div>}
@@ -104,6 +113,7 @@ export function Configuracion() {
 
       {tab === 'movil' && (
         <div className="pila">
+          <ActivacionApp urlApi={String(movil.urlApi ?? '')} />
           <Tarjeta>
             <TarjetaTitulo titulo="Control de versiones" subtitulo="La app consulta esto al abrir. Por debajo de la mínima, obliga a actualizar." />
             <div className="form form--2col">
@@ -155,6 +165,28 @@ export function Configuracion() {
         </Tarjeta>
       )}
 
+      {tab === 'correo' && (
+        <Tarjeta>
+          <TarjetaTitulo titulo="Servidor de correo (SMTP)" subtitulo="Lo usa la recuperación de contraseña y los avisos. Gmail, Outlook, Zoho, Amazon SES, tu hosting…"
+            accion={<Insignia tono={correo.habilitado ? 'ok' : 'neutral'} punto>{correo.habilitado ? 'Activo' : 'Inactivo'}</Insignia>} />
+          <div className="form form--2col">
+            <label className="check field--ancho"><input type="checkbox" checked={!!correo.habilitado} onChange={(e) => campo('correo', 'habilitado', e.target.checked)} /> Enviar correos</label>
+            <Campo etiqueta="Servidor (host)"><input className="field__input mono" placeholder="smtp.gmail.com" value={correo.host ?? ''} onChange={(e) => campo('correo', 'host', e.target.value.trim())} /></Campo>
+            <Campo etiqueta="Puerto"><input className="field__input mono" type="number" min={1} max={65535} value={correo.puerto ?? 587} onChange={(e) => campo('correo', 'puerto', Number(e.target.value))} /></Campo>
+            <label className="check field--ancho"><input type="checkbox" checked={!!correo.seguro} onChange={(e) => campo('correo', 'seguro', e.target.checked)} /> Conexión SSL directa (puerto 465). Con 587 se usa STARTTLS automáticamente.</label>
+            <Campo etiqueta="Usuario"><input className="field__input" autoComplete="off" value={correo.usuario ?? ''} onChange={(e) => campo('correo', 'usuario', e.target.value.trim())} /></Campo>
+            <Campo etiqueta="Contraseña · secreta"><input className="field__input" type="password" autoComplete="new-password" value={correo.clave ?? ''} onChange={(e) => campo('correo', 'clave', e.target.value)} /></Campo>
+            <Campo etiqueta="Correo remitente"><input className="field__input" type="email" placeholder="no-responder@tantapanaderia.com" value={correo.remitente ?? ''} onChange={(e) => campo('correo', 'remitente', e.target.value.trim())} /></Campo>
+            <Campo etiqueta="Nombre del remitente"><input className="field__input" value={correo.nombreRemitente ?? ''} onChange={(e) => campo('correo', 'nombreRemitente', e.target.value)} /></Campo>
+          </div>
+          <p className="dialogo__nota">Con Gmail usa una «contraseña de aplicación» (no la de tu cuenta). La prueba se envía al correo de tu perfil.</p>
+          <div className="form__acciones">
+            <Boton onClick={() => void probar('/sistema/correo/probar', (r) => `Correo de prueba enviado a ${r.para}.`)}>Enviarme una prueba</Boton>
+            <Boton variant="primary" onClick={() => void guardar('correo')} disabled={guardando}>Guardar correo</Boton>
+          </div>
+        </Tarjeta>
+      )}
+
       {tab === 'integraciones' && (
         <div className="pila">
           <Tarjeta>
@@ -163,6 +195,14 @@ export function Configuracion() {
             <div className="form form--2col">
               <label className="check"><input type="checkbox" checked={!!firebase.habilitado} onChange={(e) => campo('firebase', 'habilitado', e.target.checked)} /> Enviar notificaciones push</label>
               <span />
+              <div className="field field--ancho">
+                <span className="field__label">Subir archivos de Firebase (se leen aquí y completan los campos)</span>
+                <div className="subida-firebase">
+                  <label className="btn btn--secondary btn--sm">google-services.json (Android)<input type="file" accept=".json,application/json" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0]); e.target.value = ''; }} /></label>
+                  <label className="btn btn--secondary btn--sm">GoogleService-Info.plist (iOS)<input type="file" accept=".plist" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0]); e.target.value = ''; }} /></label>
+                  <label className="btn btn--secondary btn--sm">Cuenta de servicio (.json)<input type="file" accept=".json,application/json" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0]); e.target.value = ''; }} /></label>
+                </div>
+              </div>
               <Campo etiqueta="Project ID"><input className="field__input mono" value={firebase.projectId ?? ''} onChange={(e) => campo('firebase', 'projectId', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Sender ID"><input className="field__input mono" value={firebase.senderId ?? ''} onChange={(e) => campo('firebase', 'senderId', e.target.value.trim())} /></Campo>
               <Campo etiqueta="API key (pública)"><input className="field__input mono" value={firebase.apiKey ?? ''} onChange={(e) => campo('firebase', 'apiKey', e.target.value.trim())} /></Campo>

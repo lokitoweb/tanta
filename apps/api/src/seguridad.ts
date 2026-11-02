@@ -152,6 +152,15 @@ if (SECRETO_TEXTO.length < 32) {
     );
   }
 }
+// En producción se rechazan los valores de ejemplo publicados en el repositorio:
+// con ellos cualquiera podría firmar un token de Superadmin.
+if (process.env.NODE_ENV === 'production') {
+  const deEjemplo = (v?: string) => !v || /CAMBIA_ESTO|dev-only|cambiar-en-produccion|ejemplo|changeme/i.test(v);
+  if (deEjemplo(process.env.JWT_SECRET)) throw new Error('JWT_SECRET tiene un valor de ejemplo: genera uno aleatorio para producción.');
+  if (deEjemplo(process.env.CONFIG_KEY) || (process.env.CONFIG_KEY ?? '').length < 32) {
+    throw new Error('CONFIG_KEY falta o es de ejemplo (mínimo 32 caracteres aleatorios).');
+  }
+}
 const SECRETO = new TextEncoder().encode(process.env.JWT_SECRET!);
 const EMISOR = 'tanta-core';
 const AUDIENCIA = 'tanta-apps';
@@ -185,6 +194,30 @@ export async function verificarAcceso(token: string): Promise<CargaToken | null>
       rol: String(payload.rol ?? ''),
       pv: Number(payload.pv ?? 0),
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ticket de segundo factor: prueba que la contraseña fue correcta, NADA más.
+ * Audiencia distinta y 5 minutos de vida: autenticar() exige la audiencia de acceso,
+ * así que este ticket nunca sirve como sesión (antes era un token de acceso completo
+ * y permitía saltarse el MFA).
+ */
+const AUDIENCIA_MFA = 'tanta-mfa';
+export async function firmarTicketMfa(c: Omit<CargaToken, 'pv'>): Promise<string> {
+  return new SignJWT({ nombre: c.nombre, rol: c.rol, typ: 'mfa' })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setSubject(c.sub).setIssuer(EMISOR).setAudience(AUDIENCIA_MFA)
+    .setIssuedAt().setExpirationTime('5m')
+    .sign(SECRETO);
+}
+export async function verificarTicketMfa(ticket: string): Promise<CargaToken | null> {
+  try {
+    const { payload } = await jwtVerify(ticket, SECRETO, { issuer: EMISOR, audience: AUDIENCIA_MFA });
+    if (payload.typ !== 'mfa') return null;
+    return { sub: String(payload.sub), nombre: String(payload.nombre ?? ''), rol: String(payload.rol ?? ''), pv: 0 };
   } catch {
     return null;
   }

@@ -1,11 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { importPKCS8, SignJWT } from 'jose';
 import { z } from 'zod';
 import { q, tx, uno } from '../db.js';
 import { autenticar, exigir, error, hashClave, verificarClave } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { recordar, invalidar } from '../cache.js';
+import { enviarCorreo } from '../correo.js';
 
 /**
  * Sistema: todo lo que el superadministrador cambia sin desplegar.
@@ -14,10 +17,10 @@ import { recordar, invalidar } from '../cache.js';
  */
 
 type Config = Record<string, unknown>;
-const SECCIONES = ['marca', 'movil', 'legal', 'firebase', 'webhook'] as const;
+const SECCIONES = ['marca', 'movil', 'legal', 'firebase', 'webhook', 'correo'] as const;
 type Seccion = (typeof SECCIONES)[number];
 // Campos que nunca salen del servidor: se devuelven como "••••" si tienen valor.
-const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'] };
+const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'], correo: ['clave'] };
 const MASCARA = '••••••••';
 
 /**
@@ -71,6 +74,9 @@ const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
   firebase: z.object({ habilitado: z.boolean(), projectId: z.string().max(100), apiKey: z.string().max(100),
     appIdAndroid: z.string().max(100), appIdIos: z.string().max(100), senderId: z.string().max(40),
     cuentaServicio: z.string().max(10_000) }),
+  correo: z.object({ habilitado: z.boolean(), host: z.string().trim().max(200).regex(/^[A-Za-z0-9.-]*$/, 'Host inválido'),
+    puerto: z.number().int().min(1).max(65535), seguro: z.boolean(), usuario: z.string().trim().max(200), clave: z.string().max(500),
+    remitente: z.union([z.literal(''), z.string().trim().email()]), nombreRemitente: z.string().trim().max(80) }),
   webhook: z.object({ habilitado: z.boolean(), url: urlHttps, secreto: z.string().max(200),
     eventos: z.array(z.enum(['venta.creada', 'cobro.registrado', 'pedido.estado', 'inventario.movimiento', 'usuario.eliminado'])) }),
 };
@@ -100,11 +106,41 @@ async function guardarImagen(base64: string, usuarioId: string): Promise<string>
 }
 
 /* -------------------------------------------------------------- webhook */
+/** IP no enrutable públicamente (loopback, privada, link-local/metadata, CGNAT, reservada). */
+function ipPrivada(ip: string): boolean {
+  if (isIP(ip) === 6) {
+    const v = ip.toLowerCase();
+    if (v.startsWith('::ffff:')) return ipPrivada(v.slice(7));
+    return v === '::1' || v === '::' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80');
+  }
+  const [a, b] = ip.split('.').map(Number);
+  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+}
+
+/**
+ * Anti-SSRF: el webhook solo puede salir a internet. Se resuelve el DNS y se valida CADA
+ * dirección (un dominio no puede apuntar a 127.0.0.1 o al servicio de metadatos de la nube).
+ */
+export async function destinoPublico(url: string): Promise<boolean> {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:' || u.username || u.password) return false;
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+    const ips = isIP(host) ? [host] : (await lookup(host, { all: true })).map((r) => r.address);
+    return ips.length > 0 && ips.every((ip) => !ipPrivada(ip));
+  } catch {
+    return false;
+  }
+}
+
 /** Notifica a un sistema externo. Firma HMAC-SHA256 del cuerpo en X-Tanta-Firma. Nunca bloquea la operación. */
 export async function emitirEvento(evento: string, datos: unknown): Promise<void> {
   try {
     const cfg = await leerConfig('webhook') as { habilitado?: boolean; url?: string; secreto?: string; eventos?: string[] };
     if (!cfg.habilitado || !cfg.url || !cfg.eventos?.includes(evento)) return;
+    if (!(await destinoPublico(cfg.url))) return;
     const cuerpo = JSON.stringify({ evento, ocurridoEn: new Date().toISOString(), datos });
     const firma = createHmac('sha256', cfg.secreto ?? '').update(cuerpo).digest('hex');
     await fetch(cfg.url, {
@@ -225,6 +261,9 @@ export async function rutasSistema(app: FastifyInstance) {
     for (const k of SECRETOS[seccion] ?? []) if (entrada[k] === MASCARA) entrada[k] = anterior[k] ?? '';
     const p = ESQUEMAS[seccion].safeParse(entrada);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(' · ')));
+    if (seccion === 'webhook' && p.data.url && !(await destinoPublico(p.data.url))) {
+      return reply.code(422).send(error(422, 'DESTINO_NO_PERMITIDO', 'El webhook debe apuntar a un servidor público por https (no a direcciones internas).'));
+    }
     if (seccion === 'movil' && versionMenor(p.data.versionActual, p.data.versionMinima)) {
       return reply.code(422).send(error(422, 'VERSION_INVALIDA', 'La versión mínima no puede ser mayor que la actual.'));
     }
@@ -255,6 +294,7 @@ export async function rutasSistema(app: FastifyInstance) {
     if (!exigir(req, reply, 'config.gestionar')) return;
     const cfg = await leerConfig('webhook') as { url?: string; secreto?: string };
     if (!cfg.url) return reply.code(422).send(error(422, 'SIN_URL', 'Configura primero la URL del webhook.'));
+    if (!(await destinoPublico(cfg.url))) return reply.code(422).send(error(422, 'DESTINO_NO_PERMITIDO', 'El webhook debe apuntar a un servidor público por https (no a direcciones internas).'));
     const cuerpo = JSON.stringify({ evento: 'prueba', ocurridoEn: new Date().toISOString(), datos: {} });
     try {
       const r = await fetch(cfg.url, { method: 'POST', body: cuerpo, redirect: 'error', signal: AbortSignal.timeout(5000),
@@ -262,6 +302,20 @@ export async function rutasSistema(app: FastifyInstance) {
           'X-Tanta-Firma': `sha256=${createHmac('sha256', cfg.secreto ?? '').update(cuerpo).digest('hex')}` } });
       return { ok: r.ok, status: r.status };
     } catch (e) { return { ok: false, status: 0, detalle: (e as Error).message }; }
+  });
+
+  // Envía un correo de prueba al Superadmin que lo pide (a su correo del perfil).
+  app.post('/sistema/correo/probar', { preHandler: autenticar, config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req, reply) => {
+    if (!exigir(req, reply, 'config.gestionar')) return;
+    const yo = await uno<{ email: string }>('SELECT email FROM core.usuario WHERE id = $1', [req.usuario!.id]);
+    if (!yo?.email) return reply.code(422).send(error(422, 'SIN_CORREO', 'Agrega tu correo en Mi perfil para recibir la prueba.'));
+    try {
+      await enviarCorreo(yo.email, 'Prueba de correo', ['El servidor de correo está bien configurado.', 'Desde ahora el sistema puede enviar códigos de recuperación de contraseña.']);
+      return { ok: true, para: yo.email };
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      return reply.code(err.status ?? 502).send(error(err.status ?? 502, 'SMTP_ERROR', `No se pudo enviar: ${err.message}`));
+    }
   });
 
   app.post('/sistema/push/probar', { preHandler: autenticar }, async (req, reply) => {
@@ -288,6 +342,41 @@ export async function rutasSistema(app: FastifyInstance) {
       q<{ rol_id: string; permiso_id: string }>('SELECT rol_id, permiso_id FROM core.rol_permiso'),
     ]);
     return { roles, permisos, asignados: asignados.map((a) => `${a.rol_id}:${a.permiso_id}`) };
+  });
+
+  // Roles nuevos (p. ej. "Cajero", "Repartidor"): nacen sin permisos y se configuran en la matriz.
+  const NuevoRol = z.object({
+    nombre: z.string().trim().min(3).max(40), descripcion: z.string().trim().max(120).default(''),
+    perfil: z.enum(['web', 'app', 'tablet']).default('web'),
+  });
+  const ROLES_BASE = new Set(['SUPERADMIN', 'GERENTE', 'ADMINISTRADOR', 'PRODUCCION', 'ALMACEN', 'VENDEDOR', 'CLIENTE', 'SOPORTE']);
+
+  app.post('/sistema/roles', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'roles.gestionar')) return;
+    const p = NuevoRol.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
+    const id = p.data.nombre.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
+    if (!id || await uno('SELECT 1 FROM core.rol WHERE id = $1 OR lower(nombre) = lower($2)', [id, p.data.nombre])) {
+      return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un rol con ese nombre.'));
+    }
+    await q(`INSERT INTO core.rol (id, nombre, corto, descripcion, perfil, icono, orden)
+             VALUES ($1,$2,$2,$3,$4,'user',(SELECT coalesce(max(orden),0)+1 FROM core.rol))`, [id, p.data.nombre, p.data.descripcion, p.data.perfil]);
+    // Todo rol ve al menos su panel: sin eso no tendría pantalla de inicio.
+    await q("INSERT INTO core.rol_permiso (rol_id, permiso_id) VALUES ($1, 'panel.ver') ON CONFLICT DO NOTHING", [id]);
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'ROL_CREADO', entidad: 'rol', entidadId: id, detalle: p.data, ip: req.ip });
+    return reply.code(201).send({ id, ...p.data });
+  });
+
+  app.delete('/sistema/roles/:id', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'roles.gestionar')) return;
+    const { id } = req.params as { id: string };
+    if (ROLES_BASE.has(id)) return reply.code(409).send(error(409, 'ROL_PROTEGIDO', 'Los roles base del sistema no se eliminan (sí se pueden editar sus permisos).'));
+    const usados = await uno<{ n: string }>('SELECT count(*) n FROM core.usuario_rol WHERE rol_id = $1', [id]);
+    if (Number(usados?.n) > 0) return reply.code(409).send(error(409, 'ROL_EN_USO', `Hay ${usados?.n} usuario(s) con este rol: cámbialos de rol antes de eliminarlo.`));
+    const r = await q('DELETE FROM core.rol WHERE id = $1 RETURNING id', [id]);
+    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El rol no existe.'));
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'ROL_ELIMINADO', entidad: 'rol', entidadId: id, ip: req.ip });
+    return { ok: true };
   });
 
   app.put('/sistema/roles/:id/permisos', { preHandler: autenticar }, async (req, reply) => {

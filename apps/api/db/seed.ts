@@ -50,23 +50,25 @@ const PERMISOS: Array<[string, string, string]> = [
   ['roles.gestionar', 'Seguridad', 'Editar los permisos de cada rol'],
   ['clientes.gestionar', 'Ventas', 'Crear y editar clientes, crédito y lista de precios'],
   ['auditoria.ver', 'Seguridad', 'Consultar la bitácora de auditoría'],
+  ['pedidos.crear', 'Cliente', 'Registrar pedidos propios desde la app o la web'],
+  ['produccion.planificar', 'Producción', 'Generar órdenes de producción'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver']],
+    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
-    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver']],
+    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
-    ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'recetas.ver', 'inventario.ver']],
+    ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'produccion.planificar', 'recetas.ver', 'inventario.ver', 'pedidos.ver', 'catalogo.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,
-    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver']],
+    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver']],
   ['VENDEDOR', 'Vendedor', 'Ventas', 'Despacho, ventas a terceros y cobranza', 'app', 'truck', 5,
-    ['panel.ver', 'pedidos.ver', 'pedidos.gestionar', 'ventas.registrar', 'cobranza.ver', 'cobranza.registrar', 'clientes.ver']],
+    ['panel.ver', 'pedidos.ver', 'pedidos.gestionar', 'pedidos.crear', 'ventas.registrar', 'cobranza.ver', 'cobranza.registrar', 'clientes.ver', 'catalogo.ver', 'reportes.ver']],
   ['CLIENTE', 'Cliente', 'Cliente', 'Catálogo, pedidos y saldo', 'app', 'user', 6,
-    ['panel.ver', 'catalogo.ver']],
+    ['panel.ver', 'catalogo.ver', 'pedidos.crear']],
   ['SOPORTE', 'Soporte técnico', 'Soporte', 'Break-glass: sin datos de negocio', 'web', 'shield', 7,
     ['panel.ver']],
 ];
@@ -91,7 +93,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-config', 'Sistema', 'Configuración', '/sistema/configuracion', 'settings', 'config.gestionar', 2, 9],
   ['n-auditoria', 'Sistema', 'Auditoría', '/sistema/auditoria', 'ledger', 'auditoria.ver', 3, 9],
   ['n-dashboard', 'Gerencia', 'Costos y márgenes', '/gerencia/dashboard', 'chart', 'dashboard.ver', 1, 4],
-  ['n-reportes', 'Gerencia', 'Reportes', '/gerencia/reportes', 'report', 'reportes.ver', 2, 4],
+  ['n-reportes', 'Reportes', 'Reportes', '/gerencia/reportes', 'report', 'reportes.ver', 1, 8],
   ['n-periodos', 'Gerencia', 'Períodos de costo', '/gerencia/periodos', 'report', 'periodos.cerrar', 3, 4],
 ];
 
@@ -227,6 +229,7 @@ async function main() {
       ['margen_objetivo_global', '0.52', 'porcentaje', 'Margen objetivo por defecto'],
       ['permitir_saldo_negativo', 'false', 'booleano', 'Política estricta de inventario'],
       ['cif_base_prorrateo', 'UNIDADES', 'texto', 'Base de prorrateo del CIF: UNIDADES o COSTO_INSUMOS'],
+      ['descuento_maximo', '0.10', 'porcentaje', 'Descuento máximo que un vendedor puede aplicar en una venta'],
     ]) {
       await c.query('INSERT INTO core.parametro (clave,valor,tipo,descripcion) VALUES ($1,$2,$3,$4)', [clave, valor, tipo, desc]);
     }
