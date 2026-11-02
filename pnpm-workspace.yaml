@@ -7,5 +7,6 @@ packages:
 nodeLinker: hoisted
 strictPeerDependencies: false
 confirmModulesPurge: false
-onlyBuiltDependencies:
-  - esbuild
+# Únicos paquetes autorizados a ejecutar scripts al instalar (defensa contra cadena de suministro).
+allowBuilds:
+  esbuild: true
