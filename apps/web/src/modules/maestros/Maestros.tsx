@@ -48,7 +48,7 @@ export function CostosIndirectos() {
       cargar={cargar} nuevo={{ concepto: '', tipo: 'FIJO', montoMensual: 0, activo: true }}
       crear={guardar('POST', '/costos-indirectos')} editar={(id, d) => api(`/costos-indirectos/${id}`, { method: 'PATCH', body: d })}
       extra={r && (
-        <div className="grid grid--4">
+        <div className="grid grid--auto">
           <Kpi label="CIF mensual" valor={money(total)} nota="conceptos activos" icono="wallet" />
           <Kpi label="Costos fijos" valor={money(fijos)} nota={`variables ${money(total - fijos)}`} icono="ledger" />
           <Kpi label="CIF por unidad" valor={money(r.cifPromedioPorUnidad)} nota="promedio de productos" icono="bread" />

@@ -596,9 +596,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
          SELECT m.id, m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad, m.costo_unitario,
                 m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp
          FROM core.movimiento_inventario m
-         LEFT JOIN core.insumo i ON i.id = m.insumo_id
-         LEFT JOIN core.producto p ON p.id = m.producto_id
-         WHERE coalesce(i.codigo, p.codigo) = $1
+         -- Por id y no por código: así usa los índices de insumo_id / producto_id.
+         WHERE m.insumo_id = (SELECT id FROM core.insumo WHERE codigo = $1)
+            OR m.producto_id = (SELECT id FROM core.producto WHERE codigo = $1)
          ORDER BY m.id DESC LIMIT 1000
        ) x ORDER BY id`,
       [codigo],

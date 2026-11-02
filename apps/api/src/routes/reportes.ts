@@ -78,8 +78,8 @@ const REPORTES: Record<string, Reporte> = {
           { indicador: 'Ventas netas', actual: A.n, anterior: B.n, variacion: v(A.n, B.n) },
           { indicador: 'Costo de ventas', actual: A.c, anterior: B.c, variacion: v(A.c, B.c) },
           { indicador: 'Utilidad bruta', actual: A.u, anterior: B.u, variacion: v(A.u, B.u) },
-          { indicador: 'Margen bruto %', actual: A.mg, anterior: B.mg, variacion: A.mg - B.mg },
-          { indicador: 'Tickets', actual: A.t, anterior: B.t, variacion: v(A.t, B.t) },
+          { indicador: 'Margen bruto %', tipo: 'pct', actual: A.mg, anterior: B.mg, variacion: A.mg - B.mg },
+          { indicador: 'Tickets', tipo: 'num', actual: A.t, anterior: B.t, variacion: v(A.t, B.t) },
         ],
         resumen: { periodoAnterior: `${ant.desde} a ${ant.hasta}` },
       };

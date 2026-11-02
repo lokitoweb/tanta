@@ -21,11 +21,11 @@ export function BarraFiltros({ valor, onChange, campos = ['categoria', 'producto
 
   return (
     <div className="filtros" role="search">
-      <div className="filtros__rapidos" role="group" aria-label="Rango rápido">
+      <div className="filtros__campo"><span>Rango</span><div className="filtros__rapidos" role="group" aria-label="Rango rápido">
         {[7, 30, 90].map((n) => (
           <button key={n} className={`chipfilter ${dias === n && valor.hasta === iso(new Date()) ? 'is-active' : ''}`} onClick={() => onChange({ ...valor, ...rango(n) })}>{n} días</button>
         ))}
-      </div>
+      </div></div>
       <label className="filtros__campo"><span>Desde</span><input type="date" value={valor.desde} max={valor.hasta} onChange={(e) => e.target.value && set('desde', e.target.value)} /></label>
       <label className="filtros__campo"><span>Hasta</span><input type="date" value={valor.hasta} min={valor.desde} onChange={(e) => e.target.value && set('hasta', e.target.value)} /></label>
       {campos.includes('categoria') && (

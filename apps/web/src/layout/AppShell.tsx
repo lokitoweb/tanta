@@ -72,34 +72,8 @@ export function AppShell() {
                 <p className="perfil__rol">{rol.nombre}</p>
               </div>
             </NavLink>
-            <button className="perfil__btn" onClick={() => setMenu((v) => !v)} title="Cuenta">
-              <Icon name="chevron" size={15} />
-            </button>
           </div>
 
-          {menu && (
-            <div className="cambiar-rol">
-              <p className="cambiar-rol__titulo">Sesión activa</p>
-              <div className="cambiar-rol__dato">
-                <Icon name="shield" size={15} />
-                <span>{rol.nombre}</span>
-              </div>
-              <div className="cambiar-rol__dato">
-                <Icon name="user" size={15} />
-                <span>{sesion.usuario.nombre}</span>
-              </div>
-              <div className="cambiar-rol__dato">
-                <Icon name="check" size={15} />
-                <span>{rol.permisos.length} permisos</span>
-              </div>
-              <NavLink className="cambiar-rol__salir" to="/perfil" onClick={() => setMenu(false)}>
-                <Icon name="user" size={15} /> Mi perfil
-              </NavLink>
-              <button className="cambiar-rol__salir" onClick={() => void cerrarSesion()}>
-                <Icon name="logout" size={15} /> Cerrar sesión
-              </button>
-            </div>
-          )}
         </div>
       </aside>
 
@@ -125,11 +99,35 @@ export function AppShell() {
               <Icon name="sync" size={14} />
               <span className="chip__txt">En línea</span>
             </span>
-            <button className="iconbtn" aria-label="Notificaciones">
-              <Icon name="bell" size={18} />
-              <i className="iconbtn__dot" />
-            </button>
             <span className="topbar__fecha">{fechaCorta(new Date())}</span>
+            <div className="cuenta">
+              <button className="cuenta__boton" onClick={() => setMenu((v) => !v)} aria-expanded={menu} aria-haspopup="menu">
+                <Avatar nombre={sesion.usuario.nombre} fotoUrl={sesion.usuario.fotoUrl} />
+                <span className="cuenta__txt">
+                  <b>{sesion.usuario.nombre}</b>
+                  <small>{rol.nombre}</small>
+                </span>
+                <Icon name="chevron" size={14} />
+              </button>
+              {menu && (
+                <>
+                  <button className="cuenta__fondo" aria-label="Cerrar menú" onClick={() => setMenu(false)} />
+                  <div className="cuenta__menu" role="menu">
+                    <div className="cuenta__cabeza">
+                      <b>{sesion.usuario.nombre}</b>
+                      <small>{rol.nombre}</small>
+                    </div>
+                    <NavLink role="menuitem" className="cuenta__item" to="/perfil" onClick={() => setMenu(false)}>
+                      <Icon name="user" size={16} /> Mi cuenta
+                    </NavLink>
+                    <hr />
+                    <button role="menuitem" className="cuenta__item" onClick={() => void cerrarSesion()}>
+                      <Icon name="logout" size={16} /> Cerrar sesión
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 

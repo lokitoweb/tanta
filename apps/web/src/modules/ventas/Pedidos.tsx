@@ -69,7 +69,7 @@ export function Pedidos() {
         </>} />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         <Tarjeta className="mini-stat"><span>Por producir</span><b>{porEstado('EN_PRODUCCION') + porEstado('REGISTRADO')}</b></Tarjeta>
         <Tarjeta className="mini-stat"><span>Listos para despacho</span><b>{porEstado('LISTO')}</b></Tarjeta>
         <Tarjeta className="mini-stat"><span>En reparto</span><b>{porEstado('DESPACHADO')}</b></Tarjeta>

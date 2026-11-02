@@ -72,48 +72,48 @@ export function Perfil() {
         </div>
       )}
 
-      <div className="grid grid--12">
-        <Tarjeta className="col-4">
-          <div className="perfil-ficha">
-            <Avatar nombre={p.nombre} fotoUrl={p.fotoUrl} size="lg" />
-            <h3>{p.nombre}</h3>
-            <p className="t-muted">{p.rol} · @{p.usuario}</p>
-            <input ref={archivo} type="file" accept="image/png,image/jpeg,image/webp" hidden
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) void subirFoto(f); e.target.value = ''; }} />
-            <Boton icono="user" onClick={() => archivo.current?.click()} disabled={ocupado === 'foto'}>
-              {ocupado === 'foto' ? 'Subiendo…' : p.fotoUrl ? 'Cambiar foto' : 'Subir foto'}
-            </Boton>
-            <dl className="datos datos--compacto">
-              <div><dt>Miembro desde</dt><dd>{fechaHora(p.creado_en)}</dd></div>
-              {p.ultimo_acceso && <div><dt>Último acceso</dt><dd>{fechaHora(p.ultimo_acceso)}</dd></div>}
-            </dl>
-          </div>
+      {/* Identidad y foto en una franja; debajo, datos y seguridad lado a lado. */}
+      <Tarjeta className="perfil-cabecera">
+        <Avatar nombre={p.nombre} fotoUrl={p.fotoUrl} size="lg" />
+        <div className="perfil-cabecera__id">
+          <h2>{p.nombre}</h2>
+          <p><span className="badge">{p.rol}</span> @{p.usuario}{p.email && <> · {p.email}</>}</p>
+        </div>
+        <dl className="perfil-cabecera__meta">
+          <div><dt>Miembro desde</dt><dd>{fechaHora(p.creado_en)}</dd></div>
+          {p.ultimo_acceso && <div><dt>Último acceso</dt><dd>{fechaHora(p.ultimo_acceso)}</dd></div>}
+        </dl>
+        <input ref={archivo} type="file" accept="image/png,image/jpeg,image/webp" hidden
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void subirFoto(f); e.target.value = ''; }} />
+        <Boton icono="user" onClick={() => archivo.current?.click()} disabled={ocupado === 'foto'}>
+          {ocupado === 'foto' ? 'Subiendo…' : p.fotoUrl ? 'Cambiar foto' : 'Subir foto'}
+        </Boton>
+      </Tarjeta>
+
+      <div className="perfil-columnas">
+        <Tarjeta>
+          <TarjetaTitulo titulo="Datos de contacto" subtitulo="Se usan para avisos y para recuperar tu cuenta" />
+          <form className="form" onSubmit={(e) => { e.preventDefault(); void guardarDatos(); }}>
+            <label className="field"><span className="field__label">Nombre completo</span>
+              <input className="field__input" required minLength={3} maxLength={120} value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
+            </label>
+            <label className="field"><span className="field__label">Correo</span>
+              <input className="field__input" type="email" maxLength={160} autoComplete="email" placeholder="nombre@empresa.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </label>
+            <label className="field"><span className="field__label">Teléfono</span>
+              <input className="field__input" type="tel" maxLength={30} autoComplete="tel" placeholder="999 999 999" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
+            </label>
+            <div className="form__acciones"><Boton variant="primary" type="submit" disabled={ocupado === 'datos'}>{ocupado === 'datos' ? 'Guardando…' : 'Guardar cambios'}</Boton></div>
+          </form>
         </Tarjeta>
 
-        <div className="col-8 pila">
-          <Tarjeta>
-            <TarjetaTitulo titulo="Datos de contacto" subtitulo="Se usan para avisos y para recuperar tu cuenta" />
-            <form className="form form--2col" onSubmit={(e) => { e.preventDefault(); void guardarDatos(); }}>
-              <label className="field"><span className="field__label">Nombre completo</span>
-                <input className="field__input" required minLength={3} maxLength={120} value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} />
-              </label>
-              <label className="field"><span className="field__label">Correo</span>
-                <input className="field__input" type="email" maxLength={160} autoComplete="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-              </label>
-              <label className="field"><span className="field__label">Teléfono</span>
-                <input className="field__input" type="tel" maxLength={30} autoComplete="tel" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
-              </label>
-              <div className="form__acciones"><Boton variant="primary" type="submit" disabled={ocupado === 'datos'}>{ocupado === 'datos' ? 'Guardando…' : 'Guardar cambios'}</Boton></div>
-            </form>
-          </Tarjeta>
-
-          <Tarjeta>
-            <TarjetaTitulo titulo="Cambiar contraseña" subtitulo="Mínimo 10 caracteres. Al cambiarla se cierran tus sesiones en otros equipos." />
-            <form className="form form--2col" onSubmit={(e) => { e.preventDefault(); void cambiarClave(); }}>
-              <label className="field"><span className="field__label">Contraseña actual</span>
-                <input className="field__input" type="password" required autoComplete="current-password" value={clave.actual} onChange={(e) => setClave({ ...clave, actual: e.target.value })} />
-              </label>
-              <span />
+        <Tarjeta>
+          <TarjetaTitulo titulo="Seguridad" subtitulo="Mínimo 10 caracteres. Al cambiarla se cierran tus sesiones en otros equipos." />
+          <form className="form" onSubmit={(e) => { e.preventDefault(); void cambiarClave(); }}>
+            <label className="field"><span className="field__label">Contraseña actual</span>
+              <input className="field__input" type="password" required autoComplete="current-password" value={clave.actual} onChange={(e) => setClave({ ...clave, actual: e.target.value })} />
+            </label>
+            <div className="perfil-par">
               <label className="field"><span className="field__label">Nueva contraseña</span>
                 <input className="field__input" type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={clave.nueva} onChange={(e) => setClave({ ...clave, nueva: e.target.value })} />
                 {fuerza && <span className={`field__aviso field__aviso--${fuerza}`}>Seguridad: {fuerza}</span>}
@@ -121,19 +121,18 @@ export function Perfil() {
               <label className="field"><span className="field__label">Repite la nueva</span>
                 <input className="field__input" type="password" required autoComplete="new-password" value={clave.repetir} onChange={(e) => setClave({ ...clave, repetir: e.target.value })} />
               </label>
-              <div className="form__acciones">
-                <Boton variant="primary" type="submit" disabled={ocupado === 'clave' || clave.nueva.length < 10 || clave.nueva !== clave.repetir}>
-                  {ocupado === 'clave' ? 'Cambiando…' : 'Cambiar contraseña'}
-                </Boton>
-              </div>
-            </form>
-          </Tarjeta>
-
-          <Tarjeta>
-            <TarjetaTitulo titulo="Verificación en dos pasos" subtitulo={`${p.codigos_mfa} códigos de respaldo sin usar`}
-              accion={<Boton icono="shield" onClick={() => void ejecutar('mfa', async () => { setCodigos(await regenerarRecuperacion()); return 'Se generaron códigos nuevos; los anteriores quedan anulados.'; })}>Generar códigos</Boton>} />
-          </Tarjeta>
-        </div>
+            </div>
+            <div className="form__acciones">
+              <Boton variant="primary" type="submit" disabled={ocupado === 'clave' || clave.nueva.length < 10 || clave.nueva !== clave.repetir}>
+                {ocupado === 'clave' ? 'Cambiando…' : 'Cambiar contraseña'}
+              </Boton>
+            </div>
+          </form>
+          <div className="perfil-mfa">
+            <div><b>Verificación en dos pasos</b><small>{p.codigos_mfa} códigos de respaldo sin usar</small></div>
+            <Boton icono="shield" onClick={() => void ejecutar('mfa', async () => { setCodigos(await regenerarRecuperacion()); return 'Se generaron códigos nuevos; los anteriores quedan anulados.'; })}>Generar códigos</Boton>
+          </div>
+        </Tarjeta>
       </div>
 
       <Dialogo abierto={codigos !== null} titulo="Códigos de recuperación"

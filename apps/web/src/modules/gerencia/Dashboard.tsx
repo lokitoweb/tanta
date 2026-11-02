@@ -63,7 +63,7 @@ export function Dashboard() {
 
       <Tarjeta><BarraFiltros valor={filtros} onChange={setFiltros} campos={['categoria', 'vendedor']} /></Tarjeta>
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         <Kpi label="Ventas netas" valor={money(ventas)} {...delta(k['Ventas netas'])} nota="vs. período anterior" icono="chart" />
         <Kpi label="Utilidad bruta" valor={money(k['Utilidad bruta']?.actual ?? 0)} {...delta(k['Utilidad bruta'])} nota={`costo ${money(k['Costo de ventas']?.actual ?? 0)}`} icono="wallet" />
         <Kpi label="Margen bruto" valor={pct(k['Margen bruto %']?.actual ?? 0)} {...delta(k['Margen bruto %'], true)} nota="utilidad ÷ ventas netas" icono="spark" />

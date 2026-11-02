@@ -26,6 +26,11 @@ class TantaApp extends StatelessWidget {
       title: 'Tanta',
       debugShowCheckedModeBanner: false,
       theme: construirTema(),
+      // Respeta el tamaño de letra del teléfono, con tope para que las tarjetas no se desborden.
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3)),
+        child: child!,
+      ),
       home: const Raiz(),
     );
   }

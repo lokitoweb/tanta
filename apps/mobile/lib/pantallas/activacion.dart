@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../core/api.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
 
-/// Primera apertura: la app no trae ninguna dirección. Se escanea el QR de
-/// Configuración → App móvil en la web, o se escribe el dominio de la empresa.
+/// Primera apertura: la app no trae ninguna dirección; se escribe el dominio donde está
+/// instalado el sistema. Después la app sigue sola los cambios que haga el superadmin.
 class Activacion extends StatefulWidget {
   const Activacion({super.key, required this.onActivada});
   final VoidCallback onActivada;
@@ -32,11 +31,6 @@ class _ActivacionState extends State<Activacion> {
     }
   }
 
-  Future<void> _escanear() async {
-    final leido = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const _Escaner()));
-    if (leido != null) await _activar(leido);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -51,54 +45,23 @@ class _ActivacionState extends State<Activacion> {
                 const SizedBox(height: 28),
                 Text('Activa la aplicación', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 8),
-                const Text('En la web entra a Configuración → App móvil y escanea el código QR.', textAlign: TextAlign.center),
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: _ocupado ? null : _escanear,
-                  icon: const Icon(Icons.qr_code_scanner),
-                  label: const Text('Escanear código'),
-                ),
+                const Text('Escribe el dominio de tu empresa. Solo se hace una vez.', textAlign: TextAlign.center),
                 const SizedBox(height: 24),
                 TextField(
                   controller: _direccion,
                   keyboardType: TextInputType.url,
                   autocorrect: false,
                   onSubmitted: _activar,
-                  decoration: const InputDecoration(labelText: 'O escribe la dirección (ej. empresa.com)', prefixIcon: Icon(Icons.language)),
+                  decoration: const InputDecoration(labelText: 'Dominio (ej. miempresa.com)', prefixIcon: Icon(Icons.language)),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton(onPressed: _ocupado ? null : () => _activar(_direccion.text), child: const Text('Conectar')),
+                FilledButton(onPressed: _ocupado ? null : () => _activar(_direccion.text), child: const Text('Conectar')),
                 if (_ocupado) const Padding(padding: EdgeInsets.only(top: 16), child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.sand500))),
                 if (_error != null) Padding(padding: const EdgeInsets.only(top: 16), child: Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.error))),
               ]),
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _Escaner extends StatefulWidget {
-  const _Escaner();
-  @override
-  State<_Escaner> createState() => _EscanerState();
-}
-
-class _EscanerState extends State<_Escaner> {
-  bool _listo = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Escanea el código')),
-      body: MobileScanner(
-        onDetect: (captura) {
-          final valor = captura.barcodes.firstOrNull?.rawValue;
-          if (_listo || valor == null || !valor.startsWith('tanta://')) return;
-          _listo = true;
-          Navigator.pop(context, valor);
-        },
       ),
     );
   }

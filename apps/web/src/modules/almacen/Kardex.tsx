@@ -51,7 +51,7 @@ export function Kardex() {
         </label>
       </Tarjeta>
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         <Kpi label="Saldo actual" valor={ultimo ? `${num2(ultimo.saldoCantidad)} ${item?.unidad ?? ''}` : '—'} nota="según el último asiento" icono="box" />
         {valoriza && <Kpi label="Valor del saldo" valor={ultimo?.saldoValor !== undefined ? money(ultimo.saldoValor) : '—'} nota="valorizado al CPP" icono="wallet" />}
         {valoriza && <Kpi label="CPP vigente" valor={ultimo?.cpp !== undefined ? money(ultimo.cpp) : '—'} nota={`por ${item?.unidad ?? 'unidad'}`} icono="chart" />}

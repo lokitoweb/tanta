@@ -79,7 +79,7 @@ export function Produccion() {
 
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         <Tarjeta className="mini-stat"><span>Pendientes</span><b>{conteo('PENDIENTE')}</b></Tarjeta>
         <Tarjeta className="mini-stat"><span>En proceso</span><b>{conteo('EN_PROCESO')}</b></Tarjeta>
         <Tarjeta className="mini-stat"><span>Terminadas</span><b>{conteo('TERMINADA')}</b></Tarjeta>

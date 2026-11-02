@@ -50,10 +50,10 @@ export function Panel() {
         </Tarjeta>
       ) : (
         <>
-          <div className="grid grid--4">
+          <div className="grid grid--auto">
             {vista === 'GERENCIA' && (
               <>
-                <Kpi label="Ventas netas" valor={money(k.ventasNetas)} delta={pct(k.variacionVentas)} deltaTono="up" nota="30 días" icono="up" />
+                <Kpi label="Ventas netas" valor={money(k.ventasNetas)} delta={pct(k.variacionVentas)} deltaTono={k.variacionVentas >= 0 ? 'up' : 'down'} nota="30 días" icono="up" />
                 <Kpi label="Utilidad bruta" valor={money(k.utilidadBruta)} nota={pct(k.margen) + ' de margen'} icono="spark" />
                 <Kpi label="Por cobrar" valor={money(k.porCobrar)} nota={money(k.vencido) + ' vencido'} icono="wallet" />
                 <Kpi label="Productos activos" valor={num(dataset.productos.length)} nota={`${dataset.recetas.length} recetas vigentes`} icono="bread" />
@@ -61,7 +61,7 @@ export function Panel() {
             )}
             {vista === 'PRODUCCION' && (
               <>
-                <Kpi label="Órdenes para hoy" valor={num(dataset.ops.filter((o) => o.estado !== 'TERMINADA').length)} nota="pendientes y en proceso" icono="oven" />
+                <Kpi label="Órdenes abiertas" valor={num(dataset.ops.filter((o) => o.estado !== 'TERMINADA').length)} nota="pendientes y en proceso" icono="oven" />
                 <Kpi label="Terminadas" valor={num(dataset.ops.filter((o) => o.estado === 'TERMINADA').length)} nota="del turno" icono="check" />
                 <Kpi label="Merma estándar" valor={pct(mermaRecetas)} nota="promedio de las recetas vigentes" icono="alert" />
                 <Kpi label="Insumos bajo mínimo" valor={num(dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').length)} nota="avisar a almacén" icono="sack" />

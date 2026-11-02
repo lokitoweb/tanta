@@ -11,10 +11,11 @@ const SEMAFORO: Record<string, { tono: 'ok' | 'warn' | 'danger'; txt: string }> 
 
 export function formatear(v: unknown, tipo?: ColRep['tipo'], fila?: Fila): React.ReactNode {
   if (v === null || v === undefined || v === '') return <span className="t-muted">—</span>;
-  const t = (fila?.tipo === 'pct' && tipo === 'dinero') ? 'pct' : tipo; // filas que traen su propio tipo (G-09)
+  if (typeof v === 'boolean') return <Insignia tono={v ? 'ok' : 'neutral'} punto>{v ? 'Sí' : 'No'}</Insignia>;
+  const t = (fila?.tipo && tipo === 'dinero') ? fila.tipo as ColRep['tipo'] : tipo; // filas que traen su propio tipo (G-01, G-09)
   if (t === 'dinero') return money(v as number);
   if (t === 'pct') return pct(v as number);
-  if (t === 'num') return num2(v as number);
+  if (t === 'num') return Number.isInteger(v) ? (v as number).toLocaleString('es-PE') : num2(v as number);
   if (t === 'fecha') return String(v).slice(0, 16).replace('T', ' ');
   if (t === 'semaforo') { const s = SEMAFORO[String(v)]; return s ? <Insignia tono={s.tono} punto>{s.txt}</Insignia> : String(v); }
   return String(v);
@@ -31,7 +32,7 @@ export function TablaReporte({ columnas, filas, onFila }: { columnas: ColRep[]; 
       return orden.asc ? r : -r;
     });
   }, [filas, orden]);
-  const sumables = columnas.filter((c) => c.tipo === 'dinero' && filas.length > 1 && filas.every((f) => typeof f[c.key] === 'number' && f.tipo !== 'pct'));
+  const sumables = columnas.filter((c) => c.tipo === 'dinero' && filas.length > 1 && filas.every((f) => typeof f[c.key] === 'number' && !f.tipo));
 
   return (
     <div className="table-wrap">

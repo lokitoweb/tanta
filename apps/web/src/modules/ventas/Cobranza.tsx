@@ -100,7 +100,7 @@ export function Cobranza() {
         ) : <p className="t-muted">No hay cuentas por cobrar pendientes.</p>)}
       </Dialogo>
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         <Kpi label="Total por cobrar" valor={money(k.porCobrar)} nota={`${dataset.clientes.filter((c) => c.saldo > 0).length} clientes`} icono="wallet" />
         <Kpi label="Monto vencido" valor={money(k.vencido)} nota={pct(k.vencido / Math.max(k.porCobrar, 1)) + ' de la cartera'} icono="alert" />
         <Kpi label="Días promedio de cobro" valor={`${k.diasPromedioCobro ?? 0} d`} nota="emisión → pago, últimos 90 días" icono="clock" />
@@ -131,7 +131,7 @@ export function Cobranza() {
               <p className="card__sub">V-01 · deudas por cobrar con antigüedad</p>
             </div>
           </div>
-          <Tabla columnas={columnas} filas={dataset.clientes} clave={(c) => c.id}
+          <Tabla columnas={columnas} filas={dataset.clientes.filter((c) => c.saldo > 0)} clave={(c) => c.id}
             vacio={<Vacio titulo="Sin clientes con deuda" icono="wallet" />} />
         </Tarjeta>
       </div>

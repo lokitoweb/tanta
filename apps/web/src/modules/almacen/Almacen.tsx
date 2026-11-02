@@ -56,10 +56,10 @@ export function Almacen() {
         acciones={<><Boton icono="download" onClick={() => exportarExcel('inventario', insumos.map((i) => ({ codigo: i.codigo ?? i.id, insumo: i.nombre, unidad: i.unidad, stock: i.stock, minimo: i.minimo, ...(verValor ? { cpp: i.cpp, valorizado: i.valorizado } : {}), estado: i.estado })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{puede('inventario.mover') && <Boton variant="primary" icono="plus" onClick={() => setRegistrar(true)}>Registrar movimiento</Boton>}</>}
       />
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         <Kpi label="Insumos activos" valor={num(dataset.insumos.length)} nota={`${bajos.length} bajo mínimo`} icono="sack" />
         {verValor && <Kpi label="Valor del stock" valor={money(valorTotal)} nota="costo promedio ponderado" icono="wallet" />}
-        <Kpi label="Movimientos del día" valor={num(dataset.movimientos.length)} nota="kárdex inmutable" icono="ledger" />
+        <Kpi label="Movimientos recientes" valor={num(dataset.movimientos.length)} nota="kárdex inmutable" icono="ledger" />
         {verValor && <Kpi label="Merma valorizada" valor={money(dataset.kpis.mermaValorizada)} nota={pct(dataset.kpis.mermaPct) + ' de la producción'} icono="alert" />}
       </div>
 

@@ -43,7 +43,7 @@ export function Catalogo() {
         ))}
       </div>
 
-      <div className="grid grid--4">
+      <div className="grid grid--auto">
         {lista.map((p) => (
           <article className="prod" key={p.id}>
             <div className={`prod__tile prod__tile--${p.categoriaId}`}>

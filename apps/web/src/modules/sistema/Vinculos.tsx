@@ -1,33 +1,24 @@
-import { useEffect, useState } from 'react';
-import QRCode from 'qrcode';
+import { useState } from 'react';
 import { Boton, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
 
 /**
- * Activación de la app: el APK no trae ninguna dirección. La primera vez se escanea este QR
- * (o se abre el enlace) y la app queda vinculada a este servidor; después sigue los cambios
- * que se hagan en "Servidor de las apps".
+ * Activación de la app: el APK no trae ninguna dirección. La primera vez se escribe este
+ * dominio en el teléfono; después la app sigue sola los cambios de "Servidor de las apps".
  */
 export function ActivacionApp({ urlApi }: { urlApi: string }) {
-  const servidor = (urlApi || `${window.location.origin}/api/v1`).replace(/\/+$/, '');
-  const enlace = `tanta://activar?servidor=${encodeURIComponent(servidor)}`;
-  const [qr, setQr] = useState('');
+  const dominio = urlApi ? new URL(urlApi).host : window.location.host;
   const [copiado, setCopiado] = useState(false);
-  useEffect(() => { QRCode.toDataURL(enlace, { width: 220, margin: 1, errorCorrectionLevel: 'M' }).then(setQr).catch(() => setQr('')); }, [enlace]);
-
   return (
     <Tarjeta>
-      <TarjetaTitulo titulo="Activar la app en un teléfono" subtitulo="Se hace una sola vez por teléfono. El APK no lleva ninguna dirección escrita." />
-      <div className="activacion">
-        {qr && <img src={qr} alt="Código QR de activación" width={220} height={220} />}
-        <ol className="activacion__pasos">
-          <li>Instala la app y ábrela.</li>
-          <li>Toca <b>Escanear código</b> y apunta a este QR.</li>
-          <li>Listo: inicia sesión con tu usuario. Si mudas el sistema de dominio, la app se actualiza sola.</li>
-        </ol>
-        <div className="activacion__enlace">
-          <code>{servidor}</code>
-          <Boton size="sm" onClick={() => { void navigator.clipboard.writeText(servidor).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500); }); }}>{copiado ? 'Copiado' : 'Copiar dirección'}</Boton>
-        </div>
+      <TarjetaTitulo titulo="Activar la app en un teléfono" subtitulo="Se hace una sola vez por teléfono." />
+      <ol className="activacion__pasos">
+        <li>Instala la app y ábrela.</li>
+        <li>Escribe este dominio y toca <b>Conectar</b>.</li>
+        <li>Inicia sesión con tu usuario. Si mudas el sistema de dominio, la app se actualiza sola.</li>
+      </ol>
+      <div className="activacion__enlace">
+        <code>{dominio}</code>
+        <Boton size="sm" onClick={() => { void navigator.clipboard.writeText(dominio).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500); }); }}>{copiado ? 'Copiado' : 'Copiar dominio'}</Boton>
       </div>
     </Tarjeta>
   );

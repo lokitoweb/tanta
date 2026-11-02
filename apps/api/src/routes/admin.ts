@@ -227,10 +227,10 @@ export async function rutasAdmin(app: FastifyInstance) {
     const filas = await q<Record<string, string>>(`
       SELECT p.id, p.anio, p.mes, p.estado, p.cif_total, p.cerrado_en::text AS cerrado_en,
              (SELECT count(*) FROM core.venta v
-               WHERE date_trunc('month', v.creado_en) = make_date(p.anio, p.mes, 1)) AS ventas,
+               WHERE v.creado_en >= make_date(p.anio, p.mes, 1) AND v.creado_en < make_date(p.anio, p.mes, 1) + interval '1 month') AS ventas,
              (SELECT coalesce(sum(v.ventas_netas),0) FROM core.venta v
                WHERE v.estado = 'CONFIRMADA'
-                 AND date_trunc('month', v.creado_en) = make_date(p.anio, p.mes, 1)) AS netas
+                 AND v.creado_en >= make_date(p.anio, p.mes, 1) AND v.creado_en < make_date(p.anio, p.mes, 1) + interval '1 month') AS netas
       FROM core.periodo_costos p
       ORDER BY p.anio DESC, p.mes DESC`);
     return reply.send(filas.map((f) => ({

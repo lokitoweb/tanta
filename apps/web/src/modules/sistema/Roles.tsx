@@ -115,9 +115,9 @@ export function Roles() {
         <Tarjeta className="col-8" padding="none">
           <div className="card__head card__head--padded">
             <div><h3 className="card__title">{rol?.nombre}</h3><p className="card__sub">{rol?.descripcion}</p></div>
-            {!BASE.has(rolId) && rolId && <Boton variant="ghost" onClick={() => void eliminarRol()}>Eliminar rol</Boton>}
+            <div className="page-head__actions">{!BASE.has(rolId) && rolId && <Boton variant="ghost" onClick={() => void eliminarRol()}>Eliminar rol</Boton>}
             {protegido ? <Insignia tono="info">Tiene todo · protegido</Insignia>
-              : <Boton variant="primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar permisos'}</Boton>}
+              : <Boton variant="primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar permisos'}</Boton>}</div>
           </div>
           <div className="permisos">
             {grupos.map(([grupo, ps]) => (
