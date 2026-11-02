@@ -3,14 +3,17 @@ import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
+import { NuevoPedido } from '@/modules/ventas/NuevoPedido';
 
 export function Catalogo() {
-  const { dataset } = useApp();
+  const { dataset, puede, refrescarDatos } = useApp();
   const [cat, setCat] = useState('todas');
   const [carrito, setCarrito] = useState<Record<string, number>>({});
+  const [confirmando, setConfirmando] = useState(false);
+  const [registrado, setRegistrado] = useState<string | null>(null);
 
   const productos = dataset.categorias.flatMap((c) =>
-    dataset.productos.filter((p) => p.categoriaId === c.id).map((p) => ({ ...p, categoria: c.nombre })),
+    dataset.productos.filter((p) => p.categoriaId === c.id && p.estado === 'ACTIVO').map((p) => ({ ...p, categoria: c.nombre })),
   );
 
   const lista = cat === 'todas' ? productos : productos.filter((p) => p.categoriaId === cat);
@@ -29,8 +32,8 @@ export function Catalogo() {
     <>
       <Encabezado
         titulo="Catálogo"
-        descripcion="Pan de masa madre, horneado a diario · pide hasta las 18:00 para entrega al día siguiente"
-        acciones={<Insignia tono="info" punto>Entrega mañana</Insignia>}
+        descripcion="Elige tus productos y la fecha de entrega al confirmar el pedido"
+        acciones={registrado && <Insignia tono="ok" punto>Pedido {registrado} registrado</Insignia>}
       />
 
       <div className="chips chips--fila">
@@ -70,8 +73,14 @@ export function Catalogo() {
               <p>Total {money(total)}</p>
             </div>
           </div>
-          <Boton variant="primary" size="lg" iconoDer="chevron">Confirmar pedido</Boton>
+          {puede('pedidos.crear') && <Boton variant="primary" size="lg" iconoDer="chevron" onClick={() => setConfirmando(true)}>Confirmar pedido</Boton>}
         </div>
+      )}
+
+      {confirmando && (
+        <NuevoPedido elegirCliente={!dataset.misPedidos && puede('pedidos.gestionar')}
+          inicial={Object.entries(carrito).filter(([, n]) => n > 0).map(([productoId, cantidad]) => ({ productoId, cantidad }))}
+          onCerrar={(codigo) => { setConfirmando(false); if (codigo) { setRegistrado(codigo); setCarrito({}); void refrescarDatos(); } }} />
       )}
 
       {ultimo && (

@@ -52,7 +52,7 @@ test('perfil: datos, foto validada, cambio de clave y eliminación de cuenta', a
   // Usuario temporal: no se tocan las cuentas de la semilla que usan las otras pruebas.
   const sa = await login('superadmin');
   const usuario = 'temp' + Date.now();
-  assert.equal((await api(sa, 'POST', '/usuarios', { nombre: 'Temporal Prueba', usuario, clave: 'ClaveInicial1', rol: 'CLIENTE' })).s, 201);
+  assert.equal((await api(sa, 'POST', '/usuarios', { nombre: 'Temporal Prueba', usuario, clave: 'ClaveInicial1', rol: 'VENDEDOR' })).s, 201);
   const t = await login(usuario, 'ClaveInicial1');
 
   assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: 'temp@tanta.pe', telefono: '+51 999 111 222' })).s, 200);

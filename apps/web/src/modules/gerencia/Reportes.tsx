@@ -34,7 +34,13 @@ export function Reportes() {
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
 
-  useEffect(() => { void api<Catalogo[]>('/reportes').then((c) => { setCatalogo(c); setCodigo((x) => x || c[0]?.codigo || ''); }); }, []);
+  useEffect(() => {
+    // ?r=A-02 abre un reporte concreto (enlaces desde Almacén, Panel…).
+    const pedido = new URLSearchParams(window.location.search).get('r');
+    api<Catalogo[]>('/reportes')
+      .then((c) => { setCatalogo(c); setCodigo((x) => x || (c.some((r) => r.codigo === pedido) ? pedido! : c[0]?.codigo) || ''); })
+      .catch((e) => setError(e instanceof Error ? e.message : 'No se pudo cargar el catálogo.'));
+  }, []);
 
   const cargar = async () => {
     if (!codigo) return;

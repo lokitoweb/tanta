@@ -83,7 +83,8 @@ export async function rutasFlujo(app: FastifyInstance) {
     const yo = await uno<{ cliente_id: string | null }>('SELECT cliente_id FROM core.usuario WHERE id = $1', [req.usuario!.id]);
     if (!yo?.cliente_id && !req.usuario!.permisos.has('pedidos.ver')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso pedidos.ver.'));
     const filas = await q<Record<string, string>>(`
-      SELECT p.id, p.codigo, p.cliente, p.estado, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
+      SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
+             (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv))
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
       FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id

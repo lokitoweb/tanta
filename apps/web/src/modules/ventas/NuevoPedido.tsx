@@ -1,0 +1,80 @@
+import { useEffect, useState } from 'react';
+import { api } from '@/core/api';
+import { useApp } from '@/core/app-state';
+import { money } from '@/core/format';
+import { Boton } from '@/ui/primitives';
+import { Dialogo } from '@/ui/Dialogo';
+
+export interface ItemPedido { productoId: string; cantidad: number }
+const manana = () => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+
+/**
+ * Registrar un pedido (PDF §3.2): cliente, productos, fecha y hora de entrega, observaciones.
+ * El cliente de la app no elige cliente: el API lo asigna a su propia cuenta.
+ */
+export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
+  inicial?: ItemPedido[]; elegirCliente: boolean; onCerrar: (codigo?: string) => void;
+}) {
+  const { dataset } = useApp();
+  const productos = dataset.productos.filter((p) => p.estado === 'ACTIVO');
+  const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [clienteId, setClienteId] = useState('');
+  const [items, setItems] = useState<Array<{ productoId: string; cantidad: string }>>(
+    inicial.length ? inicial.map((i) => ({ productoId: i.productoId, cantidad: String(i.cantidad) })) : [{ productoId: productos[0]?.id ?? '', cantidad: '1' }]);
+  const [fecha, setFecha] = useState(manana());
+  const [hora, setHora] = useState('08:00');
+  const [obs, setObs] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  useEffect(() => {
+    if (elegirCliente) api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => { setClientes(r.clientes); setClienteId(r.clientes[0]?.id ?? ''); }).catch(() => {});
+  }, [elegirCliente]);
+
+  const precio = (id: string) => productos.find((p) => p.id === id)?.precioConIgv ?? 0;
+  const total = items.reduce((s, i) => s + precio(i.productoId) * (Number(i.cantidad) || 0), 0);
+  const valido = items.length > 0 && items.every((i) => i.productoId && Number(i.cantidad) > 0) && fecha >= hoy() && (!elegirCliente || clienteId);
+
+  const guardar = async () => {
+    setError(null);
+    setGuardando(true);
+    try {
+      const r = await api<{ codigo: string }>('/pedidos', {
+        method: 'POST', conIdempotencia: true,
+        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad) })), fechaEntrega: fecha, horaEntrega: hora, observaciones: obs },
+      });
+      onCerrar(r.codigo);
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar.'); }
+    finally { setGuardando(false); }
+  };
+
+  return (
+    <Dialogo abierto titulo="Registrar pedido" descripcion="Producción lo verá consolidado por fecha de entrega." onCerrar={() => onCerrar()}
+      acciones={<><Boton onClick={() => onCerrar()}>Cancelar</Boton><Boton variant="primary" disabled={!valido || guardando} onClick={() => void guardar()}>{guardando ? 'Registrando…' : `Registrar · ${money(total)}`}</Boton></>}>
+      <div className="form form--2col form--dialogo">
+        {elegirCliente && (
+          <label className="field field--ancho"><span className="field__label">Cliente</span>
+            <select className="field__input" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
+        )}
+        <div className="field--ancho editor-receta">
+          <div className="editor-receta__cab"><span>Producto</span><span>Cantidad</span><span /></div>
+          {items.map((it, i) => (
+            <div key={i} className="editor-receta__fila">
+              <select className="field__input" value={it.productoId} aria-label="Producto" onChange={(e) => setItems(items.map((x, j) => j === i ? { ...x, productoId: e.target.value } : x))}>
+                {productos.map((p) => <option key={p.id} value={p.id}>{p.nombre} · {money(p.precioConIgv)}</option>)}
+              </select>
+              <div className="editor-receta__cant"><input className="field__input" type="number" min="1" step="1" aria-label="Cantidad" value={it.cantidad} onChange={(e) => setItems(items.map((x, j) => j === i ? { ...x, cantidad: e.target.value } : x))} /></div>
+              <button type="button" className="iconbtn" aria-label="Quitar" onClick={() => setItems(items.filter((_, j) => j !== i))}>×</button>
+            </div>
+          ))}
+          <Boton size="sm" icono="plus" onClick={() => setItems([...items, { productoId: productos[0]?.id ?? '', cantidad: '1' }])}>Agregar producto</Boton>
+        </div>
+        <label className="field"><span className="field__label">Fecha de entrega</span><input className="field__input" type="date" min={hoy()} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
+        <label className="field"><span className="field__label">Hora</span><input className="field__input" type="time" value={hora} onChange={(e) => setHora(e.target.value)} /></label>
+        <label className="field field--ancho"><span className="field__label">Observaciones / personalización</span><input className="field__input" maxLength={500} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ej.: torta con mensaje «Feliz cumpleaños Ana»" /></label>
+        {error && <p className="form__error field--ancho" role="alert">{error}</p>}
+      </div>
+    </Dialogo>
+  );
+}

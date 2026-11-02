@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '@/core/app-state';
 import { money, num, pct, semaforo } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
@@ -7,6 +7,11 @@ import { hoyLargo } from '@/core/fecha';
 
 export function Panel() {
   const { dataset, rol, sesion, navegacionVisible, puede } = useApp();
+  const navegar = useNavigate();
+  const hoyIso = new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+  // Merma estándar real: promedio de las recetas vigentes (antes era un 3 % fijo).
+  const mermaRecetas = dataset.recetas.length ? dataset.recetas.reduce((s, r) => s + r.mermaEstandar, 0) / dataset.recetas.length : 0;
+  const bajasHoy = dataset.movimientos.filter((m) => m.cantidad < 0 && m.fecha.startsWith(hoyIso)).length;
   // La vista sale de los permisos, no del nombre del rol: un rol creado desde
   // Roles y permisos (o el Superadmin) recibe el panel que le corresponde.
   const vista = puede('costos.ver') ? 'GERENCIA' : puede('produccion.ejecutar') ? 'PRODUCCION'
@@ -58,14 +63,14 @@ export function Panel() {
               <>
                 <Kpi label="Órdenes para hoy" valor={num(dataset.ops.filter((o) => o.estado !== 'TERMINADA').length)} nota="pendientes y en proceso" icono="oven" />
                 <Kpi label="Terminadas" valor={num(dataset.ops.filter((o) => o.estado === 'TERMINADA').length)} nota="del turno" icono="check" />
-                <Kpi label="Merma estándar" valor={pct(0.03)} nota="objetivo del período" icono="alert" />
+                <Kpi label="Merma estándar" valor={pct(mermaRecetas)} nota="promedio de las recetas vigentes" icono="alert" />
                 <Kpi label="Insumos bajo mínimo" valor={num(dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').length)} nota="avisar a almacén" icono="sack" />
               </>
             )}
             {vista === 'ALMACEN' && (
               <>
                 <Kpi label="Insumos" valor={num(dataset.insumos.length)} nota={`${dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').length} bajo mínimo`} icono="sack" />
-                <Kpi label="Bajas del día" valor={num(dataset.movimientos.filter((m) => m.cantidad < 0).length)} nota="kárdex inmutable" icono="ledger" />
+                <Kpi label="Salidas de hoy" valor={num(bajasHoy)} nota="consumos, ventas y mermas" icono="ledger" />
                 <Kpi label="Valor del stock" valor={money(dataset.insumos.reduce((s, i) => s + i.valorizado, 0))} nota="al CPP" icono="box" />
                 <Kpi label="Merma valorizada" valor={money(k.mermaValorizada)} nota={pct(k.mermaPct)} icono="alert" />
               </>
@@ -111,12 +116,12 @@ export function Panel() {
                   </h3>
                   <p className="card__sub">Lo que requiere tu atención ahora</p>
                 </div>
-                <Boton variant="ghost" iconoDer="chevron">Ver todo</Boton>
+                <Boton variant="ghost" iconoDer="chevron" onClick={() => navegar(vista === 'PRODUCCION' ? '/produccion' : vista === 'ALMACEN' ? '/almacen' : vista === 'VENDEDOR' ? '/ventas/pedidos' : '/gerencia/dashboard')}>Ver todo</Boton>
               </div>
 
               {vista === 'ALMACEN' ? (
                 <ul className="listado">
-                  {dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').concat(dataset.insumos.slice(0, 3)).slice(0, 5).map((i) => (
+                  {dataset.insumos.filter((i) => i.estado === 'BAJO_MINIMO').slice(0, 5).map((i) => (
                     <li key={i.id}>
                       <span className="listado__icono"><Icon name="sack" size={16} /></span>
                       <div className="listado__txt">

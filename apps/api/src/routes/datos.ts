@@ -43,7 +43,10 @@ export async function rutasDatos(app: FastifyInstance) {
             AND creado_en <  now() - interval '30 days'
         ), cxc AS (
           SELECT coalesce(sum(saldo),0) AS por_cobrar,
-                 coalesce(sum(CASE WHEN vence_en < current_date THEN saldo ELSE 0 END),0) AS vencido
+                 coalesce(sum(CASE WHEN vence_en < current_date THEN saldo ELSE 0 END),0) AS vencido,
+                 -- Días promedio de cobro real (emisión → pago) de los últimos 90 días.
+                 coalesce((SELECT avg(cb.creado_en::date - x.creado_en::date) FROM core.cobranza cb JOIN core.cuenta_por_cobrar x ON x.id = cb.cxc_id
+                           WHERE cb.creado_en >= now() - interval '90 days'), 0) AS dias_cobro
           FROM core.cuenta_por_cobrar WHERE estado IN ('PENDIENTE','PARCIAL')
         ), merma AS (
           SELECT coalesce(sum(abs(valor)),0) AS valor
@@ -53,7 +56,7 @@ export async function rutasDatos(app: FastifyInstance) {
                v.ventas - v.costo AS utilidad,
                CASE WHEN v.ventas > 0 THEN (v.ventas - v.costo) / v.ventas ELSE 0 END AS margen,
                CASE WHEN prev.ventas > 0 THEN (v.ventas - prev.ventas) / prev.ventas ELSE 0 END AS variacion_ventas,
-               cxc.por_cobrar, cxc.vencido, merma.valor AS merma_valor,
+               cxc.por_cobrar, cxc.vencido, cxc.dias_cobro, merma.valor AS merma_valor,
                v.ventas / GREATEST(v.tickets,1) AS ticket_promedio
         FROM v, prev, cxc, merma`)),
 
@@ -143,23 +146,24 @@ export async function rutasDatos(app: FastifyInstance) {
         ORDER BY saldo DESC`)),
 
       agg('7', () => q<Record<string, string>>(`
-        SELECT m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad,
+        -- Movimientos recientes de TODO el inventario (antes estaba fijado en INS-001).
+        SELECT m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad, coalesce(i.nombre, p.nombre) AS item,
                m.costo_unitario, m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp
         FROM core.movimiento_inventario m
-        JOIN core.insumo i ON i.id = m.insumo_id
-        WHERE i.codigo = 'INS-001'
-        ORDER BY m.id DESC LIMIT 12`)),
+        LEFT JOIN core.insumo i ON i.id = m.insumo_id
+        LEFT JOIN core.producto p ON p.id = m.producto_id
+        ORDER BY m.id DESC LIMIT 50`)),
 
       agg('8', () => q<Record<string, string>>(`
         SELECT CASE
-                 WHEN current_date - vence_en <= 7  THEN '0 a 7 días'
-                 WHEN current_date - vence_en <= 15 THEN '8 a 15 días'
-                 WHEN current_date - vence_en <= 30 THEN '16 a 30 días'
+                 WHEN current_date - creado_en::date <= 7  THEN '0 a 7 días'
+                 WHEN current_date - creado_en::date <= 15 THEN '8 a 15 días'
+                 WHEN current_date - creado_en::date <= 30 THEN '16 a 30 días'
                  ELSE 'Más de 30 días'
                END AS rango,
                sum(saldo) AS monto, count(*) AS documentos,
-               min(CASE WHEN current_date - vence_en <= 7 THEN 1 WHEN current_date - vence_en <= 15 THEN 2
-                        WHEN current_date - vence_en <= 30 THEN 3 ELSE 4 END) AS orden
+               min(CASE WHEN current_date - creado_en::date <= 7 THEN 1 WHEN current_date - creado_en::date <= 15 THEN 2
+                        WHEN current_date - creado_en::date <= 30 THEN 3 ELSE 4 END) AS orden
         FROM core.cuenta_por_cobrar
         WHERE estado IN ('PENDIENTE','PARCIAL') AND saldo > 0
         GROUP BY 1 ORDER BY orden`)),
@@ -182,8 +186,9 @@ export async function rutasDatos(app: FastifyInstance) {
         ? q<Record<string, string>>(`
             SELECT us.id, us.nombre, us.usuario, us.estado, us.ultimo_acceso::text AS ultimo_acceso,
                    (SELECT r.nombre FROM core.usuario_rol ur JOIN core.rol r ON r.id = ur.rol_id
-                    WHERE ur.usuario_id = us.id ORDER BY r.orden LIMIT 1) AS rol
-            FROM core.usuario us ORDER BY us.nombre`)
+                    WHERE ur.usuario_id = us.id ORDER BY r.orden LIMIT 1) AS rol,
+                   (SELECT ur.rol_id FROM core.usuario_rol ur WHERE ur.usuario_id = us.id LIMIT 1) AS rol_id
+            FROM core.usuario us WHERE us.eliminado_en IS NULL ORDER BY us.nombre`)
         : Promise.resolve([]),
     ]);
 
@@ -238,6 +243,7 @@ export async function rutasDatos(app: FastifyInstance) {
         variacionVentas: num(k.variacion_ventas),
         variacionMargen: 0,
         porCobrar: num(k.por_cobrar),
+        diasPromedioCobro: Math.round(num(k.dias_cobro)),
         vencido: num(k.vencido),
         mermaValorizada: num(k.merma_valor),
         mermaPct: ventas > 0 ? num(k.merma_valor) / ventas : 0,
@@ -303,7 +309,7 @@ export async function rutasDatos(app: FastifyInstance) {
       })),
       movimientos: movimientos.slice().reverse().map((m) => ({
         fecha: m.fecha.slice(0, 16).replace('T', ' '),
-        tipo: m.tipo, documento: m.documento, cantidad: num(m.cantidad),
+        tipo: m.tipo, documento: m.documento, cantidad: num(m.cantidad), item: m.item,
         costo: num(m.costo_unitario), costoUnitario: num(m.costo_unitario),
         valor: num(m.valor), saldoCantidad: num(m.saldo_cantidad),
         saldoValor: num(m.saldo_valor), cpp: num(m.cpp),
@@ -329,7 +335,7 @@ export async function rutasDatos(app: FastifyInstance) {
         };
       }),
       usuarios: usuarios.map((x) => ({
-        id: x.id, nombre: x.nombre, usuario: x.usuario, rol: x.rol,
+        id: x.id, nombre: x.nombre, usuario: x.usuario, rol: x.rol, rolId: x.rol_id,
         estado: x.estado, ultimoAcceso: x.ultimo_acceso ?? '',
       })),
       permisos: [...u.permisos],
@@ -380,6 +386,7 @@ export async function rutasDatos(app: FastifyInstance) {
       delete k.vencido;
     }
     if (!puede('usuarios.gestionar')) p.usuarios = [];
+    // Antigüedad de saldos = días desde la emisión (mismo criterio que G-11 y V-01).
     // Ventas del negocio (totales, tendencia, ranking): solo para quien ve dashboard o reportes.
     if (!puede('dashboard.ver') && !puede('reportes.ver')) {
       const k = p.kpis as Record<string, unknown>;

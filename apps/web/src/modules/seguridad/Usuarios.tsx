@@ -8,13 +8,31 @@ import { fechaHora } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
 import type { Usuario } from '@/core/types';
 
-const ROLES = ['GERENTE', 'ADMINISTRADOR', 'PRODUCCION', 'ALMACEN', 'VENDEDOR', 'CLIENTE', 'SOPORTE'];
 
 export function Usuarios() {
   const { dataset, sesion, refrescarDatos } = useApp();
   const [usuarios, setUsuarios] = useState<Usuario[]>(dataset.usuarios ?? []);
   const [nuevo, setNuevo] = useState(false);
-  const [form, setForm] = useState({ nombre: '', usuario: '', clave: '', rol: 'VENDEDOR' });
+  const [form, setForm] = useState({ nombre: '', usuario: '', clave: '', rol: 'VENDEDOR', clienteId: '' });
+  // Roles y clientes vienen de la base: un rol creado en «Roles y permisos» aparece aquí al instante.
+  const [roles, setRoles] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [cambio, setCambio] = useState<{ u: Usuario; rol: string; clienteId: string } | null>(null);
+  useEffect(() => {
+    api<Array<{ id: string; nombre: string }>>('/roles-asignables').then(setRoles).catch(() => {});
+    api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => setClientes(r.clientes)).catch(() => {});
+  }, []);
+  const cambiarRol = async () => {
+    if (!cambio) return;
+    setGuardando(true);
+    setError(null);
+    try {
+      await api(`/usuarios/${cambio.u.id}/rol`, { method: 'PATCH', body: { rol: cambio.rol, ...(cambio.rol === 'CLIENTE' ? { clienteId: cambio.clienteId } : {}) } });
+      setCambio(null);
+      await refrescarDatos();
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cambiar el rol.'); }
+    finally { setGuardando(false); }
+  };
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
 
@@ -24,9 +42,9 @@ export function Usuarios() {
     setGuardando(true);
     setError(null);
     try {
-      await api('/usuarios', { method: 'POST', body: form });
+      await api('/usuarios', { method: 'POST', body: { ...form, clienteId: form.rol === 'CLIENTE' ? form.clienteId : undefined } });
       setNuevo(false);
-      setForm({ nombre: '', usuario: '', clave: '', rol: 'VENDEDOR' });
+      setForm({ nombre: '', usuario: '', clave: '', rol: 'VENDEDOR', clienteId: '' });
       await refrescarDatos();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo crear el usuario.');
@@ -67,6 +85,8 @@ export function Usuarios() {
     {
       key: 'acciones', header: '', align: 'right',
       render: (u) => (
+        <span className="acciones-fila">
+        <Boton size="sm" variant="ghost" disabled={u.id === sesion.usuario.id} onClick={() => setCambio({ u, rol: u.rolId ?? 'VENDEDOR', clienteId: '' })}>Cambiar rol</Boton>
         <Boton
           size="sm"
           variant={u.estado === 'ACTIVO' ? 'ghost' : 'secondary'}
@@ -76,6 +96,7 @@ export function Usuarios() {
         >
           {u.estado === 'ACTIVO' ? 'Bloquear' : 'Reactivar'}
         </Boton>
+        </span>
       ),
     },
   ];
@@ -125,7 +146,7 @@ export function Usuarios() {
       <Dialogo
         abierto={nuevo}
         titulo="Nuevo usuario"
-        descripcion="La contraseña se guarda con scrypt. La persona debe cambiarla en su primer ingreso."
+        descripcion="La contraseña se guarda cifrada con Argon2id. Pídele a la persona que la cambie en Mi perfil al ingresar."
         onCerrar={() => setNuevo(false)}
         acciones={
           <>
@@ -147,15 +168,37 @@ export function Usuarios() {
           </label>
           <label className="field">
             <span className="field__label">Contraseña inicial</span>
-            <input className="field__input" type="text" value={form.clave} onChange={(e) => setForm({ ...form, clave: e.target.value })} placeholder="mínimo 8 caracteres" />
+            <input className="field__input" type="text" value={form.clave} onChange={(e) => setForm({ ...form, clave: e.target.value })} placeholder="mínimo 10 caracteres" />
           </label>
           <label className="field">
             <span className="field__label">Rol</span>
             <select className="field__input" value={form.rol} onChange={(e) => setForm({ ...form, rol: e.target.value })}>
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+              {roles.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
             </select>
           </label>
+          {form.rol === 'CLIENTE' && (
+            <label className="field">
+              <span className="field__label">Ficha de cliente</span>
+              <select className="field__input" value={form.clienteId} onChange={(e) => setForm({ ...form, clienteId: e.target.value })}>
+                <option value="">Elegir…</option>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            </label>
+          )}
         </div>
+      </Dialogo>
+      <Dialogo abierto={cambio !== null} titulo={`Cambiar rol · ${cambio?.u.nombre ?? ''}`} descripcion="Sus sesiones abiertas se cierran: vuelve a ingresar con el rol nuevo."
+        onCerrar={() => setCambio(null)}
+        acciones={<><Boton onClick={() => setCambio(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || (cambio?.rol === 'CLIENTE' && !cambio.clienteId)} onClick={() => void cambiarRol()}>Cambiar rol</Boton></>}>
+        {cambio && (
+          <div className="form form--compacto">
+            <label className="field"><span className="field__label">Rol</span>
+              <select className="field__input" value={cambio.rol} onChange={(e) => setCambio({ ...cambio, rol: e.target.value })}>{roles.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}</select></label>
+            {cambio.rol === 'CLIENTE' && (
+              <label className="field"><span className="field__label">Ficha de cliente</span>
+                <select className="field__input" value={cambio.clienteId} onChange={(e) => setCambio({ ...cambio, clienteId: e.target.value })}><option value="">Elegir…</option>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
+            )}
+          </div>
+        )}
       </Dialogo>
     </>
   );

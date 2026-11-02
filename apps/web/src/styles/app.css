@@ -1060,3 +1060,6 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .subida-firebase { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .subida-firebase label { cursor: pointer; }
 @media (max-width: 760px) { .activacion { grid-template-columns: 1fr; justify-items: center; } }
+.table--compacta td { padding: 6px 8px; font-size: .8125rem; }
+.filtros__campo--ancho select { min-width: min(420px, 100%); }
+.acciones-fila { display: inline-flex; gap: 6px; }

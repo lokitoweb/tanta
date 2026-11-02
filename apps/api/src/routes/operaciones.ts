@@ -79,9 +79,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
   });
 
   const CerrarOP = z.object({
-    cantidadProducida: z.number().positive(),
+    cantidadProducida: z.number().positive().max(100_000),
     mermaReal: z.number().min(0).max(0.9).default(0),
-  });
+    // PDF §3.2: la merma se registra con su motivo.
+    motivoMerma: z.string().trim().max(200).default(''),
+  }).refine((d) => d.mermaReal === 0 || d.motivoMerma.length >= 3, { message: 'Indica el motivo de la merma.', path: ['motivoMerma'] });
 
   /**
    * Cerrar una OP mueve inventario de verdad, en una sola transacción:
@@ -91,8 +93,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (!exigir(req, reply, 'produccion.ejecutar')) return;
     const { codigo } = req.params as { codigo: string };
     const parseo = CerrarOP.safeParse(req.body);
-    if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Cantidad producida inválida.'));
-    const { cantidadProducida, mermaReal } = parseo.data;
+    if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Cantidad producida inválida.'));
+    const { cantidadProducida, mermaReal, motivoMerma } = parseo.data;
 
     const clave = req.headers['idempotency-key'] as string | undefined;
 
@@ -170,9 +172,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
           await c.query(
             `UPDATE core.orden_produccion
-             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3
+             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3, motivo_merma = $4
              WHERE id = $1`,
-            [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6)],
+            [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma],
           );
           await c.query('SELECT core.recalcular_costos()');
 
@@ -584,21 +586,27 @@ export async function rutasOperaciones(app: FastifyInstance) {
     }
   });
 
+  // Kárdex por insumo (INS-…) o producto (P…). Sin permiso de valorización, solo cantidades.
   app.get('/kardex/:codigo', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'inventario.ver')) return;
     const { codigo } = req.params as { codigo: string };
+    if (!/^[A-Z0-9-]{1,20}$/.test(codigo)) return reply.code(422).send(error(422, 'CODIGO_INVALIDO', 'Código inválido.'));
     const filas = await q<Record<string, string>>(
-      `SELECT m.id, m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad, m.costo_unitario,
-              m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp
-       FROM core.movimiento_inventario m
-       JOIN core.insumo i ON i.id = m.insumo_id
-       WHERE i.codigo = $1 ORDER BY m.id`,
+      `SELECT * FROM (
+         SELECT m.id, m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad, m.costo_unitario,
+                m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp
+         FROM core.movimiento_inventario m
+         LEFT JOIN core.insumo i ON i.id = m.insumo_id
+         LEFT JOIN core.producto p ON p.id = m.producto_id
+         WHERE coalesce(i.codigo, p.codigo) = $1
+         ORDER BY m.id DESC LIMIT 1000
+       ) x ORDER BY id`,
       [codigo],
     );
+    const valoriza = req.usuario!.permisos.has('costos.ver') || req.usuario!.permisos.has('inventario.mover');
     return reply.send(filas.map((f) => ({
-      fecha: f.fecha, tipo: f.tipo, documento: f.documento, cantidad: num(f.cantidad),
-      costoUnitario: num(f.costo_unitario), valor: num(f.valor),
-      saldoCantidad: num(f.saldo_cantidad), saldoValor: num(f.saldo_valor), cpp: num(f.cpp),
+      fecha: f.fecha, tipo: f.tipo, documento: f.documento, cantidad: num(f.cantidad), saldoCantidad: num(f.saldo_cantidad),
+      ...(valoriza ? { costoUnitario: num(f.costo_unitario), valor: num(f.valor), saldoValor: num(f.saldo_valor), cpp: num(f.cpp) } : {}),
     })));
   });
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { api } from '@/core/api';
@@ -11,6 +12,7 @@ import type { Insumo } from '@/core/types';
 export function Almacen() {
   const { dataset, puede, refrescarDatos } = useApp();
   const [registrar, setRegistrar] = useState(false);
+  const navegar = useNavigate();
   // Misma regla que el API (PDF 3.3): valorización para Gerencia/Admin y Almacén.
   const verValor = puede('costos.ver') || puede('inventario.mover');
   const [q, setQ] = useState('');
@@ -68,7 +70,7 @@ export function Almacen() {
             <strong>{bajos.length} insumos bajo el stock mínimo</strong>
             <p>{bajos.map((b) => b.nombre).join(' · ')}</p>
           </div>
-          <Boton size="sm">Ver reposición</Boton>
+          {puede('reportes.ver') && <Boton size="sm" onClick={() => navegar('/gerencia/reportes?r=A-02')}>Ver reposición sugerida</Boton>}
         </div>
       )}
 

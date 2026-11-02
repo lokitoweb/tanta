@@ -36,6 +36,7 @@ export interface Cliente {
   diasPromedio: number; limiteCredito: number; listaPrecio: string;
 }
 export interface Movimiento {
+  item?: string;
   fecha: string; tipo: string; documento: string; cantidad: number;
   costo: number | null; costoUnitario: number; valor: number;
   saldoCantidad: number; saldoValor: number; cpp: number;
@@ -52,13 +53,13 @@ export interface Receta {
   costoInsumos?: number; costoConMerma?: number; cifUnit?: number; costoUnitario?: number; margen?: number;
 }
 export interface Usuario {
-  id: string; nombre: string; usuario: string; rol: string; estado: string; ultimoAcceso: string;
+  id: string; nombre: string; usuario: string; rol: string; rolId?: string; estado: string; ultimoAcceso: string;
 }
 export interface Kpis {
   ventasNetas: number; costoVentas: number; utilidadBruta: number; margen: number;
   margenObjetivo: number; tickets: number; ticketPromedio: number;
   variacionVentas: number; variacionMargen: number;
-  porCobrar: number; vencido: number; mermaValorizada: number; mermaPct: number;
+  porCobrar: number; vencido: number; diasPromedioCobro?: number; mermaValorizada: number; mermaPct: number;
 }
 export interface Dataset {
   generadoEn: string;

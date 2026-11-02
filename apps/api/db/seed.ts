@@ -507,9 +507,10 @@ async function main() {
 
     // Los correlativos siguen a los documentos cargados: sin esto, la primera venta real
     // de una base recién sembrada chocaba con VTA-…-000001 (409 DUPLICADO).
-    await c.query(`SELECT setval('core.venta_correlativo_seq', GREATEST((SELECT count(*) FROM core.venta), 1)),
-                          setval('core.pedido_correlativo_seq', GREATEST((SELECT count(*) FROM core.pedido), 1)),
-                          setval('core.op_correlativo_seq', GREATEST((SELECT count(*) FROM core.orden_produccion), 1))`);
+    // Por el número más alto (no por count): la semilla no numera de forma contigua.
+    await c.query(`SELECT setval('core.venta_correlativo_seq', GREATEST((SELECT coalesce(max(substring(codigo from '(\\d+)$')::bigint), 0) FROM core.venta), 1)),
+                          setval('core.pedido_correlativo_seq', GREATEST((SELECT coalesce(max(substring(codigo from '(\\d+)$')::bigint), 0) FROM core.pedido), 1)),
+                          setval('core.op_correlativo_seq', GREATEST((SELECT coalesce(max(substring(codigo from '(\\d+)$')::bigint), 0) FROM core.orden_produccion), 1))`);
     await c.query('COMMIT');
 
     const resumen = await c.query(`

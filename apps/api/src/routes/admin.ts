@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error, hashClave } from '../seguridad.js';
 import { auditar, verificarCadena, ultimoEvento } from '../auditoria.js';
+import { invalidar } from '../cache.js';
 
 /**
  * Administración del sistema.
@@ -83,8 +84,10 @@ export async function rutasAdmin(app: FastifyInstance) {
   const NuevoUsuario = z.object({
     nombre: z.string().min(3).max(120),
     usuario: z.string().min(3).max(40).regex(/^[a-z0-9._-]+$/, 'Solo minúsculas, números, punto, guion y guion bajo.'),
-    clave: z.string().min(8).max(120),
+    clave: z.string().min(10, 'La contraseña inicial debe tener al menos 10 caracteres.').max(128),
     rol: z.string().min(1),
+    // Un usuario con rol Cliente se vincula a su ficha: así solo ve y pide lo suyo.
+    clienteId: z.string().uuid().optional(),
   });
 
   app.post('/usuarios', { preHandler: autenticar }, async (req, reply) => {
@@ -96,6 +99,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     const d = parseo.data;
 
     if (!(await protegeSuperadmin(req, reply, { rol: d.rol }))) return;
+    if (d.rol === 'CLIENTE' && !d.clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige la ficha de cliente de este usuario.'));
     const rolExiste = await uno('SELECT 1 FROM core.rol WHERE id = $1', [d.rol]);
     if (!rolExiste) return reply.code(422).send(error(422, 'ROL_INEXISTENTE', 'El rol indicado no existe.'));
 
@@ -104,8 +108,8 @@ export async function rutasAdmin(app: FastifyInstance) {
 
     const creado = await tx(async (c) => {
       const r = await c.query<{ id: string }>(
-        'INSERT INTO core.usuario (nombre, usuario, clave_hash) VALUES ($1,$2,$3) RETURNING id',
-        [d.nombre, d.usuario.toLowerCase(), hashClave(d.clave)],
+        'INSERT INTO core.usuario (nombre, usuario, clave_hash, cliente_id) VALUES ($1,$2,$3,$4) RETURNING id',
+        [d.nombre, d.usuario.toLowerCase(), hashClave(d.clave), d.rol === 'CLIENTE' ? d.clienteId ?? null : null],
       );
       await c.query('INSERT INTO core.usuario_rol (usuario_id, rol_id) VALUES ($1,$2)', [r.rows[0].id, d.rol]);
       return r.rows[0].id;
@@ -147,7 +151,36 @@ export async function rutasAdmin(app: FastifyInstance) {
     return reply.send({ id, estado: parseo.data.estado });
   });
 
-  const NuevaClave = z.object({ clave: z.string().min(8).max(120) });
+  // Roles que puede asignar quien gestiona usuarios (el Superadmin solo lo asigna otro Superadmin).
+  app.get('/roles-asignables', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'usuarios.gestionar')) return;
+    return q("SELECT id, nombre FROM core.rol WHERE id <> 'SUPERADMIN' OR $1 ORDER BY orden", [req.usuario!.rol === 'SUPERADMIN']);
+  });
+
+  const CambioRol = z.object({ rol: z.string().min(1).max(40), clienteId: z.string().uuid().optional() });
+  app.patch('/usuarios/:id/rol', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'usuarios.gestionar')) return;
+    const { id } = req.params as { id: string };
+    const p = CambioRol.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Rol inválido.'));
+    if (id === req.usuario!.id) return reply.code(409).send(error(409, 'NO_PUEDES_CAMBIARTE', 'No puedes cambiar tu propio rol.'));
+    if (!(await protegeSuperadmin(req, reply, { usuarioId: id })) || !(await protegeSuperadmin(req, reply, { rol: p.data.rol }))) return;
+    if (!(await uno('SELECT 1 FROM core.rol WHERE id = $1', [p.data.rol]))) return reply.code(422).send(error(422, 'ROL_INEXISTENTE', 'El rol no existe.'));
+    if (p.data.rol === 'CLIENTE' && !p.data.clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige la ficha de cliente de este usuario.'));
+    const antes = await uno<{ rol_id: string }>('SELECT rol_id FROM core.usuario_rol WHERE usuario_id = $1', [id]);
+    if (!antes) return reply.code(404).send(error(404, 'USUARIO_NO_EXISTE', 'El usuario no existe.'));
+    await tx(async (c) => {
+      await c.query('UPDATE core.usuario_rol SET rol_id = $2 WHERE usuario_id = $1', [id, p.data.rol]);
+      await c.query('UPDATE core.usuario SET cliente_id = $2 WHERE id = $1', [id, p.data.rol === 'CLIENTE' ? p.data.clienteId : null]);
+      // Sesiones abiertas con el rol anterior quedan sin efecto (el token se revalida contra la base).
+      await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE usuario_id = $1 AND revocado_en IS NULL', [id]);
+    });
+    invalidar(`sesion:${id}`);
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'USUARIO_ROL_CAMBIADO', entidad: 'usuario', entidadId: id, detalle: { antes: antes.rol_id, despues: p.data.rol }, ip: req.ip });
+    return { id, rol: p.data.rol };
+  });
+
+  const NuevaClave = z.object({ clave: z.string().min(10, 'Mínimo 10 caracteres.').max(128) });
 
   app.patch('/usuarios/:id/clave', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'usuarios.gestionar')) return;
