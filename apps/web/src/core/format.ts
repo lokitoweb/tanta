@@ -30,7 +30,9 @@ export function fechaLarga(iso: string): string {
 }
 
 export function fechaHora(iso: string): string {
-  const d = new Date(iso.replace(' ', 'T'));
+  // Postgres envía '2026-11-02 17:03:12.5-05': el navegador exige 'T' y la zona como -05:00.
+  const d = new Date(iso.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'));
+  if (Number.isNaN(d.getTime())) return '—';
   return `${d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' })} · ${d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}`;
 }
 

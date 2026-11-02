@@ -1118,3 +1118,16 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 @media (max-width: 640px) { .grid--4 { grid-template-columns: 1fr; } }
 /* KPI: se reparten el ancho aunque el rol oculte algunos */
 .grid--auto { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+
+/* Modales: crecen con su contenido (ancho y alto) en vez de mostrar scroll; solo si no caben en la
+   pantalla, el cuerpo se desplaza y la cabecera y los botones quedan siempre visibles. */
+.dialogo {
+  width: fit-content; min-width: min(460px, 100%); max-width: min(980px, 100%);
+  max-height: calc(100vh - 32px); overflow: hidden; display: flex; flex-direction: column;
+}
+.dialogo__fondo { padding: 16px; }
+.dialogo__cuerpo { overflow-y: auto; padding: 4px 22px 14px; min-height: 0; }
+.dialogo__cuerpo .form--2col { min-width: min(620px, calc(100vw - 80px)); }
+.dialogo__cuerpo .table-wrap, .dialogo__cuerpo table { max-width: 100%; }
+.dialogo__desc { max-width: 60ch; }
+@media (max-width: 640px) { .dialogo { min-width: 100%; } .dialogo__cuerpo .form--2col { min-width: 0; } }

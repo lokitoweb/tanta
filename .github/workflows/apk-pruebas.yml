@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: 'Servidor opcional (https://…). Vacío: la app se activa con el QR de Configuración → App móvil.'
+        description: 'Servidor (https://dominio). Vacío = el guardado en la variable API_URL del repositorio.'
         required: false
         default: ''
 
+# contents: write para publicar el release: de ahí el sistema toma versión y enlace de descarga.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: apk-pruebas
@@ -32,9 +33,9 @@ jobs:
       - name: Validar servidor
         # Se pasa por variable de entorno, nunca interpolado en el script (evita inyección de comandos).
         env:
-          API_URL: ${{ inputs.api_url }}
+          API_URL: ${{ inputs.api_url || vars.API_URL }}
         run: |
-          if [ -z "$API_URL" ]; then echo "API=" >> "$GITHUB_ENV"; exit 0; fi
+          if [ -z "$API_URL" ]; then echo "::error::Define el dominio: variable API_URL del repositorio o el campo al ejecutar"; exit 1; fi
           [[ "$API_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] || { echo "::error::Usa solo https://dominio"; exit 1; }
           echo "API=${API_URL%/}/api/v1" >> "$GITHUB_ENV"
 
@@ -64,6 +65,17 @@ jobs:
       - name: Pruebas
         run: flutter test
 
+      # Llave fija de firma (secretos del repositorio): sin ella cada APK tendría otra firma
+      # y Android no dejaría instalarla encima de la anterior (la actualización fallaría).
+      - name: Llave de firma
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          CLAVE: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then echo "::warning::Sin ANDROID_KEYSTORE: se firma con la llave de debug y no se podrá actualizar encima"; exit 0; fi
+          echo "$KEYSTORE" | base64 -d > android/app/tanta.jks
+          printf 'storeFile=tanta.jks\nstorePassword=%s\nkeyAlias=tanta\nkeyPassword=%s\n' "$CLAVE" "$CLAVE" > android/key.properties
+
       # Build de pruebas: firmada con la llave de debug (instalable a mano, no para Play)
       # y con el servidor editable desde el login.
       - name: Compilar
@@ -74,3 +86,13 @@ jobs:
           name: tanta-${{ env.VERSION }}+${{ env.BUILD }}-apk
           path: apps/mobile/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 14
+
+      # Release = aviso de actualización: el sistema lo detecta solo y las apps instaladas lo muestran.
+      - name: Publicar release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp apps/mobile/build/app/outputs/flutter-apk/app-release.apk "tanta-$VERSION+$BUILD.apk"
+          gh release create "v$VERSION+$BUILD" "tanta-$VERSION+$BUILD.apk" \
+            --title "Tanta $VERSION ($BUILD)" --notes "APK compilada para $API" --target "$GITHUB_SHA"

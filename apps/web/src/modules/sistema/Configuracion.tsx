@@ -24,8 +24,12 @@ export function Configuracion() {
 
   const [negocio, setNegocio] = useState<Record<string, string> | null>(null);
   const cargar = async () => {
-    setCfg(await api<Datos>('/sistema/config'));
+    // Primero la pública: el servidor revisa ahí el último release de GitHub y actualiza la versión.
     setNegocio({ ...(await leerConfigPublica(true)).negocio });
+    const d = await api<Datos>('/sistema/config');
+    // Primera vez: el servidor de las apps es este mismo dominio (no se escribe a mano).
+    if (d.movil && !d.movil.urlApi && window.location.protocol === 'https:') d.movil = { ...d.movil, urlApi: `${window.location.origin}/api/v1` };
+    setCfg(d);
   };
   const guardarNegocio = async () => {
     setGuardando(true);
@@ -117,15 +121,19 @@ export function Configuracion() {
           <Tarjeta>
             <TarjetaTitulo titulo="Control de versiones" subtitulo="La app consulta esto al abrir. Por debajo de la mínima, obliga a actualizar." />
             <div className="form form--2col">
-              <Campo etiqueta="Versión publicada en tiendas"><input className="field__input mono" placeholder="1.2.0" value={movil.versionActual ?? ''} onChange={(e) => campo('movil', 'versionActual', e.target.value.trim())} /></Campo>
+              <Campo etiqueta="Última versión publicada"><input className="field__input mono" placeholder="1.2.0" value={movil.versionActual ?? ''} onChange={(e) => campo('movil', 'versionActual', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Versión mínima permitida"><input className="field__input mono" placeholder="1.1.0" value={movil.versionMinima ?? ''} onChange={(e) => campo('movil', 'versionMinima', e.target.value.trim())} /></Campo>
-              <Campo etiqueta="Enlace Google Play"><input className="field__input" type="url" placeholder="https://play.google.com/store/apps/details?id=…" value={movil.urlAndroid ?? ''} onChange={(e) => campo('movil', 'urlAndroid', e.target.value.trim())} /></Campo>
+              <Campo etiqueta="Repositorio que compila la APK (GitHub)" ancho>
+                <input className="field__input mono" placeholder="dueño/repositorio" value={movil.repoGithub ?? ''} onChange={(e) => campo('movil', 'repoGithub', e.target.value.trim())} />
+              </Campo>
+              <p className="dialogo__nota field--ancho">Con el repositorio indicado, cada APK que compila GitHub se detecta sola: la versión y el enlace de Android se actualizan aquí y los teléfonos reciben el aviso de actualización. La versión mínima la decides tú (obliga a actualizar).</p>
+              <Campo etiqueta="Enlace Android (Google Play o APK)"><input className="field__input" type="url" placeholder="https://play.google.com/store/apps/details?id=…" value={movil.urlAndroid ?? ''} onChange={(e) => campo('movil', 'urlAndroid', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Enlace App Store"><input className="field__input" type="url" placeholder="https://apps.apple.com/app/id…" value={movil.urlIos ?? ''} onChange={(e) => campo('movil', 'urlIos', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Servidor de las apps (URL del API)" ancho>
                 <input className="field__input" type="url" placeholder="https://www.tantapanaderia.com/api/v1" value={movil.urlApi ?? ''}
                   onChange={(e) => campo('movil', 'urlApi', e.target.value.trim())} />
               </Campo>
-              <p className="dialogo__nota field--ancho">Si mudas el sistema a otro dominio, escribe aquí el nuevo antes de apagar el actual: cada app lo lee al abrir, comprueba que responde y se cambia sola. Vacío = las apps siguen donde están.</p>
+              <p className="dialogo__nota field--ancho">Por defecto es este mismo dominio y la APK se compila con él. Si mudas el sistema, escribe aquí el nuevo antes de apagar el actual: cada app instalada lo lee al abrir, comprueba que responde y se cambia sola.</p>
               <Campo etiqueta="Mensaje al pedir actualización" ancho><input className="field__input" maxLength={200} value={movil.mensajeActualizacion ?? ''} onChange={(e) => campo('movil', 'mensajeActualizacion', e.target.value)} /></Campo>
             </div>
             <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('movil')} disabled={guardando}>Guardar versiones</Boton></div>

@@ -60,7 +60,8 @@ const enmascarar = (s: Seccion, v: Config) =>
   Object.fromEntries(Object.entries(v).map(([k, x]) => [k, SECRETOS[s]?.includes(k) && x ? MASCARA : x]));
 
 /* ------------------------------------------------------------ validación */
-const semver = z.string().regex(/^\d+\.\d+\.\d+$/, 'Formato 1.2.3');
+// 1.2.3 o 1.2.3+45 (número de compilación: cada APK de GitHub sube este número).
+const semver = z.string().regex(/^\d+\.\d+\.\d+(\+\d+)?$/, 'Formato 1.2.3 o 1.2.3+45');
 const urlHttps = z.union([z.literal(''), z.string().url().startsWith('https://', 'Debe usar https://')]);
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
@@ -69,7 +70,9 @@ const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
   movil: z.object({ versionActual: semver, versionMinima: semver, urlAndroid: urlHttps, urlIos: urlHttps,
     mensajeActualizacion: z.string().trim().min(5).max(200),
     // Servidor que deben usar las apps instaladas: si cambia, se mudan solas al abrir.
-    urlApi: urlHttps.optional().default('') }),
+    urlApi: urlHttps.optional().default(''),
+    // Repositorio que compila la APK (dueño/nombre): de su último release salen versión y enlace.
+    repoGithub: z.union([z.literal(''), z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'Formato dueño/repositorio')]).optional().default('') }),
   legal: z.object({ urlPrivacidad: urlHttps, urlTerminos: urlHttps, correoSoporte: z.union([z.literal(''), z.string().email()]) }),
   firebase: z.object({ habilitado: z.boolean(), projectId: z.string().max(100), apiKey: z.string().max(100),
     appIdAndroid: z.string().max(100), appIdIos: z.string().max(100), senderId: z.string().max(40),
@@ -82,10 +85,39 @@ const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
 };
 
 /** a < b en semver. */
+/** Compara 1.2.3+45: mayor, menor, parche y número de compilación (sin compilación = 0). */
 export function versionMenor(a: string, b: string): boolean {
-  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0);
+  const partes = (v: string) => v.replace(/^v/, '').split(/[.+]/).map(Number);
+  const pa = partes(a), pb = partes(b);
+  for (let i = 0; i < 4; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
   return false;
+}
+
+/**
+ * Versión publicada automática: lee el último release del repositorio configurado (GitHub
+ * Actions publica uno por cada APK). Si es más nuevo, actualiza versión y enlace de Android;
+ * así el superadmin ve el dato al día y las apps instaladas reciben el aviso de actualización.
+ * ponytail: consulta como máximo cada 5 min (límite de la API pública de GitHub: 60/h por IP).
+ */
+let ultimaRevision = 0;
+export async function sincronizarRelease(): Promise<void> {
+  if (Date.now() - ultimaRevision < 5 * 60_000) return;
+  ultimaRevision = Date.now();
+  const movil = await leerConfig('movil') as { repoGithub?: string; versionActual?: string };
+  if (!movil.repoGithub) return;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${movil.repoGithub}/releases/latest`, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'tanta-api' }, signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return;
+    const rel = await r.json() as { tag_name?: string; assets?: Array<{ name: string; browser_download_url: string }> };
+    const version = (rel.tag_name ?? '').replace(/^v/, '');
+    const apk = rel.assets?.find((a) => a.name.endsWith('.apk'))?.browser_download_url;
+    if (!/^\d+\.\d+\.\d+(\+\d+)?$/.test(version) || !apk || !versionMenor(movil.versionActual ?? '0.0.0', version)) return;
+    await q(`UPDATE core.configuracion SET valor = valor || jsonb_build_object('versionActual', $1::text, 'urlAndroid', $2::text), actualizado_en = now()
+             WHERE clave = 'movil'`, [version, apk]);
+    invalidar('cfg:movil');
+  } catch { /* GitHub no respondió: se reintenta en la próxima ventana */ }
 }
 
 /** Tipo real por "números mágicos": no se confía en el mime que declara el cliente. */
@@ -221,6 +253,7 @@ export async function rutasSistema(app: FastifyInstance) {
   /* --------------------------------------- configuración pública (sin sesión) */
   // Lo que la pantalla de login y la app necesitan antes de autenticarse. Nada secreto.
   app.get('/config/publica', async (_req, reply) => {
+    await sincronizarRelease();
     const [marca, movil, legal, fb, negocio] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase'), leerNegocio()]);
     const f = fb as Record<string, unknown>;
     // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
@@ -500,6 +533,7 @@ export async function rutasSistema(app: FastifyInstance) {
              ON CONFLICT (usuario_id, instalacion) DO UPDATE SET plataforma = EXCLUDED.plataforma,
                version_app = EXCLUDED.version_app, token_push = coalesce(EXCLUDED.token_push, core.dispositivo.token_push), ultimo_uso = now()`,
       [req.usuario!.id, d.instalacion, d.plataforma, d.versionApp, d.tokenPush ?? null]);
+    await sincronizarRelease();
     const movil = await leerConfig('movil') as { versionMinima: string; versionActual: string; urlAndroid: string; urlIos: string; mensajeActualizacion: string };
     return {
       actualizacionObligatoria: versionMenor(d.versionApp, movil.versionMinima),

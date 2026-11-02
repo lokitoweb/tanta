@@ -1,25 +1,16 @@
-import { useState } from 'react';
-import { Boton, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Tarjeta, TarjetaTitulo } from '@/ui/primitives';
 
-/**
- * Activación de la app: el APK no trae ninguna dirección. La primera vez se escribe este
- * dominio en el teléfono; después la app sigue sola los cambios de "Servidor de las apps".
- */
+/** Resumen de cómo se conectan las apps: todo es automático; el dominio solo se muestra. */
 export function ActivacionApp({ urlApi }: { urlApi: string }) {
   const dominio = urlApi ? new URL(urlApi).host : window.location.host;
-  const [copiado, setCopiado] = useState(false);
   return (
     <Tarjeta>
-      <TarjetaTitulo titulo="Activar la app en un teléfono" subtitulo="Se hace una sola vez por teléfono." />
-      <ol className="activacion__pasos">
-        <li>Instala la app y ábrela.</li>
-        <li>Escribe este dominio y toca <b>Conectar</b>.</li>
-        <li>Inicia sesión con tu usuario. Si mudas el sistema de dominio, la app se actualiza sola.</li>
-      </ol>
-      <div className="activacion__enlace">
-        <code>{dominio}</code>
-        <Boton size="sm" onClick={() => { void navigator.clipboard.writeText(dominio).then(() => { setCopiado(true); setTimeout(() => setCopiado(false), 1500); }); }}>{copiado ? 'Copiado' : 'Copiar dominio'}</Boton>
-      </div>
+      <TarjetaTitulo titulo="Conexión de las apps" subtitulo="Automática: no hay que configurar nada en el teléfono." />
+      <ul className="activacion__pasos">
+        <li>La APK se compila con el dominio <b className="mono">{dominio}</b>: al instalarla ya entra directo al inicio de sesión.</li>
+        <li>Si cambias el dominio abajo, las apps instaladas se mudan solas la próxima vez que se abran.</li>
+        <li>Cada nueva APK aparece sola en "Última versión publicada" y los teléfonos reciben el aviso para actualizar.</li>
+      </ul>
     </Tarjeta>
   );
 }

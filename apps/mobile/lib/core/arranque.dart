@@ -16,7 +16,10 @@ class EstadoVersion {
 String get plataforma => kIsWeb ? 'web' : defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
 
 /// Versión instalada ("1.2.0") leída del propio paquete: no se escribe a mano en el código.
-Future<String> versionInstalada() async => (await PackageInfo.fromPlatform()).version;
+Future<String> versionInstalada() async {
+  final p = await PackageInfo.fromPlatform();
+  return p.buildNumber.isEmpty ? p.version : '${p.version}+${p.buildNumber}';
+}
 
 /// Al iniciar sesión: registra versión y token push, y pregunta si hay que actualizar.
 /// Nunca bloquea la app por un fallo de red o de Firebase.
