@@ -379,6 +379,62 @@ export async function rutasOperaciones(app: FastifyInstance) {
     }
   });
 
+  /* -------------------------------------------------------- anular venta */
+  // PDF §4.5: la venta no se borra; queda ANULADA, el stock vuelve y la deuda se cancela.
+  // Si ya tiene cobros, primero hay que extornarlos: así la caja nunca descuadra.
+  app.post('/ventas/:codigo/anular', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'ventas.anular')) return;
+    const { codigo } = req.params as { codigo: string };
+    const parseo = z.object({ motivo: z.string().trim().min(5).max(200) }).safeParse(req.body);
+    if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo de la anulación (mínimo 5 caracteres).'));
+    const { motivo } = parseo.data;
+    try {
+      const r = await tx(async (c) => {
+        const v = (await c.query<{ id: string; estado: string }>('SELECT id, estado FROM core.venta WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
+        if (!v) throw Object.assign(new Error('La venta no existe.'), { status: 404 });
+        if (v.estado === 'ANULADA') throw Object.assign(new Error('La venta ya está anulada.'), { status: 409 });
+        const cobrado = (await c.query<{ n: string }>(
+          'SELECT count(*) n FROM core.cobranza b JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id WHERE x.venta_id = $1', [v.id])).rows[0].n;
+        if (Number(cobrado) > 0) throw Object.assign(new Error('La venta tiene cobros registrados: no se puede anular.'), { status: 409 });
+
+        // Mismo orden de bloqueo que POST /ventas (por id de producto): sin deadlocks.
+        const lineas = (await c.query<{ producto_id: string; cantidad: string; costo_unitario: string; stock: string; cpp: string }>(
+          `SELECT d.producto_id, sum(d.cantidad) cantidad, max(d.costo_unitario) costo_unitario, p.stock, p.costo_unitario cpp
+           FROM core.venta_detalle d JOIN core.producto p ON p.id = d.producto_id
+           WHERE d.venta_id = $1 GROUP BY d.producto_id, p.stock, p.costo_unitario, p.id ORDER BY p.id`, [v.id])).rows;
+        await c.query('SELECT 1 FROM core.producto WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [lineas.map((l) => l.producto_id)]);
+        for (const l of lineas) {
+          const cantidad = Number(l.cantidad);
+          const saldo = Number(l.stock) + cantidad;
+          const cpp = Number(l.cpp);
+          await c.query(
+            `INSERT INTO core.movimiento_inventario
+               (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,motivo_tipo,registrado_por)
+             VALUES ('DEVOLUCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$4,'ANULACION',$8)`,
+            [l.producto_id, codigo, cantidad.toFixed(6), Number(l.costo_unitario).toFixed(6), (cantidad * Number(l.costo_unitario)).toFixed(4),
+              saldo.toFixed(6), (saldo * cpp).toFixed(4), req.usuario!.id],
+          );
+          await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [saldo.toFixed(6), l.producto_id]);
+        }
+        await c.query(`UPDATE core.cuenta_por_cobrar SET estado = 'ANULADA', saldo = 0 WHERE venta_id = $1`, [v.id]);
+        await c.query(`UPDATE core.venta SET estado = 'ANULADA', anulada_en = now(), anulada_por = $2, motivo_anulacion = $3 WHERE id = $1`,
+          [v.id, req.usuario!.id, motivo]);
+        return { codigo, ventaId: v.id, productos: lineas.length };
+      });
+      invalidar('cat:');
+      await auditar({
+        actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
+        accion: 'VENTA_ANULADA', entidad: 'venta', entidadId: r.ventaId, detalle: { codigo, motivo }, ip: req.ip,
+      });
+      void emitirEvento('venta.anulada', { codigo, motivo });
+      return reply.send({ codigo, estado: 'ANULADA' });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'NO_ANULABLE', err.message));
+    }
+  });
+
   /* ------------------------------------------------------------- cobranza */
   const NuevaCobranza = z.object({
     cxcId: z.string().uuid(),
@@ -508,6 +564,55 @@ export async function rutasOperaciones(app: FastifyInstance) {
     return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino });
   });
 
+  /* ------------------------------------------------ inventario: productos */
+  // PDF §3.3: baja de producto terminado (merma, vencimiento) o devolución de un cliente.
+  const MovProducto = z.object({
+    productoId: z.string().uuid(),
+    cantidad: z.number().positive().max(100_000),
+    motivoTipo: z.enum(['MERMA', 'VENCIMIENTO', 'DEVOLUCION']),
+    motivo: z.string().trim().min(3).max(200),
+  });
+
+  app.post('/inventario/productos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'inventario.mover')) return;
+    const parseo = MovProducto.safeParse(req.body);
+    if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Revisa producto, cantidad y motivo (mínimo 3 caracteres).'));
+    const m = parseo.data;
+    const clave = req.headers['idempotency-key'] as string | undefined;
+    try {
+      const r = await conIdempotencia(clave, req.usuario!.id, 'inventario-prod', () =>
+        tx(async (c) => {
+          const p = (await c.query<{ nombre: string; stock: string; costo_unitario: string }>(
+            'SELECT nombre, stock, costo_unitario FROM core.producto WHERE id = $1 FOR UPDATE', [m.productoId])).rows[0];
+          if (!p) throw Object.assign(new Error('El producto no existe.'), { status: 404 });
+          const delta = m.motivoTipo === 'DEVOLUCION' ? m.cantidad : -m.cantidad;
+          const saldo = Number(p.stock) + delta;
+          if (saldo < -0.000001) throw Object.assign(new Error(`Stock insuficiente de ${p.nombre} (disponible ${Number(p.stock).toFixed(2)}).`), { status: 409 });
+          const costo = Number(p.costo_unitario);
+          await c.query(
+            `INSERT INTO core.movimiento_inventario
+               (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,idempotency_key,registrado_por,motivo_tipo)
+             VALUES ($1,'PRODUCTO',$2,$3,$4,$5,$6,$7,$8,$5,$9,$10,$11)`,
+            [m.motivoTipo === 'DEVOLUCION' ? 'DEVOLUCION' : 'MERMA', m.productoId, m.motivo, delta.toFixed(6), costo.toFixed(6),
+              (delta * costo).toFixed(4), saldo.toFixed(6), (saldo * costo).toFixed(4), clave ?? null, req.usuario!.id, m.motivoTipo],
+          );
+          await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [saldo.toFixed(6), m.productoId]);
+          return { producto: p.nombre, tipo: m.motivoTipo, diferencia: delta, saldo: Number(saldo.toFixed(3)) };
+        }),
+      );
+      invalidar('cat:');
+      await auditar({
+        actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
+        accion: `INVENTARIO_PRODUCTO_${m.motivoTipo}`, entidad: 'producto', entidadId: m.productoId, detalle: m, ip: req.ip,
+      });
+      return reply.send(r);
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'MOVIMIENTO_INVALIDO', err.message));
+    }
+  });
+
   /* ---------------------------------------------------------------- kárdex */
   /* --------------------------------------------------- inventario: insumos */
   // PDF 3.3: compra (actualiza el CPP), bajas con motivo y toma de inventario físico.
@@ -515,6 +620,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     z.object({ tipo: z.literal('COMPRA'), insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000),
       costoUnitario: z.number().positive().max(100_000), motivo: z.string().trim().min(3).max(200) }),
     z.object({ tipo: z.literal('MERMA'), insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000),
+      motivoTipo: z.enum(['CONSUMO', 'MERMA', 'VENCIMIENTO', 'AJUSTE']).default('MERMA'),
       motivo: z.string().trim().min(3).max(200) }),
     z.object({ tipo: z.literal('CONTEO'), insumoId: z.string().uuid(), cantidadContada: z.number().min(0).max(1_000_000),
       motivo: z.string().trim().min(3).max(200) }),
@@ -559,10 +665,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const valor = delta * costo;
           await c.query(
             `INSERT INTO core.movimiento_inventario
-               (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,idempotency_key,registrado_por)
-             VALUES ($1,'INSUMO',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+               (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,idempotency_key,registrado_por,motivo_tipo)
+             VALUES ($1,'INSUMO',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
             [tipo, m.insumoId, m.motivo.slice(0, 200), delta.toFixed(6), costo.toFixed(6), valor.toFixed(4),
-              nuevoSaldo.toFixed(6), (nuevoSaldo * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), clave ?? null, req.usuario!.id],
+              nuevoSaldo.toFixed(6), (nuevoSaldo * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), clave ?? null, req.usuario!.id,
+              m.tipo === 'MERMA' ? m.motivoTipo : m.tipo === 'CONTEO' ? 'AJUSTE' : null],
           );
           await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3',
             [nuevoSaldo.toFixed(6), nuevoCpp.toFixed(6), m.insumoId]);

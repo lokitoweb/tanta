@@ -230,6 +230,21 @@ class Api {
 
   Future<List<dynamic>> kardex(String codigo) async => await _get('/kardex/$codigo') as List<dynamic>;
 
+  Future<Map<String, dynamic>> registrarVenta({required List<Map<String, dynamic>> items, required String formaPago, String? clienteId, double descuentoPct = 0}) async =>
+      await _post('/ventas', {
+        'items': items, 'formaPago': formaPago, 'descuentoPct': descuentoPct,
+        if (clienteId != null) 'clienteId': clienteId,
+      }, idempotente: true) as Map<String, dynamic>;
+
+  /// Insumo: merma/consumo/vencimiento/ajuste. Producto: merma/vencimiento o devolución de cliente.
+  Future<void> registrarBaja({required bool producto, required String id, required double cantidad, required String motivoTipo, required String motivo}) async =>
+      await _post(producto ? '/inventario/productos' : '/inventario/movimientos', producto
+          ? {'productoId': id, 'cantidad': cantidad, 'motivoTipo': motivoTipo, 'motivo': motivo}
+          : {'tipo': 'MERMA', 'insumoId': id, 'cantidad': cantidad, 'motivoTipo': motivoTipo, 'motivo': motivo}, idempotente: true);
+
+  Future<Map<String, dynamic>> crearOrden({required String productoId, required double cantidad, required String entrega}) async =>
+      await _post('/ordenes-produccion', {'productoId': productoId, 'cantidad': cantidad, 'entrega': entrega}, idempotente: true) as Map<String, dynamic>;
+
   Future<void> iniciarOrden(String codigo) async => await _post('/ordenes-produccion/$codigo/iniciar', {});
 
   Future<Map<String, dynamic>> cerrarOrden(String codigo, num cantidad, num merma, String motivo) async =>

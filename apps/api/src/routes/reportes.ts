@@ -144,7 +144,7 @@ const REPORTES: Record<string, Reporte> = {
       const r = await uno<Record<string, string>>(`${LINEAS}
         SELECT coalesce(sum(l.neto),0) netas, coalesce(sum(l.cantidad * re.costo_insumos),0) insumos,
                coalesce(sum(l.cantidad * (re.costo_con_merma - re.costo_insumos)),0) merma, coalesce(sum(l.cantidad * re.cif_unitario),0) cif
-        FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id`, params(f));
+        FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id AND re.estado = 'VIGENTE'`, params(f));
       const netas = num(r?.netas), cif = num(r?.cif);
       const conceptos = await q<Record<string, string>>('SELECT concepto, tipo, monto_mensual FROM core.costo_indirecto WHERE activo ORDER BY monto_mensual DESC');
       const totalMes = conceptos.reduce((s, c) => s + num(c.monto_mensual), 0);
@@ -181,7 +181,7 @@ const REPORTES: Record<string, Reporte> = {
     async calcular(f) {
       const r = await uno<Record<string, string>>(`${LINEAS}
         SELECT coalesce(sum(l.neto),0) netas, coalesce(sum(l.cantidad * re.costo_con_merma),0) variables
-        FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id`, params(f));
+        FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id AND re.estado = 'VIGENTE'`, params(f));
       const cif = await uno<Record<string, string>>(`SELECT coalesce(sum(monto_mensual) FILTER (WHERE tipo='FIJO'),0) fijos, coalesce(sum(monto_mensual) FILTER (WHERE tipo='VARIABLE'),0) varcif FROM core.costo_indirecto WHERE activo`);
       const dias = Math.max(1, Math.round((Date.parse(f.hasta) - Date.parse(f.desde)) / 86_400_000) + 1);
       const factor = dias / 30;

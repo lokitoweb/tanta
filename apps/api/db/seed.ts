@@ -52,15 +52,16 @@ const PERMISOS: Array<[string, string, string]> = [
   ['auditoria.ver', 'Seguridad', 'Consultar la bitácora de auditoría'],
   ['pedidos.crear', 'Cliente', 'Registrar pedidos propios desde la app o la web'],
   ['produccion.planificar', 'Producción', 'Generar órdenes de producción'],
+  ['ventas.anular', 'Ventas', 'Anular ventas: devuelve el stock y cancela la deuda'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver']],
+    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
-    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver']],
+    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
     ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'produccion.planificar', 'recetas.ver', 'inventario.ver', 'pedidos.ver', 'catalogo.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,

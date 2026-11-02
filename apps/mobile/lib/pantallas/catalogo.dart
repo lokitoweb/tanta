@@ -17,6 +17,24 @@ class _CatalogoState extends State<Catalogo> {
   String _categoria = 'todas';
   bool _enviando = false;
 
+  Future<void> _repetir() async {
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final pedidos = await Api.instancia.misPedidos();
+      if (pedidos.isEmpty) { aviso.showSnackBar(const SnackBar(content: Text('Aún no tienes pedidos'))); return; }
+      final items = ((pedidos.first as Map)['items'] as List?) ?? const [];
+      setState(() {
+        _carrito.clear();
+        for (final i in items) {
+          _carrito['${i['productoId']}'] = ((i['cantidad'] as num?) ?? 0).round();
+        }
+      });
+      aviso.showSnackBar(SnackBar(content: Text('Carrito listo con el pedido ${(pedidos.first as Map)['codigo']}')));
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: intenta de nuevo')));
+    }
+  }
+
   /// Pide fecha de entrega y registra el pedido; el servidor recalcula precios y total.
   Future<void> _pedir() async {
     final hoy = DateTime.now();
@@ -70,6 +88,10 @@ class _CatalogoState extends State<Catalogo> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ActionChip(avatar: const Icon(Icons.replay, size: 16), label: const Text('Repetir último'), onPressed: _repetir),
+              ),
               _chip('todas', 'Todo'),
               ...categorias.map((c) => _chip(c['id'] as String, c['nombre'] as String)),
             ],

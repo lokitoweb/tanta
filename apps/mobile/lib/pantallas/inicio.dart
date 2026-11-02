@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'acciones.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/arranque.dart';
@@ -271,7 +272,7 @@ class _PanelInicio extends StatelessWidget {
     final nombre = api.nombre.split(' ').first;
     final hora = DateTime.now().hour;
     final saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
-    final accesos = _accesos(api);
+    final accesos = _accesos(context, api);
     final actividad = _actividad(api);
 
     return ListView(
@@ -348,10 +349,18 @@ class _PanelInicio extends StatelessWidget {
   }
 
   /// Botones a las pestañas que el rol realmente tiene.
-  List<Widget> _accesos(Api api) {
+  List<Widget> _accesos(BuildContext context, Api api) {
     Widget chip(String titulo, IconData icono) =>
         ActionChip(avatar: Icon(icono, size: 18), label: Text(titulo), onPressed: () => irA(titulo));
+    // Registrar: abre la pantalla de la acción; el servidor vuelve a validar el permiso.
+    Widget accion(String titulo, IconData icono, Widget pantalla) => ActionChip(
+          avatar: Icon(icono, size: 18), label: Text(titulo),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)),
+        );
     return [
+      if (api.puede('ventas.registrar')) accion('Nueva venta', Icons.point_of_sale_outlined, NuevaVenta(datos: datos)),
+      if (api.puede('inventario.mover')) accion('Registrar baja', Icons.remove_shopping_cart_outlined, BajaInventario(datos: datos)),
+      if (api.puede('produccion.planificar')) accion('Nueva OP', Icons.add_task_outlined, NuevaOrden(datos: datos)),
       if (api.puede('pedidos.ver')) chip('Pedidos', Icons.receipt_long_outlined),
       if (api.puede('cobranza.ver')) chip('Cobranza', Icons.account_balance_wallet_outlined),
       if (api.puede('produccion.ver')) chip('Producción', Icons.local_fire_department_outlined),

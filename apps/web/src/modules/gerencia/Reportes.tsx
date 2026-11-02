@@ -5,6 +5,8 @@ import { money, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
 import { BarraFiltros, aQuery, rango, useEnVivo, type Filtros } from '@/ui/Filtros';
 import { TablaReporte, type ColRep } from '@/ui/TablaReporte';
+import { Dialogo } from '@/ui/Dialogo';
+import { useApp } from '@/core/app-state';
 
 interface Catalogo { codigo: string; titulo: string; columnas: ColRep[] }
 interface Resultado extends Catalogo { filas: Array<Record<string, unknown>>; resumen?: Record<string, unknown>; generadoEn: string }
@@ -52,6 +54,20 @@ export function Reportes() {
   };
   const hace = useEnVivo(cargar, [codigo, JSON.stringify(filtros)], 60);
 
+  // G-06 lista ventas: con permiso, un clic abre la anulación (devuelve stock y cancela la deuda).
+  const { rol } = useApp();
+  const puedeAnular = codigo === 'G-06' && rol.permisos.includes('ventas.anular');
+  const [anular, setAnular] = useState<{ codigo: string; motivo: string; error?: string; ocupado?: boolean } | null>(null);
+  const confirmarAnulacion = async () => {
+    if (!anular) return;
+    setAnular({ ...anular, ocupado: true, error: undefined });
+    try {
+      await api(`/ventas/${anular.codigo}/anular`, { method: 'POST', body: { motivo: anular.motivo } });
+      setAnular(null);
+      void cargar();
+    } catch (e) { setAnular({ ...anular, ocupado: false, error: e instanceof Error ? e.message : 'No se pudo anular.' }); }
+  };
+
   const actual = catalogo.find((c) => c.codigo === codigo);
   const grupos = [...new Set(catalogo.map((c) => c.codigo[0]))];
   const resumen = res?.resumen && RESUMEN[codigo]?.(res.resumen);
@@ -92,10 +108,27 @@ export function Reportes() {
           <Tarjeta padding="none">
             {error ? <Vacio titulo="Sin datos" detalle={error} icono="report" />
               : res && res.filas.length === 0 ? <Vacio titulo="Sin resultados" detalle="No hay movimientos con estos filtros." icono="report" />
-                : res && <TablaReporte columnas={res.columnas} filas={res.filas} />}
+                : res && <TablaReporte columnas={res.columnas} filas={res.filas}
+                  onFila={puedeAnular ? (f) => setAnular({ codigo: String(f.codigo), motivo: '' }) : undefined} />}
           </Tarjeta>
         </div>
       </div>
+
+      <Dialogo abierto={anular !== null} titulo={`Anular venta ${anular?.codigo ?? ''}`}
+        descripcion="El stock vuelve al almacén y la deuda se cancela. Queda registrado en la auditoría y no se puede deshacer."
+        onCerrar={() => setAnular(null)}
+        acciones={<>
+          <Boton onClick={() => setAnular(null)}>Cancelar</Boton>
+          <Boton variant="primary" disabled={!anular || anular.motivo.trim().length < 5 || anular.ocupado} onClick={() => void confirmarAnulacion()}>
+            {anular?.ocupado ? 'Anulando…' : 'Anular venta'}
+          </Boton>
+        </>}>
+        <label className="field"><span className="field__label">Motivo</span>
+          <input className="field__input" autoFocus maxLength={200} placeholder="Ej.: error de digitación" value={anular?.motivo ?? ''}
+            onChange={(e) => anular && setAnular({ ...anular, motivo: e.target.value })} />
+        </label>
+        {anular?.error && <p className="form__error" role="alert">{anular.error}</p>}
+      </Dialogo>
     </>
   );
 }
