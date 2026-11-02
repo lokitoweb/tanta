@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import cookie from '@fastify/cookie';
 import { pool } from './db.js';
+import { invalidar } from './cache.js';
 import { rutasAuth } from './routes/auth.js';
 import { rutasDatos } from './routes/datos.js';
 import { rutasOperaciones } from './routes/operaciones.js';
@@ -46,6 +47,12 @@ export async function construir() {
   await app.register(rateLimit, {
     max: Number(process.env.RATE_MAX ?? 6000),
     timeWindow: '1 minute',
+  });
+
+  // Toda escritura exitosa invalida los agregados cacheados ANTES de responder: quien
+  // recarga justo después de su venta, cobro o ajuste ya ve el dato nuevo.
+  app.addHook('onSend', async (req, reply) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD' && reply.statusCode < 400) invalidar('agg:');
   });
 
   // Respuesta de error uniforme (RFC 9457). Nunca se filtra el mensaje crudo de PostgreSQL.

@@ -35,10 +35,15 @@ ThemeData construirTema() {
       color: TantaColors.surfaceCard,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: TantaColors.borderSubtle),
       ),
       margin: EdgeInsets.zero,
+    ),
+    // Misma curvatura que botones y campos (12): sobria, no "burbuja".
+    dialogTheme: DialogThemeData(
+      backgroundColor: TantaColors.surfaceCard,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

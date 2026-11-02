@@ -19,7 +19,7 @@ class Produccion extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
       children: [
-        const TituloSeccion('Tablero de producción',
+        const TituloSeccion('',
             subtitulo: 'Órdenes del día · el consumo de insumos se descuenta al cerrar'),
         const SizedBox(height: 16),
         _grupo(context, 'Pendientes', pendientes, Tono.neutral),
@@ -66,7 +66,7 @@ class _TarjetaOp extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: TantaColors.surfaceCard,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TantaColors.borderSubtle),
       ),
       child: Column(
@@ -75,7 +75,7 @@ class _TarjetaOp extends StatelessWidget {
             height: 3,
             decoration: BoxDecoration(
               color: esTerminada ? TantaColors.stateOk : TantaColors.sand300,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
             ),
           ),
           Padding(
@@ -175,7 +175,7 @@ class Almacen extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
       children: [
-        TituloSeccion('Almacén e inventario',
+        TituloSeccion('',
             subtitulo: '$criticos insumos bajo el stock mínimo'),
         const SizedBox(height: 14),
         ...insumos.map((i) {

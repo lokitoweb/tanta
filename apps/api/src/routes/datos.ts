@@ -16,17 +16,21 @@ export async function rutasDatos(app: FastifyInstance) {
     const u = req.usuario!;
     const verCosto = u.permisos.has('costos.ver');
     const CATALOGO_MS = 15_000;
+    // Agregados iguales para todos (ventas 30 días, tendencia, top, CxC…): una sola consulta
+    // por ventana de 3 s aunque entren 60 usuarios a la vez. La proyección por rol se hace
+    // después sobre objetos nuevos. Toda escritura llama invalidar('agg:').
+    const agg = <T>(k: string, f: () => Promise<T>) => recordar('agg:' + k, 3_000, f);
 
     const [
       _sinUso, periodo, kpis, dias, categorias, productos, top, insumos,
       ops, pedidos, clientes, movimientos, aging, recetas, usuarios,
     ] = await Promise.all([
       Promise.resolve(null),
-      uno<{ anio: number; mes: number; estado: string }>(
+      agg('0', () => uno<{ anio: number; mes: number; estado: string }>(
         `SELECT anio, mes, estado FROM core.periodo_costos ORDER BY anio DESC, mes DESC LIMIT 1`,
-      ),
+      )),
 
-      uno<Record<string, string>>(`
+      agg('1', () => uno<Record<string, string>>(`
         WITH v AS (
           SELECT sum(ventas_netas) AS ventas, sum(costo_ventas) AS costo, count(*) AS tickets
           FROM core.venta
@@ -51,9 +55,9 @@ export async function rutasDatos(app: FastifyInstance) {
                CASE WHEN prev.ventas > 0 THEN (v.ventas - prev.ventas) / prev.ventas ELSE 0 END AS variacion_ventas,
                cxc.por_cobrar, cxc.vencido, merma.valor AS merma_valor,
                v.ventas / GREATEST(v.tickets,1) AS ticket_promedio
-        FROM v, prev, cxc, merma`),
+        FROM v, prev, cxc, merma`)),
 
-      q<Record<string, string>>(`
+      agg('2', () => q<Record<string, string>>(`
         WITH fechas AS (
           SELECT generate_series(
             (current_date - interval '29 days')::date, current_date, interval '1 day'
@@ -66,7 +70,7 @@ export async function rutasDatos(app: FastifyInstance) {
                coalesce(vd.tickets, 0)     AS tickets
         FROM fechas f
         LEFT JOIN report.v_venta_dia vd ON vd.fecha = f.fecha
-        ORDER BY f.fecha`),
+        ORDER BY f.fecha`)),
 
       recordar('cat:categorias', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT c.id, c.nombre, c.margen_objetivo,
@@ -101,7 +105,7 @@ export async function rutasDatos(app: FastifyInstance) {
         FROM core.producto p
         ORDER BY p.nombre`, [String(0.18)])),
 
-      q<Record<string, string>>(`
+      agg('3', () => q<Record<string, string>>(`
         SELECT vd.producto_id AS id, vd.producto AS nombre, p.categoria_id AS categoria,
                sum(vd.precio_neto) AS ventas, sum(vd.utilidad) AS utilidad,
                sum(vd.cantidad)    AS unidades,
@@ -113,22 +117,22 @@ export async function rutasDatos(app: FastifyInstance) {
         JOIN core.producto p ON p.id = vd.producto_id
         GROUP BY vd.producto_id, vd.producto, p.categoria_id
         ORDER BY ventas DESC
-        LIMIT 8`),
+        LIMIT 8`)),
 
       recordar('cat:insumos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT id, codigo, nombre, unidad, cpp, stock, minimo, proveedor, estado,
                (cpp * stock) AS valorizado
         FROM core.insumo ORDER BY estado DESC, nombre`)),
 
-      q<Record<string, string>>(`
+      agg('4', () => q<Record<string, string>>(`
         SELECT codigo, producto, cantidad, estado, entrega::text AS entrega, responsable, avance, merma_esperada
-        FROM core.orden_produccion ORDER BY (estado = 'TERMINADA'), entrega, codigo`),
+        FROM core.orden_produccion ORDER BY (estado = 'TERMINADA'), entrega, codigo`)),
 
-      q<Record<string, string>>(`
+      agg('5', () => q<Record<string, string>>(`
         SELECT codigo, cliente, estado, total, fecha_entrega::text AS fecha_entrega, vendedor
-        FROM core.pedido ORDER BY creado_en DESC LIMIT 40`),
+        FROM core.pedido ORDER BY creado_en DESC LIMIT 40`)),
 
-      q<Record<string, string>>(`
+      agg('6', () => q<Record<string, string>>(`
         SELECT c.id, c.nombre, c.doc_tipo, c.lista_precio, c.limite_credito,
                coalesce(sum(x.saldo),0) AS saldo,
                coalesce(sum(CASE WHEN x.vence_en < current_date THEN x.saldo ELSE 0 END),0) AS vencido,
@@ -136,17 +140,17 @@ export async function rutasDatos(app: FastifyInstance) {
         FROM core.cliente c
         LEFT JOIN core.cuenta_por_cobrar x ON x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')
         GROUP BY c.id, c.nombre, c.doc_tipo, c.lista_precio, c.limite_credito
-        ORDER BY saldo DESC`),
+        ORDER BY saldo DESC`)),
 
-      q<Record<string, string>>(`
+      agg('7', () => q<Record<string, string>>(`
         SELECT m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad,
                m.costo_unitario, m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp
         FROM core.movimiento_inventario m
         JOIN core.insumo i ON i.id = m.insumo_id
         WHERE i.codigo = 'INS-001'
-        ORDER BY m.id DESC LIMIT 12`),
+        ORDER BY m.id DESC LIMIT 12`)),
 
-      q<Record<string, string>>(`
+      agg('8', () => q<Record<string, string>>(`
         SELECT CASE
                  WHEN current_date - vence_en <= 7  THEN '0 a 7 días'
                  WHEN current_date - vence_en <= 15 THEN '8 a 15 días'
@@ -158,7 +162,7 @@ export async function rutasDatos(app: FastifyInstance) {
                         WHEN current_date - vence_en <= 30 THEN 3 ELSE 4 END) AS orden
         FROM core.cuenta_por_cobrar
         WHERE estado IN ('PENDIENTE','PARCIAL') AND saldo > 0
-        GROUP BY 1 ORDER BY orden`),
+        GROUP BY 1 ORDER BY orden`)),
 
       recordar('cat:recetas', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT r.producto_id, r.producto, r.version, r.estado, r.rendimiento,
@@ -183,7 +187,7 @@ export async function rutasDatos(app: FastifyInstance) {
         : Promise.resolve([]),
     ]);
 
-    const parametros = await q<{ clave: string; valor: string }>('SELECT clave, valor FROM core.parametro');
+    const parametros = await agg('parametros', () => q<{ clave: string; valor: string }>('SELECT clave, valor FROM core.parametro'));
     const param = Object.fromEntries(parametros.map((x) => [x.clave, x.valor]));
     const igv = Number(param.igv ?? 0.18);
     const margenObjetivo = Number(param.margen_objetivo_global ?? 0.52);

@@ -105,7 +105,7 @@ class _PedidosState extends State<Pedidos> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        TituloSeccion('Pedidos', subtitulo: '${_pedidos.length} en el período'),
+        TituloSeccion('', subtitulo: '${_pedidos.length} en el período'),
         const SizedBox(height: 14),
         ..._pedidos.map((p) {
           final estado = '${p['estado']}';
@@ -321,7 +321,7 @@ class _CobranzaState extends State<Cobranza> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        TituloSeccion('Cobranza',
+        TituloSeccion('',
             subtitulo: '${cuentas.length} cuentas · $vencidas vencidas'),
         const SizedBox(height: 14),
         Panel(

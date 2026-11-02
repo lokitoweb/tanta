@@ -59,7 +59,7 @@ class Panel extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: TantaColors.surfaceCard,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TantaColors.borderSubtle),
       ),
       child: child,
@@ -159,10 +159,11 @@ class TituloSeccion extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(titulo, style: estiloDisplay.copyWith(fontSize: 20)),
+        // Vacío cuando la barra superior ya muestra el nombre de la pestaña: no se repite.
+        if (titulo.isNotEmpty) Text(titulo, style: estiloDisplay.copyWith(fontSize: 20)),
         if (subtitulo != null)
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: EdgeInsets.only(top: titulo.isEmpty ? 0 : 2),
             child: Text(subtitulo!, style: const TextStyle(fontSize: 12.5, color: TantaColors.textMuted)),
           ),
       ],

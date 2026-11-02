@@ -1,0 +1,89 @@
+{
+  "etiqueta": "20u",
+  "inicio": "2026-11-02T03:45:15.489Z",
+  "fin": "2026-11-02T03:45:48.594Z",
+  "duracionSeg": 15.25,
+  "config": {
+    "concurrencia": 20,
+    "duracion": 15,
+    "calentamiento": 5,
+    "base": "http://127.0.0.1:3001/api/v1",
+    "clave": "tanta",
+    "etiqueta": "20u",
+    "salida": "tests/resultados-20u.json",
+    "xff": "vu",
+    "idempotencia": false,
+    "pausa": 0,
+    "timeout": 30000,
+    "semilla": 20261101,
+    "fixtures": "tests/no-existe.json",
+    "solo": [
+      "ventas"
+    ]
+  },
+  "logins": [
+    {
+      "usuario": "osquilcate",
+      "rol": "GERENTE",
+      "ms": 3402.1
+    },
+    {
+      "usuario": "cmedina",
+      "rol": "VENDEDOR",
+      "ms": 3065.2
+    },
+    {
+      "usuario": "rquispe",
+      "rol": "PRODUCCION",
+      "ms": 2899.7
+    },
+    {
+      "usuario": "jramos",
+      "rol": "ALMACEN",
+      "ms": 2719.2
+    }
+  ],
+  "usuariosPorPersona": {
+    "cmedina": 20
+  },
+  "mezclaObjetivo": {
+    "GET /datos": 60,
+    "GET /kardex/INS-001": 15,
+    "POST /ventas": 20,
+    "POST /cobranza": 5
+  },
+  "mezclaRealPct": {
+    "POST /ventas": 100
+  },
+  "totales": {
+    "n": 748,
+    "rps": 49.06,
+    "errores": 0,
+    "tasaError": 0,
+    "p50": 373.8,
+    "p90": 531.9,
+    "p95": 655.7,
+    "p99": 847.4,
+    "max": 1418.4
+  },
+  "endpoints": [
+    {
+      "endpoint": "POST /ventas",
+      "n": 748,
+      "rps": 49.06,
+      "p50": 373.8,
+      "p90": 531.9,
+      "p95": 655.7,
+      "p99": 847.4,
+      "max": 1418.4,
+      "media": 404.4,
+      "errores": 0,
+      "tasaError": 0,
+      "estados": {
+        "201": 748
+      },
+      "codigos": [],
+      "kbytes": 365.4
+    }
+  ]
+}

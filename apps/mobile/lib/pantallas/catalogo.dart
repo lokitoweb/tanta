@@ -71,7 +71,7 @@ class _CatalogoState extends State<Catalogo> {
             padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
             decoration: BoxDecoration(
               color: TantaColors.ink800,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
@@ -141,7 +141,7 @@ class _Producto extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: TantaColors.surfaceCard,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TantaColors.borderSubtle),
       ),
       clipBehavior: Clip.antiAlias,
