@@ -15,6 +15,36 @@ class Catalogo extends StatefulWidget {
 class _CatalogoState extends State<Catalogo> {
   final Map<String, int> _carrito = {};
   String _categoria = 'todas';
+  bool _enviando = false;
+
+  /// Pide fecha de entrega y registra el pedido; el servidor recalcula precios y total.
+  Future<void> _pedir() async {
+    final hoy = DateTime.now();
+    final fecha = await showDatePicker(
+      context: context,
+      helpText: 'Fecha de entrega',
+      initialDate: hoy.add(const Duration(days: 1)),
+      firstDate: hoy,
+      lastDate: hoy.add(const Duration(days: 60)),
+    );
+    if (fecha == null || !mounted) return;
+    setState(() => _enviando = true);
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final r = await Api.instancia.crearPedido(
+        items: _carrito.entries.map((e) => {'productoId': e.key, 'cantidad': e.value}).toList(),
+        fechaEntrega: fecha.toIso8601String().substring(0, 10),
+      );
+      setState(() => _carrito.clear());
+      aviso.showSnackBar(SnackBar(content: Text('Pedido ${r['codigo'] ?? ''} registrado')));
+    } on ApiException catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: intenta de nuevo')));
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +57,7 @@ class _CatalogoState extends State<Catalogo> {
         : productos.where((p) => p['categoriaId'] == _categoria).toList();
 
     final items = _carrito.values.fold<int>(0, (s, v) => s + v);
-    final total = filtrados.fold<double>(0, (s, p) {
+    final total = productos.fold<double>(0, (s, p) {
       final q = _carrito[p['id']] ?? 0;
       return s + q * ((p['precioConIgv'] as num?)?.toDouble() ?? 0);
     });
@@ -103,8 +133,8 @@ class _CatalogoState extends State<Catalogo> {
                     minimumSize: const Size(0, 42),
                     padding: const EdgeInsets.symmetric(horizontal: 18),
                   ),
-                  onPressed: () => setState(() => _carrito.clear()),
-                  child: const Text('Pedir'),
+                  onPressed: _enviando ? null : _pedir,
+                  child: Text(_enviando ? 'Enviando…' : 'Pedir'),
                 ),
               ],
             ),

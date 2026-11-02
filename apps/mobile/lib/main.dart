@@ -4,6 +4,7 @@ import 'core/api.dart';
 import 'core/arranque.dart';
 import 'core/tema.dart';
 import 'core/tokens.dart';
+import 'pantallas/activacion.dart';
 import 'pantallas/actualizar.dart';
 import 'pantallas/inicio.dart';
 import 'pantallas/login.dart';
@@ -98,6 +99,10 @@ class _RaizState extends State<Raiz> {
           ),
         ),
       );
+    }
+
+    if (!Api.instancia.activada) {
+      return Activacion(onActivada: () => setState(() {}));
     }
 
     if (_datos == null) {

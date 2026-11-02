@@ -126,8 +126,8 @@ class _TarjetaOp extends StatelessWidget {
                             minimumSize: const Size(0, 40),
                             textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                           ),
-                          onPressed: () => _accion(context, op, esTerminada: false),
-                          child: const Text('Registrar cierre'),
+                          onPressed: () => _accion(context, op),
+                          child: Text(op['estado'] == 'PENDIENTE' ? 'Iniciar' : 'Registrar cierre'),
                         ),
                       ),
                   ],
@@ -140,25 +140,69 @@ class _TarjetaOp extends StatelessWidget {
     );
   }
 
-  Future<void> _accion(BuildContext context, Map<String, dynamic> op, {required bool esTerminada}) async {
-    final cantidad = (op['cantidad'] as num?)?.toDouble() ?? 0;
-    // La merma estándar viene de la orden (definida en la receta), no del código.
-    final merma = (op['mermaEsperada'] as num?)?.toDouble() ?? 0;
+  /// PENDIENTE → iniciar; EN_PROCESO → cierre con lo producido de verdad y la merma con su motivo.
+  Future<void> _accion(BuildContext context, Map<String, dynamic> op) async {
+    final aviso = ScaffoldMessenger.of(context);
+    final codigo = '${op['codigo']}';
     try {
-      await Api.instancia.cerrarOrden('${op['codigo']}', cantidad, merma);
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Orden ${op['codigo']} cerrada · inventario actualizado'),
-          backgroundColor: TantaColors.stateOk,
-        ),
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo cerrar: $e'), backgroundColor: TantaColors.stateDanger),
-      );
+      if (op['estado'] == 'PENDIENTE') {
+        await Api.instancia.iniciarOrden(codigo);
+        aviso.showSnackBar(SnackBar(content: Text('Orden $codigo en proceso · recarga para ver el cambio')));
+        return;
+      }
+      final cierre = await showDialog<(double, double, String)>(context: context, builder: (_) => _DialogoCierre(op: op));
+      if (cierre == null) return;
+      await Api.instancia.cerrarOrden(codigo, cierre.$1, cierre.$2, cierre.$3);
+      aviso.showSnackBar(SnackBar(content: Text('Orden $codigo cerrada · inventario actualizado'), backgroundColor: TantaColors.stateOk));
+    } on ApiException catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(e.mensaje), backgroundColor: TantaColors.stateDanger));
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: intenta de nuevo'), backgroundColor: TantaColors.stateDanger));
     }
+  }
+}
+
+class _DialogoCierre extends StatefulWidget {
+  const _DialogoCierre({required this.op});
+  final Map<String, dynamic> op;
+  @override
+  State<_DialogoCierre> createState() => _DialogoCierreState();
+}
+
+class _DialogoCierreState extends State<_DialogoCierre> {
+  late final _cantidad = TextEditingController(text: '${(widget.op['cantidad'] as num?) ?? ''}');
+  final _merma = TextEditingController(text: '0');
+  final _motivo = TextEditingController();
+  String? _error;
+
+  void _aceptar() {
+    final c = double.tryParse(_cantidad.text.replaceAll(',', '.'));
+    final m = double.tryParse(_merma.text.replaceAll(',', '.'));
+    if (c == null || c <= 0 || m == null || m < 0) return setState(() => _error = 'Revisa las cantidades');
+    if (m > 0 && _motivo.text.trim().length < 3) return setState(() => _error = 'Indica el motivo de la merma');
+    Navigator.pop(context, (c, m, _motivo.text.trim()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final teclado = const TextInputType.numberWithOptions(decimal: true);
+    return AlertDialog(
+      title: Text('Cerrar ${widget.op['codigo']}'),
+      content: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: _cantidad, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Cantidad producida')),
+          const SizedBox(height: 12),
+          TextField(controller: _merma, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Merma real')),
+          const SizedBox(height: 12),
+          TextField(controller: _motivo, maxLength: 200, decoration: const InputDecoration(labelText: 'Motivo de la merma')),
+          if (_error != null) Text(_error!, style: const TextStyle(color: TantaColors.stateDanger)),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(onPressed: _aceptar, child: const Text('Cerrar orden')),
+      ],
+    );
   }
 }
 

@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: 'Servidor (https://…trycloudflare.com). Se puede cambiar luego desde el login de la app.'
-        required: true
+        description: 'Servidor opcional (https://…). Vacío: la app se activa con el QR de Configuración → App móvil.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -33,8 +34,16 @@ jobs:
         env:
           API_URL: ${{ inputs.api_url }}
         run: |
+          if [ -z "$API_URL" ]; then echo "API=" >> "$GITHUB_ENV"; exit 0; fi
           [[ "$API_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] || { echo "::error::Usa solo https://dominio"; exit 1; }
           echo "API=${API_URL%/}/api/v1" >> "$GITHUB_ENV"
+
+      # Versión: nombre desde pubspec (1.2.0) y número de compilación = número de ejecución,
+      # así cada APK es mayor que la anterior y el aviso de actualización la reconoce.
+      - name: Versión
+        run: |
+          echo "VERSION=$(grep '^version:' pubspec.yaml | cut -d' ' -f2 | cut -d+ -f1)" >> "$GITHUB_ENV"
+          echo "BUILD=${{ github.run_number }}" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v4
         with:
@@ -58,10 +67,10 @@ jobs:
       # Build de pruebas: firmada con la llave de debug (instalable a mano, no para Play)
       # y con el servidor editable desde el login.
       - name: Compilar
-        run: flutter build apk --release --dart-define=API_URL="$API" --dart-define=PRUEBAS=true
+        run: flutter build apk --release --build-name="$VERSION" --build-number="$BUILD" --dart-define=API_URL="$API" --dart-define=PRUEBAS=true
 
       - uses: actions/upload-artifact@v4
         with:
-          name: tanta-pruebas-apk
+          name: tanta-${{ env.VERSION }}+${{ env.BUILD }}-apk
           path: apps/mobile/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 14

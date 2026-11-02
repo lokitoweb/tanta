@@ -16,7 +16,7 @@ class Api {
 
   static const String _baseCompilada = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'http://127.0.0.1:3001/api/v1',
+    defaultValue: '', // sin dirección: la app se activa con el QR de la web
   );
 
   /// Build de pruebas (--dart-define=PRUEBAS=true): el servidor se cambia desde el login,
@@ -41,6 +41,9 @@ class Api {
 
   bool get autenticado => _acceso != null;
 
+  /// Sin servidor guardado ni compilado: hay que activar la app (QR o dirección).
+  bool get activada => base.isNotEmpty;
+
   /// Tokens en Keychain (iOS) / Keystore (Android), nunca en SharedPreferences (texto plano).
   static const _seguro = FlutterSecureStorage();
 
@@ -52,7 +55,7 @@ class Api {
     // La dirección compilada solo se usa la primera vez.
     base = await _seguro.read(key: 'servidor') ?? _baseCompilada;
     // En producción solo HTTPS: un token nunca viaja en claro.
-    if (kReleaseMode && !base.startsWith('https://')) {
+    if (kReleaseMode && base.isNotEmpty && !base.startsWith('https://')) {
       throw StateError('API_URL debe usar https:// en producción');
     }
     _acceso = await _seguro.read(key: 'acceso');
@@ -227,10 +230,13 @@ class Api {
 
   Future<List<dynamic>> kardex(String codigo) async => await _get('/kardex/$codigo') as List<dynamic>;
 
-  Future<Map<String, dynamic>> cerrarOrden(String codigo, num cantidad, num merma) async =>
+  Future<void> iniciarOrden(String codigo) async => await _post('/ordenes-produccion/$codigo/iniciar', {});
+
+  Future<Map<String, dynamic>> cerrarOrden(String codigo, num cantidad, num merma, String motivo) async =>
       await _post('/ordenes-produccion/$codigo/cerrar', {
         'cantidadProducida': cantidad,
         'mermaReal': merma,
+        'motivoMerma': motivo,
       }) as Map<String, dynamic>;
 
   /// Cuentas por cobrar abiertas. El servidor ya filtra por permiso.
@@ -282,11 +288,23 @@ class Api {
   /// Solo en la build de pruebas. Acepta "https://x.trycloudflare.com" y completa /api/v1.
   /// Cambiar de servidor cierra la sesión: los tokens de otro servidor no sirven aquí.
   Future<void> cambiarServidor(String url) async {
-    if (!pruebas) return;
-    var u = url.trim().replaceAll(RegExp(r'/+$'), '');
+    if (!pruebas && activada) return;
+    // Acepta el enlace del QR (tanta://activar?servidor=…) o la dirección escrita a mano.
+    var u = url.trim();
+    final enlace = Uri.tryParse(u);
+    if (enlace?.scheme == 'tanta') u = enlace!.queryParameters['servidor'] ?? '';
+    if (!u.contains('://')) u = 'https://$u';
+    u = u.replaceAll(RegExp(r'/+$'), '');
     if (!u.startsWith('https://') && kReleaseMode) throw ApiException(422, 'El servidor debe usar https://');
     if (Uri.tryParse(u)?.host.isEmpty ?? true) throw ApiException(422, 'Dirección inválida');
     if (!u.endsWith('/api/v1')) u = '$u/api/v1';
+    // Solo se guarda si de verdad es un servidor Tanta.
+    try {
+      final r = await http.get(Uri.parse('$u/config/publica')).timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) throw 0;
+    } catch (_) {
+      throw ApiException(422, 'No se encontró un servidor Tanta en esa dirección');
+    }
     await cerrarSesion();
     base = u;
     await _seguro.write(key: 'servidor', value: u);
@@ -295,6 +313,7 @@ class Api {
 
   /* --------------------------------------------- configuración y perfil */
   Future<Map<String, dynamic>> cargarConfig() async {
+    if (!activada) return config;
     try {
       // 5 s: sin red la app abre igual con la marca por defecto.
       final r = await http.get(Uri.parse('$base/config/publica')).timeout(const Duration(seconds: 5));
