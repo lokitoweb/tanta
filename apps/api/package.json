@@ -9,7 +9,8 @@
     "start": "node --env-file-if-exists=../../.env dist/src/server.js",
     "migrate": "node --env-file-if-exists=../../.env dist/db/migrate.js",
     "seed": "node --env-file-if-exists=../../.env dist/db/seed.js",
-    "setup": "pnpm build && node dist/db/migrate.js && node dist/db/seed.js"
+    "setup": "pnpm build && node dist/db/migrate.js && node dist/db/seed.js",
+    "superadmin": "node --env-file-if-exists=../../.env dist/db/superadmin.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

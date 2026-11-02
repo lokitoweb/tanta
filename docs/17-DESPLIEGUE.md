@@ -176,3 +176,19 @@ docker compose -f infra/compose/docker-compose.prod.yml logs -f api
 
 Deja margen dentro de los S/ 150/mes del contrato, siempre que el soporte se limite por escrito
 (~4 h mensuales).
+
+
+## Primer Superadministrador (instalación nueva)
+
+Las migraciones crean roles, permisos, menú y parámetros; **no** crean usuarios ni datos de demostración.
+No cargues la semilla (`db:seed`) en producción: crea usuarios con contraseña de prueba y borra datos.
+
+```bash
+docker compose -f infra/compose/docker-compose.prod.yml exec \
+  -e SUPERADMIN_USUARIO=admin -e SUPERADMIN_CLAVE='una-clave-larga-y-unica' \
+  api node dist/db/superadmin.js
+```
+
+Al primer ingreso el sistema exige activar la verificación en dos pasos. Desde ahí, el resto de usuarios
+se crean en **Usuarios y roles**, y la marca, la app móvil y las integraciones en **Configuración**.
+El mismo comando sirve para recuperar el acceso si se pierde la clave del Superadministrador.

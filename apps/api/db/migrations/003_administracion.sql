@@ -11,9 +11,10 @@ INSERT INTO core.permiso (id, grupo, descripcion) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- Se asignan a los roles que corresponden
-INSERT INTO core.rol_permiso (rol_id, permiso_id) VALUES
-  ('ADMINISTRADOR', 'parametros.gestionar'),
-  ('GERENTE',       'periodos.cerrar')
+-- Solo si los roles ya existen: en una base nueva los crea la 012.
+INSERT INTO core.rol_permiso (rol_id, permiso_id)
+SELECT v.rol, v.permiso FROM (VALUES ('ADMINISTRADOR', 'parametros.gestionar'), ('GERENTE', 'periodos.cerrar')) AS v(rol, permiso)
+WHERE EXISTS (SELECT 1 FROM core.rol r WHERE r.id = v.rol)
 ON CONFLICT DO NOTHING;
 
 -- Nuevas entradas de menú (el menú se genera desde la base, no desde el código)
