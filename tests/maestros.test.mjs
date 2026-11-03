@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { sql } from './_sql.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -57,12 +58,18 @@ test('Clientes: alta con validación de documento y edición', async () => {
 test('Compra de insumo: el nuevo CPP cambia el costo del producto', async () => {
   const alm = await login('jramos');
   const ger = await login('osquilcate');
-  // El Gerente no ve recetas (permiso recetas.ver): se leen como Administrador.
-  const d = (await api(await login('lbermudez'), 'GET', '/datos')).b;
-  const r = d.recetas[0];
-  const insumo = d.insumos.find((i) => i.id === r.lineas[0].insumoId);
-  const antes = await ficha(ger, r.productoId);
-  const compra = await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId: insumo.id, cantidad: insumo.stock + 50, costoUnitario: insumo.cpp * 3, motivo: 'Prueba alza de precio' });
+  // Insumo y producto propios de la prueba: comprar más caro no infla la harina real de la base.
+  const ids = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock) VALUES ('T-CPP-' || substr(md5(random()::text), 1, 6), 'Insumo prueba CPP', 'KG', 2, 10) RETURNING id),
+    p AS (INSERT INTO core.producto (codigo, nombre, categoria_id, precio_con_igv, estado)
+          SELECT 'T-CPP-' || substr(md5(random()::text), 1, 6), 'Producto prueba CPP', id, 5, 'INACTIVO' FROM core.categoria ORDER BY orden LIMIT 1 RETURNING id, nombre),
+    r AS (INSERT INTO core.receta (id, producto_id, producto, rendimiento, merma_estandar) SELECT id, id, nombre, 10, 0 FROM p RETURNING id),
+    d AS (INSERT INTO core.receta_detalle (receta_id, insumo_id, insumo, unidad, cantidad) SELECT r.id, i.id, 'Insumo prueba CPP', 'KG', 1 FROM r, i RETURNING receta_id)
+    SELECT (SELECT id FROM i) || ',' || (SELECT id FROM p)`).split(',');
+  const [insumoId, productoId] = ids;
+  sql('SELECT core.recalcular_costos()');
+  const antes = await ficha(ger, productoId);
+  const compra = await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId, cantidad: 10, costoUnitario: 6, motivo: 'Prueba alza de precio' });
   assert.equal(compra.s, 200);
-  assert.ok((await ficha(ger, r.productoId)) > antes, 'comprar más caro sube el costo');
+  assert.ok(Math.abs(compra.b.cpp - 4) < 0.0001, 'CPP = (10 × 2 + 10 × 6) ÷ 20 = 4');
+  assert.ok((await ficha(ger, productoId)) > antes, 'comprar más caro sube el costo');
 });

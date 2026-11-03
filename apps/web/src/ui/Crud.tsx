@@ -42,7 +42,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
     setGuardando(true);
     setError(null);
     try {
-      const datos = Object.fromEntries(campos.map((c) => [c.key, form[c.key]]));
+      const datos = Object.fromEntries(campos.map((c) => [c.key, (c.tipo === 'numero' || c.tipo === 'pct') && form[c.key] === '' ? null : form[c.key]]));
       if (form.id) await editar!(form.id, datos); else await crear!(datos);
       setForm(null);
       await refrescar();

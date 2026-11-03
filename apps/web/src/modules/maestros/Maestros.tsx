@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
-import { money } from '@/core/format';
+import { money, num } from '@/core/format';
 import { Crud, type Campo } from '@/ui/Crud';
 import { Kpi } from '@/ui/primitives';
 import type { ColRep } from '@/ui/TablaReporte';
@@ -35,31 +35,39 @@ export function Clientes() {
 }
 
 /* ------------------------------------------------------- Costos indirectos */
-interface ResumenCif { items: Reg[]; baseProrrateo: string; cifPromedioPorUnidad: number }
+interface ResumenCif { items: Reg[]; baseProrrateo: string; cifPromedioPorUnidad: number; tarifas: Record<string, number | null> | null }
+
+const BASES = [{ valor: 'HORAS_HORNO', texto: 'Horas de horno' }, { valor: 'KG_MASA', texto: 'Kg de masa' }, { valor: 'UNIDADES', texto: 'Unidades producidas' }];
 
 export function CostosIndirectos() {
   const [r, setR] = useState<ResumenCif | null>(null);
-  const cargar = async () => { const x = await api<ResumenCif>('/costos-indirectos'); setR(x); return x.items; };
+  const cargar = async () => {
+    const x = await api<ResumenCif>('/costos-indirectos'); setR(x);
+    return x.items.map((i) => ({ ...i, categoriaTxt: i.categoria === 'GASTO' ? 'Gasto operativo' : 'CIF', baseTxt: BASES.find((b) => b.valor === i.baseReparto)?.texto ?? i.baseReparto }));
+  };
   const total = (r?.items ?? []).filter((i) => i.activo).reduce((s, i) => s + Number(i.montoMensual), 0);
   const fijos = (r?.items ?? []).filter((i) => i.activo && i.tipo === 'FIJO').reduce((s, i) => s + Number(i.montoMensual), 0);
   return (
     <Crud titulo="Costos indirectos" nombreExport="costos-indirectos"
       descripcion="Alquiler, energía, gas, planilla indirecta… Al guardar, el costo de cada producto se recalcula al instante."
-      cargar={cargar} nuevo={{ concepto: '', tipo: 'FIJO', montoMensual: 0, activo: true }}
+      cargar={cargar} nuevo={{ concepto: '', tipo: 'FIJO', montoMensual: 0, activo: true, categoria: 'CIF', baseReparto: 'UNIDADES' }}
       crear={guardar('POST', '/costos-indirectos')} editar={(id, d) => api(`/costos-indirectos/${id}`, { method: 'PATCH', body: d })}
       extra={r && (
         <div className="grid grid--auto">
           <Kpi label="CIF mensual" valor={money(total)} nota="conceptos activos" icono="wallet" />
           <Kpi label="Costos fijos" valor={money(fijos)} nota={`variables ${money(total - fijos)}`} icono="ledger" />
-          <Kpi label="CIF por unidad" valor={money(r.cifPromedioPorUnidad)} nota="promedio de productos" icono="bread" />
-          <Kpi label="Base de prorrateo" valor={r.baseProrrateo === 'UNIDADES' ? 'Unidades' : 'Costo de insumos'} nota="se cambia en Parámetros" icono="settings" />
+          <Kpi label="Tarifa por hora de horno" valor={r.tarifas?.tarifaHoraHorno ? money(r.tarifas.tarifaHoraHorno) : '—'} nota={`${num(r.tarifas?.horasHornoMes ?? 0)} h de horno en 30 días`} icono="oven" />
+          <Kpi label="Tarifa por kg de masa" valor={r.tarifas?.tarifaKgMasa ? money(r.tarifas.tarifaKgMasa) : '—'} nota={`${num(r.tarifas?.kgMasaMes ?? 0)} kg de masa en 30 días`} icono="sack" />
+          <Kpi label="Hora hombre" valor={r.tarifas?.costoHoraHombre ? money(r.tarifas.costoHoraHombre) : '—'} nota="sueldo × (1 + beneficios) ÷ horas (Parámetros)" icono="user" />
         </div>
       )}
-      columnas={[{ key: 'concepto', label: 'Concepto' }, { key: 'tipo', label: 'Tipo' }, { key: 'montoMensual', label: 'Monto mensual', tipo: 'dinero' }, { key: 'activo', label: 'Activo' }]}
+      columnas={[{ key: 'concepto', label: 'Concepto' }, { key: 'categoriaTxt', label: 'Categoría' }, { key: 'baseTxt', label: 'Base de reparto' }, { key: 'tipo', label: 'Tipo' }, { key: 'montoMensual', label: 'Monto mensual', tipo: 'dinero' }, { key: 'activo', label: 'Activo' }]}
       campos={[
         { key: 'concepto', label: 'Concepto', requerido: true, ancho: true, max: 80 },
         { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [{ valor: 'FIJO', texto: 'Fijo' }, { valor: 'VARIABLE', texto: 'Variable' }] },
         { key: 'montoMensual', label: 'Monto mensual (S/)', tipo: 'numero', requerido: true },
+        { key: 'categoria', label: 'Categoría', tipo: 'select', opciones: [{ valor: 'CIF', texto: 'CIF (entra al costo del pan)' }, { valor: 'GASTO', texto: 'Gasto operativo (no entra)' }] },
+        { key: 'baseReparto', label: 'Base de reparto', tipo: 'select', opciones: BASES },
         { key: 'activo', label: 'Activo (se incluye en el costo)', tipo: 'bool' },
       ]} />
   );
@@ -95,7 +103,7 @@ export function Productos() {
   ];
   return (
     <Crud titulo="Productos" nombreExport="productos" deps={dataset.productos}
-      descripcion={puede('costos.ver') ? 'El costo sale de la receta (insumos × CPP + merma + CIF). Para cambiarlo, edita la receta o los costos indirectos.' : 'Catálogo de productos y precios.'}
+      descripcion={puede('costos.ver') ? 'Costo = insumos por unidad esperada + mano de obra (horas hombre) + CIF (horas de horno, kg de masa y unidades).' : 'Catálogo de productos y precios.'}
       cargar={async () => dataset.productos.map((p) => ({ ...p, categoria: dataset.categorias.find((c) => c.id === (p as unknown as Reg).categoriaId)?.nombre } as unknown as Reg))}
       nuevo={{ nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO' }}
       crear={puede('maestros.editar') ? async (d) => { await api('/productos', { method: 'POST', body: { ...d, mermaPct: 0.03 } }); await refrescarDatos(); } : undefined}
@@ -107,6 +115,10 @@ export function Productos() {
         { key: 'unidad', label: 'Unidad de venta', tipo: 'select', opciones: ['UNIDAD', 'KG', 'DOCENA', 'PORCION', 'VASO', 'TORTA'].map((u) => ({ valor: u, texto: u })) },
         { key: 'precioConIgv', label: 'Precio con IGV (S/)', tipo: 'numero', requerido: true },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
+        { key: 'pesoMasaG', label: 'Peso de masa cruda por unidad (g)', tipo: 'numero', ayuda: 'Con este dato las unidades por lote salen de la masa de la receta' },
+        { key: 'perdidaCoccion', label: 'Pérdida por cocción (%)', tipo: 'pct' },
+        { key: 'horasHombreLote', label: 'Horas hombre por lote', tipo: 'numero' },
+        { key: 'horasHornoLote', label: 'Horas de horno por lote', tipo: 'numero' },
       ]} />
   );
 }
@@ -116,20 +128,25 @@ export function Insumos() {
   const { dataset, puede, refrescarDatos } = useApp();
   return (
     <Crud titulo="Insumos" nombreExport="insumos" deps={dataset.insumos}
-      descripcion="El costo (CPP) no se edita a mano: lo fija cada compra registrada en Almacén."
+      descripcion="Costo por unidad base = precio ÷ cantidad por presentación hasta la primera compra; desde ahí manda el costo promedio ponderado del kárdex."
       cargar={async () => dataset.insumos.map((i) => ({ ...i, activo: (i as unknown as Reg).activo ?? true } as unknown as Reg))}
-      nuevo={{ nombre: '', unidad: 'KG', minimo: 0, proveedor: '', activo: true }}
+      nuevo={{ nombre: '', unidad: 'KG', minimo: 0, proveedor: '', activo: true, tipo: 'OTRO', presentacion: '', precioCompra: '', cantPresentacion: '', equivKg: 1 }}
       crear={puede('maestros.editar') ? async (d) => { await api('/insumos', { method: 'POST', body: d }); await refrescarDatos(); } : undefined}
       editar={puede('maestros.editar') ? async (id, d) => { await api(`/insumos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
       columnas={[
-        { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'unidad', label: 'Unidad' },
+        { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'tipo', label: 'Tipo' }, { key: 'unidad', label: 'Unidad' },
         { key: 'stock', label: 'Stock', tipo: 'num' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
         ...(puede('costos.ver') ? [{ key: 'cpp', label: 'CPP', tipo: 'dinero' } as ColRep] : []),
         { key: 'proveedor', label: 'Proveedor' },
       ]}
       campos={[
         { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 120 },
-        { key: 'unidad', label: 'Unidad de medida', tipo: 'select', opciones: ['KG', 'G', 'L', 'ML', 'UNIDAD', 'BALON', 'PAQUETE'].map((u) => ({ valor: u, texto: u })) },
+        { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [['HARINA', 'Harina (suma 100 % panadero)'], ['GRASA', 'Grasa'], ['LACTEO', 'Lácteo'], ['AZUCAR', 'Azúcar'], ['LEVADURA', 'Levadura'], ['HUEVO', 'Huevo'], ['RELLENO', 'Relleno'], ['ADITIVO', 'Aditivo'], ['LIQUIDO', 'Líquido'], ['OTRO', 'Otro']].map(([v, t]) => ({ valor: v, texto: t })) },
+        { key: 'unidad', label: 'Unidad base', tipo: 'select', opciones: [['KG', 'Kilogramo (kg)'], ['L', 'Litro (L)'], ['UNIDAD', 'Unidad'], ['BALON', 'Balón']].map(([v, t]) => ({ valor: v, texto: t })), ayuda: 'En la receta se puede escribir en gr o ml: se convierte sola' },
+        { key: 'presentacion', label: 'Presentación de compra', max: 60, ayuda: 'Ej.: saco de 50 kg' },
+        { key: 'precioCompra', label: 'Precio de compra (S/ sin IGV)', tipo: 'numero' },
+        { key: 'cantPresentacion', label: 'Cantidad por presentación (en unidad base)', tipo: 'numero' },
+        { key: 'equivKg', label: 'Equivalente en kg de 1 unidad base', tipo: 'numero', ayuda: 'Aceite: 0.92 · agua: 1 · huevo: 0.05' },
         { key: 'minimo', label: 'Stock mínimo', tipo: 'numero' },
         { key: 'proveedor', label: 'Proveedor', ancho: true, max: 120 },
         { key: 'activo', label: 'Activo', tipo: 'bool' },

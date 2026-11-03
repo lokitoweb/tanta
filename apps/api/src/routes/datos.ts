@@ -100,6 +100,7 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
                p.precio_con_igv, p.costo_unitario, p.merma_pct, p.vendidos_30d, p.stock, p.estado,
+               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote,
                p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) AS precio_neto,
                CASE WHEN p.precio_con_igv > 0
                     THEN (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) - p.costo_unitario) / (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')))
@@ -124,6 +125,7 @@ export async function rutasDatos(app: FastifyInstance) {
 
       recordar('cat:insumos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT id, codigo, nombre, unidad, cpp, stock, minimo, proveedor, estado,
+               tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, activo,
                (cpp * stock) AS valorizado
         FROM core.insumo ORDER BY estado DESC, nombre`)),
 
@@ -170,16 +172,18 @@ export async function rutasDatos(app: FastifyInstance) {
 
       recordar('cat:recetas', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT r.producto_id, r.producto, r.version, r.estado, r.rendimiento,
-               r.merma_estandar, r.costo_insumos, r.costo_con_merma, r.cif_unitario,
-               (r.costo_con_merma + r.cif_unitario) AS costo_unitario,
+               r.merma_estandar, r.costo_insumos, r.costo_con_merma, r.cif_unitario, r.mo_unitario,
+               r.masa_lote_kg, r.unidades_teoricas, r.unidades_esperadas, r.costo_lote,
+               (r.costo_con_merma + r.mo_unitario + r.cif_unitario) AS costo_unitario,
                coalesce(json_agg(json_build_object(
                  'insumoId', d.insumo_id, 'insumo', d.insumo, 'unidad', d.unidad,
-                 'cantidad', d.cantidad, 'cpp', d.cpp, 'costo', d.costo
+                 'cantidad', d.cantidad, 'cpp', d.cpp, 'costo', d.costo,
+                 'unidadReceta', d.unidad_receta, 'cantidadOriginal', d.cantidad_original,
+                 'pesoKg', d.peso_kg, 'pctPanadero', d.pct_panadero
                ) ORDER BY d.orden) FILTER (WHERE d.insumo_id IS NOT NULL), '[]') AS lineas
         FROM core.receta r
         LEFT JOIN core.receta_detalle d ON d.receta_id = r.id
-        GROUP BY r.producto_id, r.producto, r.version, r.estado, r.rendimiento,
-                 r.merma_estandar, r.costo_insumos, r.costo_con_merma, r.cif_unitario
+        GROUP BY r.id -- clave primaria: incluye todas las columnas de la receta
         ORDER BY r.producto`)),
 
       u.permisos.has('usuarios.gestionar')
@@ -273,6 +277,8 @@ export async function rutasDatos(app: FastifyInstance) {
           unidad: pr.unidad, precioConIgv: num(pr.precio_con_igv), precioNeto: num(pr.precio_neto),
           vendidos30d: num(pr.vendidos_30d), stock: num(pr.stock), estado: pr.estado,
           mermaPct: num(pr.merma_pct), margenObjetivo: num(pr.margen_objetivo),
+          pesoMasaG: pr.peso_masa_g === null ? null : num(pr.peso_masa_g), perdidaCoccion: num(pr.perdida_coccion),
+          horasHombreLote: num(pr.horas_hombre_lote), horasHornoLote: num(pr.horas_horno_lote),
         };
         if (!verCosto) return base;
         return { ...base, costoUnitario: num(pr.costo_unitario), margen: num(pr.margen) };
@@ -290,9 +296,11 @@ export async function rutasDatos(app: FastifyInstance) {
         const base = {
           id: i.id, codigo: i.codigo, nombre: i.nombre, unidad: i.unidad,
           stock: num(i.stock), minimo: num(i.minimo), proveedor: i.proveedor, estado: i.estado,
+          tipo: i.tipo, presentacion: i.presentacion, equivKg: num(i.equiv_kg), activo: Boolean(i.activo),
         };
         if (!verCosto && !u.permisos.has('inventario.mover')) return base;
-        return { ...base, cpp: num(i.cpp), valorizado: num(i.valorizado) };
+        return { ...base, cpp: num(i.cpp), valorizado: num(i.valorizado),
+          precioCompra: i.precio_compra === null ? null : num(i.precio_compra), cantPresentacion: i.cant_presentacion === null ? null : num(i.cant_presentacion) };
       }),
       ops: ops.map((o) => ({
         codigo: o.codigo, producto: o.producto, cantidad: num(o.cantidad), estado: o.estado,
@@ -320,6 +328,7 @@ export async function rutasDatos(app: FastifyInstance) {
           id: r.producto_id, productoId: r.producto_id, producto: r.producto,
           version: num(r.version), estado: r.estado, rendimiento: num(r.rendimiento),
           mermaEstandar: num(r.merma_estandar),
+          masaLoteKg: num(r.masa_lote_kg), unidadesTeoricas: num(r.unidades_teoricas), unidadesEsperadas: num(r.unidades_esperadas),
           lineas: typeof r.lineas === 'string' ? JSON.parse(r.lineas) : r.lineas,
         };
         if (!verCosto) {
@@ -330,7 +339,7 @@ export async function rutasDatos(app: FastifyInstance) {
         return {
           ...base,
           costoInsumos: num(r.costo_insumos), costoConMerma: num(r.costo_con_merma),
-          cifUnit: num(r.cif_unitario), costoUnitario,
+          cifUnit: num(r.cif_unitario), moUnit: num(r.mo_unitario), costoLote: num(r.costo_lote), costoUnitario,
           margen: neto > 0 ? (neto - costoUnitario) / neto : 0,
         };
       }),

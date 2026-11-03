@@ -13,17 +13,12 @@ export function Recetas() {
   const [aviso, setAviso] = useState<string | null>(null);
 
   // Si el rol no ve costos, el API no los envía: aquí no hay nada que calcular.
-  const [insumos, merma] = verCosto
-    ? partesQueSuman(
-        [
-          receta.costoInsumos ?? 0,
-          (receta.costoConMerma ?? 0) - (receta.costoInsumos ?? 0),
-          receta.cifUnit ?? 0,
-        ],
-        receta.costoUnitario ?? 0,
-      )
+  // RN-15: costo total = insumos por unidad esperada + mano de obra + CIF (redondeados para que sumen).
+  const r2 = receta as typeof receta & { moUnit?: number; masaLoteKg?: number; unidadesEsperadas?: number };
+  const [insumos, mo] = verCosto
+    ? partesQueSuman([receta.costoConMerma ?? 0, r2.moUnit ?? 0, receta.cifUnit ?? 0], receta.costoUnitario ?? 0)
     : [0, 0];
-  const cif = verCosto ? Math.round(((receta.costoUnitario ?? 0) - insumos - merma) * 100) / 100 : 0;
+  const cif = verCosto ? Math.round(((receta.costoUnitario ?? 0) - insumos - mo) * 100) / 100 : 0;
 
   if (!receta) {
     return (
@@ -77,7 +72,7 @@ export function Recetas() {
                 <p className="receta-head__eyebrow">Receta vigente · versión {receta.version}</p>
                 <h2 className="receta-head__title">{receta.producto}</h2>
                 <p className="receta-head__sub">
-                  Rinde {receta.rendimiento} unidades · merma estándar {pct(receta.mermaEstandar)} · estado{' '}
+                  Masa del lote {num2(r2.masaLoteKg ?? 0)} kg · {num2(r2.unidadesEsperadas ?? receta.rendimiento)} unidades esperadas · merma {pct(receta.mermaEstandar)} · estado{' '}
                   <Insignia tono="ok" punto>Vigente</Insignia>
                 </p>
               </div>
@@ -97,7 +92,8 @@ export function Recetas() {
                 <thead>
                   <tr>
                     <th>Insumo</th>
-                    <th className="t-right">Cantidad por tanda</th>
+                    <th className="t-right">Cantidad por lote</th>
+                    <th className="t-right">% panadero</th>
                     {verCosto && <th className="t-right">CPP</th>}
                     {verCosto && <th className="t-right">Costo</th>}
                   </tr>
@@ -107,6 +103,7 @@ export function Recetas() {
                     <tr key={l.insumoId}>
                       <td><strong>{l.insumo}</strong></td>
                       <td className="t-right">{cantidad(l.cantidad, l.unidad)}</td>
+                      <td className="t-right t-muted">{(l as typeof l & { pctPanadero?: number | null }).pctPanadero != null ? pct((l as typeof l & { pctPanadero: number }).pctPanadero) : '—'}</td>
                       {verCosto && <td className="t-right t-muted">{money(l.cpp ?? 0)}</td>}
                       {verCosto && <td className="t-right">{money(l.costo ?? 0)}</td>}
                     </tr>
@@ -120,22 +117,19 @@ export function Recetas() {
             <Tarjeta>
               <TarjetaTitulo
                 titulo="Cómo se forma el costo"
-                subtitulo="La merma se divide, no se suma: el rendimiento se pierde, no se recarga"
+                subtitulo="Modelo del informe técnico: unidades esperadas = masa ÷ peso × (1 − merma)"
               />
               <ol className="cascada">
                 <li>
-                  <span>Insumos directos</span>
+                  <span>Insumos por unidad esperada <em>(lote ÷ unidades esperadas)</em></span>
                   <b>{money(insumos)}</b>
                 </li>
                 <li>
-                  <span>
-                    + Merma estándar {pct(receta.mermaEstandar)}{' '}
-                    <em>(÷ {num2(1 - receta.mermaEstandar)})</em>
-                  </span>
-                  <b>{money(merma)}</b>
+                  <span>+ Mano de obra <em>(horas hombre × costo hora ÷ unidades)</em></span>
+                  <b>{money(mo)}</b>
                 </li>
                 <li>
-                  <span>+ Costos indirectos prorrateados</span>
+                  <span>+ Costos indirectos <em>(horas de horno, kg de masa y unidades)</em></span>
                   <b>{money(cif)}</b>
                 </li>
                 <li className="cascada__total">

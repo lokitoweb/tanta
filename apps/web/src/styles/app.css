@@ -1347,3 +1347,5 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   .op__cantidad { grid-area: c; flex-direction: row; gap: 6px; align-items: baseline; }
   .op__avance { grid-area: v; } .op__entrega, .op__resp { display: none; }
 }
+.editor-receta__unidad { width: 78px; flex: 0 0 78px; padding-inline: 8px; }
+.editor-receta__cab, .editor-receta__fila { grid-template-columns: minmax(0, 1fr) 230px 36px; }

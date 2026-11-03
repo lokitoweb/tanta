@@ -335,21 +335,23 @@ const REPORTES: Record<string, Reporte> = {
     async calcular(f) {
       if (!f.producto) throw Object.assign(new Error('Elige un producto para ver su ficha de costo.'), { status: 422 });
       const r = await uno<Record<string, string>>(`SELECT p.nombre, p.precio_con_igv, p.costo_unitario, r.rendimiento, r.merma_estandar, r.costo_insumos, r.costo_con_merma, r.cif_unitario, r.version,
+        r.mo_unitario, r.unidades_esperadas, r.masa_lote_kg, r.costo_lote,
         (SELECT valor FROM core.parametro WHERE clave='igv') igv FROM core.producto p JOIN core.receta r ON r.producto_id = p.id WHERE p.id = $1`, [f.producto]);
       if (!r) throw Object.assign(new Error('El producto no tiene receta.'), { status: 404 });
-      const lineas = await q<Record<string, string>>('SELECT insumo, unidad, cantidad, cpp FROM core.receta_detalle WHERE receta_id = $1 ORDER BY orden', [f.producto]);
-      const rend = num(r.rendimiento), neto = num(r.precio_con_igv) / (1 + num(r.igv || '0.18')), costo = num(r.costo_unitario), utilidad = neto - costo;
+      const lineas = await q<Record<string, string>>('SELECT insumo, unidad, cantidad, cpp, pct_panadero FROM core.receta_detalle WHERE receta_id = $1 ORDER BY orden', [f.producto]);
+      // Cantidades por unidad esperada (RN-07), no por rendimiento declarado.
+      const rend = num(r.unidades_esperadas) || num(r.rendimiento), neto = num(r.precio_con_igv) / (1 + num(r.igv || '0.18')), costo = num(r.costo_unitario), utilidad = neto - costo;
       return {
         filas: [
-          ...lineas.map((l) => ({ concepto: `${l.insumo} (${l.unidad})`, cantidad: num(l.cantidad) / rend, cpp: num(l.cpp), costo: num(l.cantidad) * num(l.cpp) / rend })),
-          { concepto: 'Costo de insumos', cantidad: null, cpp: null, costo: num(r.costo_insumos) },
-          { concepto: `Merma estándar (${(num(r.merma_estandar) * 100).toFixed(1)} %)`, cantidad: null, cpp: null, costo: num(r.costo_con_merma) - num(r.costo_insumos) },
+          ...lineas.map((l) => ({ concepto: `${l.insumo} (${l.unidad})${l.pct_panadero !== null ? ` · ${(num(l.pct_panadero) * 100).toFixed(1)} % panadero` : ''}`, cantidad: num(l.cantidad) / rend, cpp: num(l.cpp), costo: num(l.cantidad) * num(l.cpp) / rend })),
+          { concepto: `Costo de insumos (incluye merma ${(num(r.merma_estandar) * 100).toFixed(1)} %)`, cantidad: null, cpp: null, costo: num(r.costo_con_merma) },
+          { concepto: 'Mano de obra directa', cantidad: null, cpp: null, costo: num(r.mo_unitario) },
           { concepto: 'Costos indirectos (CIF)', cantidad: null, cpp: null, costo: num(r.cif_unitario) },
           { concepto: 'Costo total unitario', cantidad: null, cpp: null, costo },
           { concepto: 'Precio de venta neto (sin IGV)', cantidad: null, cpp: null, costo: neto },
           { concepto: 'Utilidad bruta por unidad', cantidad: null, cpp: null, costo: utilidad },
         ],
-        resumen: { producto: r.nombre, version: num(r.version), rendimiento: rend, margen: neto ? utilidad / neto : 0, markup: costo ? utilidad / costo : 0 },
+        resumen: { producto: r.nombre, version: num(r.version), rendimiento: rend, masaLoteKg: num(r.masa_lote_kg), costoLote: num(r.costo_lote), margen: neto ? utilidad / neto : 0, markup: costo ? utilidad / costo : 0 },
       };
     },
   },
