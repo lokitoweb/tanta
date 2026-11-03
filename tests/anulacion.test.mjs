@@ -13,13 +13,18 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
 }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }));
 
 const productoConStock = () => sql("SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1");
+// Cliente propio con crédito sin límite: no depende de la deuda que traigan los datos de ejemplo.
+// (Dentro de un WITH: psql no agrega la línea "INSERT 0 1" a la salida.)
+const clientePrueba = () => sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito)
+  VALUES ('CLI-ANUL', 'Cliente prueba anulación', 30, 0)
+  ON CONFLICT (codigo) DO UPDATE SET limite_credito = 0 RETURNING id) SELECT id FROM c`);
 const stock = (id) => Number(sql(`SELECT stock FROM core.producto WHERE id = '${id}'`));
 
 test('anular una venta al crédito devuelve el stock y cancela la deuda', async () => {
   const vend = await login('cmedina');
   const ger = await login('osquilcate');
   const prod = productoConStock();
-  const cliente = sql("SELECT id FROM core.cliente c WHERE limite_credito = 0 OR limite_credito - coalesce((SELECT sum(saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) > 500 LIMIT 1");
+  const cliente = clientePrueba();
   const antes = stock(prod);
   const v = await api(vend, 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 2 }], formaPago: 'CREDITO', clienteId: cliente });
   assert.equal(v.s, 201, JSON.stringify(v.b));
@@ -38,7 +43,7 @@ test('anular una venta al crédito devuelve el stock y cancela la deuda', async 
 test('una venta con cobros no se puede anular', async () => {
   const vend = await login('cmedina');
   const prod = productoConStock();
-  const cliente = sql("SELECT id FROM core.cliente c WHERE limite_credito = 0 OR limite_credito - coalesce((SELECT sum(saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) > 500 LIMIT 1");
+  const cliente = clientePrueba();
   const v = await api(vend, 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 1 }], formaPago: 'CREDITO', clienteId: cliente });
   assert.equal(v.s, 201);
   const cxc = sql(`SELECT id FROM core.cuenta_por_cobrar WHERE venta_id = '${v.b.ventaId}'`);
