@@ -242,17 +242,28 @@ class Api {
           ? {'productoId': id, 'cantidad': cantidad, 'motivoTipo': motivoTipo, 'motivo': motivo}
           : {'tipo': 'MERMA', 'insumoId': id, 'cantidad': cantidad, 'motivoTipo': motivoTipo, 'motivo': motivo}, idempotente: true);
 
-  Future<Map<String, dynamic>> crearOrden({required String productoId, required double cantidad, required String entrega}) async =>
-      await _post('/ordenes-produccion', {'productoId': productoId, 'cantidad': cantidad, 'entrega': entrega}, idempotente: true) as Map<String, dynamic>;
+  /// criterio: LOTES_COMPLETOS (redondea hacia arriba) o PROPORCIONAL. La OP envía su requisición a Almacén.
+  Future<Map<String, dynamic>> crearOrden({required String productoId, required double cantidad, required String entrega, String criterio = 'LOTES_COMPLETOS'}) async =>
+      await _post('/ordenes-produccion', {'productoId': productoId, 'cantidad': cantidad, 'entrega': entrega, 'criterio': criterio}, idempotente: true) as Map<String, dynamic>;
+
+  Future<List<dynamic>> requisiciones() async => await _get('/requisiciones') as List<dynamic>;
+
+  /// Almacén entrega insumos de una requisición: el stock baja en ese momento (RN-27).
+  Future<Map<String, dynamic>> atenderRequisicion(String codigo, List<Map<String, dynamic>> lineas) async =>
+      await _post('/requisiciones/$codigo/atender', {'lineas': lineas}, idempotente: true) as Map<String, dynamic>;
 
   Future<void> iniciarOrden(String codigo) async => await _post('/ordenes-produccion/$codigo/iniciar', {});
 
-  Future<Map<String, dynamic>> cerrarOrden(String codigo, num cantidad, num merma, String motivo) async =>
+  /// Cierre (A17): unidades buenas, merma en unidades con su motivo y horas reales (opcionales).
+  Future<Map<String, dynamic>> cerrarOrden(String codigo, num buenas, num merma, String motivoTipo, String motivo, {num? horasHombre, num? horasHorno}) async =>
       await _post('/ordenes-produccion/$codigo/cerrar', {
-        'cantidadProducida': cantidad,
-        'mermaReal': merma,
+        'unidadesBuenas': buenas,
+        'unidadesMerma': merma,
+        if (merma > 0) 'motivoMermaTipo': motivoTipo,
         'motivoMerma': motivo,
-      }) as Map<String, dynamic>;
+        if (horasHombre != null) 'horasHombreReal': horasHombre,
+        if (horasHorno != null) 'horasHornoReal': horasHorno,
+      }, idempotente: true) as Map<String, dynamic>;
 
   /// Cuentas por cobrar abiertas. El servidor ya filtra por permiso.
   Future<List<dynamic>> cartera() async => await _get('/cxc') as List<dynamic>;
@@ -417,7 +428,7 @@ class Api {
   /// (Configuración → App móvil → Módulos). El servidor vuelve a validar el permiso igual.
   bool puede(String permiso) => permisos.contains(permiso) && moduloActivo(_modulos[permiso.split('.').first] ?? '');
 
-  static const _modulos = {'pedidos': 'pedidos', 'ventas': 'ventas', 'cobranza': 'cobranza', 'produccion': 'produccion', 'inventario': 'almacen', 'catalogo': 'catalogo'};
+  static const _modulos = {'pedidos': 'pedidos', 'ventas': 'ventas', 'cobranza': 'cobranza', 'produccion': 'produccion', 'inventario': 'almacen', 'requisiciones': 'almacen', 'catalogo': 'catalogo'};
 
   bool moduloActivo(String modulo) => modulo.isEmpty || ((config['movil'] as Map?)?['modulos'] as Map?)?[modulo] != false;
 }

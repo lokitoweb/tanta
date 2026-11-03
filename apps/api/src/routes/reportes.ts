@@ -329,6 +329,50 @@ const REPORTES: Record<string, Reporte> = {
       }).filter((r) => r.stock < r.minimo || r.diasCobertura < 7) };
     },
   },
+  'P-01': {
+    titulo: 'Plan de producción y consumo', permiso: 'produccion.ver',
+    columnas: [{ key: 'insumo', label: 'Insumo' }, { key: 'unidad', label: 'Unidad' }, { key: 'ordenes', label: 'Órdenes', tipo: 'num' },
+      { key: 'consumo', label: 'Consumo de las órdenes', tipo: 'num' }, { key: 'stock', label: 'Stock', tipo: 'num' }, { key: 'saldo', label: 'Saldo', tipo: 'num' }, { key: 'estado', label: 'Estado' }],
+    // PRO-11: consumo consolidado de las órdenes pendientes y en proceso frente al stock total.
+    async calcular() {
+      const filas = await q<Record<string, string>>(`
+        SELECT i.nombre insumo, i.unidad, count(DISTINCT o.id) ordenes, sum(d.cant_solicitada - d.cant_entregada) consumo, i.stock
+        FROM core.orden_produccion o JOIN core.requisicion q ON q.op_id = o.id JOIN core.requisicion_detalle d ON d.requisicion_id = q.id
+        JOIN core.insumo i ON i.id = d.insumo_id
+        WHERE o.estado IN ('PENDIENTE','EN_PROCESO') AND q.estado IN ('PENDIENTE','PARCIAL')
+        GROUP BY i.id ORDER BY i.nombre`);
+      return { filas: filas.map((r) => {
+        const saldo = num(r.stock) - num(r.consumo);
+        return { insumo: r.insumo, unidad: r.unidad, ordenes: num(r.ordenes), consumo: num(r.consumo), stock: num(r.stock), saldo, estado: saldo < 0 ? 'FALTA' : 'OK' };
+      }) };
+    },
+  },
+  'P-02': {
+    titulo: 'Control de varianza (teórico vs real)', permiso: 'produccion.ver',
+    columnas: [{ key: 'op', label: 'OP' }, { key: 'producto', label: 'Producto' }, { key: 'insumo', label: 'Insumo' },
+      { key: 'teorico', label: 'Teórico', tipo: 'num' }, { key: 'real', label: 'Real', tipo: 'num' }, { key: 'variacion', label: 'Variación', tipo: 'num' },
+      { key: 'variacionPct', label: 'Variación %', tipo: 'pct' }, { key: 'impacto', label: 'Impacto', tipo: 'dinero' }, { key: 'estado', label: 'Estado' }],
+    // RN-24: variación = real − teórico; % = variación ÷ teórico; impacto = variación × costo. Fuera de la tolerancia: EXCESO o DEFECTO.
+    async calcular(f) {
+      const tol = num((await uno<{ v: string }>("SELECT valor v FROM core.parametro WHERE clave = 'tolerancia_varianza'"))?.v ?? '0.03');
+      const filas = await q<Record<string, string>>(`
+        SELECT o.codigo op, o.producto, d.insumo, d.cant_solicitada teorico, coalesce(d.cant_real_usada, d.cant_entregada) real,
+               CASE WHEN d.cant_entregada > 0 THEN d.costo_entregado / d.cant_entregada ELSE i.cpp END costo,
+               o.unidades_buenas, o.unidades_esperadas
+        FROM core.orden_produccion o JOIN core.requisicion q ON q.op_id = o.id JOIN core.requisicion_detalle d ON d.requisicion_id = q.id
+        JOIN core.insumo i ON i.id = d.insumo_id JOIN core.producto p ON p.id = o.producto_id
+        WHERE o.estado = 'TERMINADA' AND o.terminada_en >= $1::date AND o.terminada_en < $2::date + 1
+          AND ($3::uuid IS NULL OR o.producto_id = $3)
+        ORDER BY o.terminada_en DESC, o.codigo, d.insumo LIMIT 2000`, [f.desde, f.hasta, f.producto ?? null]);
+      const lineas = filas.map((r) => {
+        const teorico = num(r.teorico), real = num(r.real), variacion = real - teorico, pctv = teorico > 0 ? variacion / teorico : 0;
+        return { op: r.op, producto: r.producto, insumo: r.insumo, teorico, real, variacion, variacionPct: pctv,
+          impacto: variacion * num(r.costo), estado: pctv > tol ? 'EXCESO' : pctv < -tol ? 'DEFECTO' : 'OK' };
+      });
+      return { filas: lineas, resumen: { tolerancia: tol, impactoTotal: lineas.reduce((s, l) => s + l.impacto, 0),
+        fueraDeTolerancia: lineas.filter((l) => l.estado !== 'OK').length } };
+    },
+  },
   'M-01': {
     titulo: 'Ficha de costo por producto', permiso: 'costos.ver',
     columnas: [{ key: 'concepto', label: 'Concepto' }, { key: 'cantidad', label: 'Cantidad', tipo: 'num' }, { key: 'cpp', label: 'CPP', tipo: 'dinero' }, { key: 'costo', label: 'Costo por unidad', tipo: 'dinero' }],

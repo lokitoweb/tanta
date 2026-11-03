@@ -29,7 +29,7 @@ test('el cliente registra su pedido y solo ve los suyos', async () => {
   assert.equal((await api(await login('jramos'), 'POST', '/pedidos', { items: [{ productoId: prods[0].id, cantidad: 1 }], fechaEntrega: manana })).s, 403);
 });
 
-test('OP: requerimiento, creación, estados y consumo = receta ÷ rendimiento', async () => {
+test('OP: requerimiento, requisición entregada por Almacén y cierre sin doble descuento', async () => {
   const prod = await login('rquispe');
   const adm = await login('lbermudez');
   const receta = (await api(adm, 'GET', '/datos')).b.recetas[0];
@@ -47,11 +47,17 @@ test('OP: requerimiento, creación, estados y consumo = receta ÷ rendimiento', 
   assert.equal(op.s, 201);
   assert.equal((await api(prod, 'POST', `/ordenes-produccion/${op.b.codigo}/cerrar`, { cantidadProducida: 24, mermaReal: 0 })).s, 409, 'no se cierra sin iniciar');
   assert.equal((await api(prod, 'POST', `/ordenes-produccion/${op.b.codigo}/iniciar`, {})).s, 200);
-  const antes = Number(sql(`SELECT stock FROM core.insumo WHERE id='${linea.insumoId}'`));
+  assert.equal((await api(prod, 'POST', `/ordenes-produccion/${op.b.codigo}/cerrar`, { cantidadProducida: 24, mermaReal: 0 })).s, 409, 'sin entrega de Almacén no se cierra');
+  // RN-27: el insumo baja cuando Almacén entrega la requisición, no al cerrar la OP.
+  const stockInsumo = () => Number(sql(`SELECT stock FROM core.insumo WHERE id='${linea.insumoId}'`));
+  const antes = stockInsumo();
+  const rq = (await api(alm, 'GET', '/requisiciones')).b.find((r) => r.op === op.b.codigo);
+  assert.equal((await api(alm, 'POST', `/requisiciones/${rq.codigo}/atender`, { lineas: rq.lineas.map((l) => ({ insumoId: l.insumoId, cantidad: l.solicitada })) })).s, 200);
+  const consumido = antes - stockInsumo();
+  assert.ok(Math.abs(consumido - esperado) < 0.01, `entrega ${consumido} vs requerido ${esperado}`);
   const cierre = await api(prod, 'POST', `/ordenes-produccion/${op.b.codigo}/cerrar`, { cantidadProducida: 24, mermaReal: 0 });
   assert.equal(cierre.s, 200);
-  const consumido = antes - Number(sql(`SELECT stock FROM core.insumo WHERE id='${linea.insumoId}'`));
-  assert.ok(Math.abs(consumido - linea.cantidad) < 0.001, `24 unidades = 1 tanda: consume ${linea.cantidad}, consumió ${consumido}`);
+  assert.ok(Math.abs(stockInsumo() - (antes - consumido)) < 0.001, 'el cierre no vuelve a descontar');
   assert.equal((await api(await login('cmedina'), 'POST', '/ordenes-produccion', { productoId: receta.productoId, cantidad: 1, entrega: manana })).s, 403);
 });
 

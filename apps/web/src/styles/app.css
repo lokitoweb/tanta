@@ -1349,3 +1349,14 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 }
 .editor-receta__unidad { width: 78px; flex: 0 0 78px; padding-inline: 8px; }
 .editor-receta__cab, .editor-receta__fila { grid-template-columns: minmax(0, 1fr) 230px 36px; }
+
+/* Producción: resultado del cálculo de la orden y botón de anular */
+.calculo-op { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.calculo-op div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 6px; background: var(--tanta-neutral-50); border: 1px solid var(--tanta-border-subtle); }
+.calculo-op span { font-size: .6875rem; color: var(--tanta-text-muted); }
+.calculo-op b { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.op__accion { gap: 6px; align-items: center; }
+.op__anular { width: 28px; height: 28px; border-radius: 6px; color: var(--tanta-text-muted); font-size: 1.1rem; display: grid; place-items: center; }
+.op__anular:hover { background: color-mix(in srgb, var(--tanta-state-danger) 10%, transparent); color: var(--tanta-state-danger); }
+@media (max-width: 640px) { .calculo-op { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.entrega__input { width: 110px; height: 32px; text-align: right; margin-left: auto; }

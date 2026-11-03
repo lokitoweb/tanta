@@ -150,9 +150,9 @@ class _TarjetaOp extends StatelessWidget {
         aviso.showSnackBar(SnackBar(content: Text('Orden $codigo en proceso · recarga para ver el cambio')));
         return;
       }
-      final cierre = await showDialog<(double, double, String)>(context: context, builder: (_) => _DialogoCierre(op: op));
-      if (cierre == null) return;
-      await Api.instancia.cerrarOrden(codigo, cierre.$1, cierre.$2, cierre.$3);
+      final c = await showDialog<_Cierre>(context: context, builder: (_) => _DialogoCierre(op: op));
+      if (c == null) return;
+      await Api.instancia.cerrarOrden(codigo, c.buenas, c.merma, c.motivoTipo, c.motivo, horasHombre: c.horasHombre, horasHorno: c.horasHorno);
       aviso.showSnackBar(SnackBar(content: Text('Orden $codigo cerrada · inventario actualizado'), backgroundColor: TantaColors.stateOk));
     } on ApiException catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(e.mensaje), backgroundColor: TantaColors.stateDanger));
@@ -169,32 +169,53 @@ class _DialogoCierre extends StatefulWidget {
   State<_DialogoCierre> createState() => _DialogoCierreState();
 }
 
+typedef _Cierre = ({double buenas, double merma, String motivoTipo, String motivo, double? horasHombre, double? horasHorno});
+
+const _motivos = {'CORTE': 'Corte', 'ROTURA': 'Rotura', 'QUEMADO': 'Quemado', 'DEFORME': 'Deforme', 'OTRO': 'Otro'};
+
 class _DialogoCierreState extends State<_DialogoCierre> {
-  late final _cantidad = TextEditingController(text: '${(widget.op['cantidad'] as num?) ?? ''}');
+  late final _buenas = TextEditingController(text: '${(widget.op['cantidad'] as num?) ?? ''}');
   final _merma = TextEditingController(text: '0');
   final _motivo = TextEditingController();
+  final _hh = TextEditingController();
+  final _hn = TextEditingController();
+  String _motivoTipo = 'QUEMADO';
   String? _error;
 
+  double? _n(TextEditingController c) => c.text.trim().isEmpty ? null : double.tryParse(c.text.replaceAll(',', '.'));
+
   void _aceptar() {
-    final c = double.tryParse(_cantidad.text.replaceAll(',', '.'));
-    final m = double.tryParse(_merma.text.replaceAll(',', '.'));
-    if (c == null || c <= 0 || m == null || m < 0) return setState(() => _error = 'Revisa las cantidades');
-    if (m > 0 && _motivo.text.trim().length < 3) return setState(() => _error = 'Indica el motivo de la merma');
-    Navigator.pop(context, (c, m, _motivo.text.trim()));
+    final b = _n(_buenas), m = _n(_merma) ?? 0;
+    if (b == null || b < 0 || m < 0) return setState(() => _error = 'Revisa las cantidades');
+    Navigator.pop<_Cierre>(context, (buenas: b, merma: m, motivoTipo: _motivoTipo, motivo: _motivo.text.trim(), horasHombre: _n(_hh), horasHorno: _n(_hn)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final teclado = const TextInputType.numberWithOptions(decimal: true);
+    const teclado = TextInputType.numberWithOptions(decimal: true);
+    final hayMerma = (_n(_merma) ?? 0) > 0;
     return AlertDialog(
       title: Text('Cerrar ${widget.op['codigo']}'),
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: _cantidad, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Cantidad producida')),
+          TextField(controller: _buenas, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Unidades buenas')),
           const SizedBox(height: 12),
-          TextField(controller: _merma, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Merma real')),
+          TextField(controller: _merma, keyboardType: teclado, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Unidades de merma')),
+          if (hayMerma) ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _motivoTipo,
+              decoration: const InputDecoration(labelText: 'Motivo de la merma'),
+              items: [for (final m in _motivos.entries) DropdownMenuItem(value: m.key, child: Text(m.value))],
+              onChanged: (v) => setState(() => _motivoTipo = v!),
+            ),
+            const SizedBox(height: 12),
+            TextField(controller: _motivo, maxLength: 200, decoration: const InputDecoration(labelText: 'Observación (opcional)')),
+          ],
           const SizedBox(height: 12),
-          TextField(controller: _motivo, maxLength: 200, decoration: const InputDecoration(labelText: 'Motivo de la merma')),
+          TextField(controller: _hh, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Horas hombre reales', helperText: 'Vacío = estándar del pan')),
+          const SizedBox(height: 12),
+          TextField(controller: _hn, keyboardType: teclado, decoration: const InputDecoration(labelText: 'Horas de horno reales', helperText: 'Vacío = estándar del pan')),
           if (_error != null) Text(_error!, style: const TextStyle(color: TantaColors.stateDanger)),
         ]),
       ),

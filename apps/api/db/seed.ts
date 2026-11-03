@@ -53,6 +53,7 @@ const PERMISOS: Array<[string, string, string]> = [
   ['pedidos.crear', 'Cliente', 'Registrar pedidos propios desde la app o la web'],
   ['produccion.planificar', 'Producción', 'Generar órdenes de producción'],
   ['ventas.anular', 'Ventas', 'Anular ventas: devuelve el stock y cancela la deuda'],
+  ['requisiciones.atender', 'Almacén', 'Entregar a Producción los insumos de una requisición'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
@@ -65,7 +66,7 @@ const ROLES: Array<[string, string, string, string, string, string, number, stri
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
     ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'produccion.planificar', 'recetas.ver', 'inventario.ver', 'pedidos.ver', 'catalogo.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,
-    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver']],
+    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver', 'requisiciones.atender']],
   ['VENDEDOR', 'Vendedor', 'Ventas', 'Despacho, ventas a terceros y cobranza', 'app', 'truck', 5,
     ['panel.ver', 'pedidos.ver', 'pedidos.gestionar', 'pedidos.crear', 'ventas.registrar', 'cobranza.ver', 'cobranza.registrar', 'clientes.ver', 'catalogo.ver', 'reportes.ver']],
   ['CLIENTE', 'Cliente', 'Cliente', 'Catálogo, pedidos y saldo', 'app', 'user', 6,
@@ -79,6 +80,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-produccion', 'Operación', 'Producción', '/produccion', 'oven', 'produccion.ver', 2, 1],
   ['n-almacen', 'Operación', 'Almacén', '/almacen', 'box', 'inventario.ver', 3, 1],
   ['n-kardex', 'Operación', 'Kárdex', '/almacen/kardex', 'ledger', 'inventario.ver', 4, 1],
+  ['n-requisiciones', 'Operación', 'Requisiciones', '/almacen/requisiciones', 'clipboard', 'requisiciones.atender', 5, 1],
   ['n-pedidos', 'Comercial', 'Pedidos', '/ventas/pedidos', 'clipboard', 'pedidos.ver', 1, 2],
   ['n-cobranza', 'Comercial', 'Cobranza', '/ventas/cobranza', 'wallet', 'cobranza.ver', 2, 2],
   ['n-catalogo', 'Comercial', 'Catálogo', '/catalogo', 'bread', 'catalogo.ver', 3, 2],

@@ -206,6 +206,7 @@ class _NuevaOrdenState extends State<NuevaOrden> {
   String? _producto;
   final _cantidad = TextEditingController();
   DateTime _entrega = DateTime.now().add(const Duration(days: 1));
+  String _criterio = 'LOTES_COMPLETOS';
   bool _enviando = false;
 
   Future<void> _crear() async {
@@ -218,10 +219,11 @@ class _NuevaOrdenState extends State<NuevaOrden> {
     }
     setState(() => _enviando = true);
     try {
-      final r = await Api.instancia.crearOrden(productoId: _producto!, cantidad: cantidad, entrega: _entrega.toIso8601String().substring(0, 10));
+      final r = await Api.instancia.crearOrden(productoId: _producto!, cantidad: cantidad, entrega: _entrega.toIso8601String().substring(0, 10), criterio: _criterio);
+      final calc = (r['calculo'] as Map?) ?? const {};
       final faltan = (r['insumosInsuficientes'] as List?) ?? const [];
       aviso.showSnackBar(SnackBar(content: Text(faltan.isEmpty
-          ? 'Orden ${r['codigo']} creada'
+          ? 'Orden ${r['codigo']} · ${calc['lotes']} lotes, ${calc['unidadesObtenidas']} unidades. Requisición enviada a Almacén'
           : 'Orden ${r['codigo']} creada · faltan insumos: ${faltan.map((f) => f['insumo'] ?? f['nombre'] ?? '').join(', ')}')));
       nav.pop(true);
     } catch (e) {
@@ -246,6 +248,12 @@ class _NuevaOrdenState extends State<NuevaOrden> {
         const SizedBox(height: 12),
         TextField(controller: _cantidad, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad a producir')),
         const SizedBox(height: 12),
+        SegmentedButton<String>(
+          segments: const [ButtonSegment(value: 'LOTES_COMPLETOS', label: Text('Lotes completos')), ButtonSegment(value: 'PROPORCIONAL', label: Text('Proporcional'))],
+          selected: {_criterio},
+          onSelectionChanged: (v) => setState(() => _criterio = v.first),
+        ),
+        const SizedBox(height: 12),
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.event_outlined),
@@ -260,6 +268,96 @@ class _NuevaOrdenState extends State<NuevaOrden> {
         const SizedBox(height: 8),
         FilledButton(onPressed: _enviando ? null : _crear, child: Text(_enviando ? 'Creando…' : 'Crear orden')),
       ]),
+    );
+  }
+}
+
+/* ------------------------------------------------ requisiciones de Almacén */
+/// A18/A19: Almacén entrega a Producción los insumos de cada orden; el stock baja al confirmar.
+class Requisiciones extends StatefulWidget {
+  const Requisiciones({super.key});
+  @override
+  State<Requisiciones> createState() => _RequisicionesState();
+}
+
+class _RequisicionesState extends State<Requisiciones> {
+  List<dynamic>? _lista;
+  String? _error;
+
+  Future<void> _cargar() async {
+    try {
+      final l = await Api.instancia.requisiciones();
+      if (mounted) setState(() { _lista = l; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _mensaje(e));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _entregar(Map<String, dynamic> r) async {
+    final lineas = ((r['lineas'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final ctrls = {for (final l in lineas) l['insumoId'] as String: TextEditingController(text: '${((l['solicitada'] as num) - (l['entregada'] as num)).clamp(0, double.infinity)}')};
+    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      title: Text('Entregar ${r['codigo']}'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('${r['op']} · ${r['producto']}'),
+        const SizedBox(height: 12),
+        for (final l in lineas) Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: TextField(controller: ctrls[l['insumoId']], keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: '${l['insumo']} (${l['unidad']})', helperText: 'Pide ${l['solicitada']} · stock ${l['stock']}')),
+        ),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmar entrega')),
+      ],
+    ));
+    if (ok != true || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final res = await Api.instancia.atenderRequisicion('${r['codigo']}', [
+        for (final l in lineas) {'insumoId': l['insumoId'], 'cantidad': double.tryParse(ctrls[l['insumoId']]!.text.replaceAll(',', '.')) ?? 0},
+      ]);
+      aviso.showSnackBar(SnackBar(content: Text('${r['codigo']}: ${res['estado'] == 'ATENDIDA' ? 'atendida' : 'atendida en parte'}')));
+      _cargar();
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lista = (_lista ?? const []).cast<Map<String, dynamic>>();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Requisiciones')),
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: _error != null
+            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            : _lista == null
+                ? const Center(child: CircularProgressIndicator())
+                : lista.isEmpty
+                    ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('Sin requisiciones por atender'))])
+                    : ListView.separated(
+                        itemCount: lista.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final r = lista[i];
+                          return ListTile(
+                            title: Text('${r['producto']}'),
+                            subtitle: Text('${r['codigo']} · ${r['op']} · ${(r['lineas'] as List).length} insumos'),
+                            trailing: Text(r['estado'] == 'PARCIAL' ? 'Parcial' : 'Pendiente'),
+                            onTap: () => _entregar(r),
+                          );
+                        },
+                      ),
+      ),
     );
   }
 }

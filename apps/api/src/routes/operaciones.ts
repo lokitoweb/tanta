@@ -78,12 +78,48 @@ export async function rutasOperaciones(app: FastifyInstance) {
     return reply.send({ codigo, estado: 'EN_PROCESO' });
   });
 
+  app.post('/ordenes-produccion/:codigo/anular', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'produccion.planificar')) return;
+    const { codigo } = req.params as { codigo: string };
+    const p = z.object({ motivo: z.string().trim().min(5).max(200) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo de la anulación (mínimo 5 caracteres).'));
+    try {
+      await tx(async (c) => {
+        const op = (await c.query<{ id: string; estado: string }>('SELECT id, estado FROM core.orden_produccion WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
+        if (!op) throw Object.assign(new Error('La orden no existe.'), { status: 404 });
+        if (!['PENDIENTE', 'EN_PROCESO'].includes(op.estado)) throw Object.assign(new Error(`Una orden ${op.estado.toLowerCase()} no se anula.`), { status: 409 });
+        const entregado = (await c.query<{ n: string }>(`SELECT coalesce(sum(d.cant_entregada), 0) n FROM core.requisicion q
+          JOIN core.requisicion_detalle d ON d.requisicion_id = q.id WHERE q.op_id = $1`, [op.id])).rows[0].n;
+        if (Number(entregado) > 0) throw Object.assign(new Error('Almacén ya entregó insumos: registra su devolución o merma antes de anular.'), { status: 409 });
+        await c.query("UPDATE core.requisicion SET estado = 'ANULADA' WHERE op_id = $1", [op.id]);
+        await c.query("UPDATE core.orden_produccion SET estado = 'ANULADA', motivo_anulacion = $2 WHERE id = $1", [op.id, p.data.motivo]);
+      });
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'OP_ANULADA', entidad: 'orden_produccion', entidadId: codigo, detalle: p.data, ip: req.ip });
+      return { codigo, estado: 'ANULADA' };
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'OP_NO_ANULABLE', err.message));
+    }
+  });
+
+  // A17: unidades buenas, merma en unidades con motivo del catálogo, tiempos y pesaje real.
+  // Acepta también el formato anterior (cantidadProducida + mermaReal en fracción) de apps sin actualizar.
   const CerrarOP = z.object({
-    cantidadProducida: z.number().positive().max(100_000),
+    unidadesBuenas: z.number().min(0).max(1_000_000).optional(),
+    cantidadProducida: z.number().positive().max(1_000_000).optional(),
+    unidadesMerma: z.number().min(0).max(1_000_000).optional(),
     mermaReal: z.number().min(0).max(0.9).default(0),
-    // PDF §3.2: la merma se registra con su motivo.
+    motivoMermaTipo: z.enum(['CORTE', 'ROTURA', 'QUEMADO', 'DEFORME', 'OTRO']).optional(),
     motivoMerma: z.string().trim().max(200).default(''),
-  }).refine((d) => d.mermaReal === 0 || d.motivoMerma.length >= 3, { message: 'Indica el motivo de la merma.', path: ['motivoMerma'] });
+    horasHombreReal: z.number().min(0).max(1000).optional(),
+    horasHornoReal: z.number().min(0).max(1000).optional(),
+    consumoReal: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().min(0).max(1_000_000) })).max(60).optional(),
+  }).refine((d) => d.unidadesBuenas !== undefined || d.cantidadProducida !== undefined, { message: 'Indica las unidades buenas.', path: ['unidadesBuenas'] })
+    .refine((d) => {
+      const merma = d.unidadesMerma ?? d.mermaReal;
+      return merma === 0 || !!d.motivoMermaTipo || d.motivoMerma.length >= 3;
+    }, { message: 'Indica el motivo de la merma.', path: ['motivoMerma'] });
 
   /**
    * Cerrar una OP mueve inventario de verdad, en una sola transacción:
@@ -94,15 +130,20 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const { codigo } = req.params as { codigo: string };
     const parseo = CerrarOP.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Cantidad producida inválida.'));
-    const { cantidadProducida, mermaReal, motivoMerma } = parseo.data;
+    const d = parseo.data;
+    const cantidadProducida = d.unidadesBuenas ?? d.cantidadProducida!;
+    // Merma en unidades; con el formato anterior se deriva de la fracción.
+    const unidadesMerma = d.unidadesMerma ?? (d.mermaReal > 0 ? Math.round(cantidadProducida * d.mermaReal / (1 - d.mermaReal)) : 0);
+    const mermaReal = cantidadProducida + unidadesMerma > 0 ? unidadesMerma / (cantidadProducida + unidadesMerma) : 0;
+    const motivoMerma = [d.motivoMermaTipo, d.motivoMerma].filter(Boolean).join(' · ');
 
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {
       const resultado = await conIdempotencia(clave, req.usuario!.id, `op-cerrar:${codigo}`, () =>
         tx(async (c) => {
-          const r = await c.query<{ id: string; estado: string; producto_id: string; producto: string; receta_id: string; cantidad: string }>(
-            'SELECT id, estado, producto_id, producto, receta_id, cantidad FROM core.orden_produccion WHERE codigo = $1 FOR UPDATE',
+          const r = await c.query<{ id: string; estado: string; producto_id: string; producto: string; receta_id: string; cantidad: string; lotes: string | null; masa_kg: string | null }>(
+            'SELECT id, estado, producto_id, producto, receta_id, cantidad, lotes, masa_kg FROM core.orden_produccion WHERE codigo = $1 FOR UPDATE',
             [codigo],
           );
           const op = r.rows[0];
@@ -111,6 +152,19 @@ export async function rutasOperaciones(app: FastifyInstance) {
             throw Object.assign(new Error(op.estado === 'PENDIENTE' ? 'Primero inicia la orden (Pendiente → En proceso).' : 'OP_ESTADO_INVALIDO'), { status: 409 });
           }
 
+          // Con requisición (RN-27) los insumos ya salieron cuando Almacén los entregó: aquí no se descuentan.
+          const requisicion = (await c.query<{ id: string; estado: string; codigo: string }>('SELECT id, estado, codigo FROM core.requisicion WHERE op_id = $1', [op.id])).rows[0];
+          if (requisicion && requisicion.estado === 'PENDIENTE') {
+            throw Object.assign(new Error(`Almacén aún no entrega los insumos (${requisicion.codigo}).`), { status: 409 });
+          }
+          const receta = (await c.query<{ unidades_teoricas: string; unidades_esperadas: string; horas_hombre_lote: string; horas_horno_lote: string }>(
+            `SELECT r.unidades_teoricas, r.unidades_esperadas, p.horas_hombre_lote, p.horas_horno_lote
+             FROM core.receta r JOIN core.producto p ON p.id = r.producto_id WHERE r.id = $1`, [op.receta_id])).rows[0];
+          const lotes = op.lotes !== null ? Number(op.lotes) : cantidadProducida / Math.max(Number(receta?.unidades_esperadas ?? 0), 1e-9);
+          // Unidades buenas + merma no superan lo preparado (lotes × unidades teóricas), con 5 % de holgura.
+          if (op.lotes !== null && cantidadProducida + unidadesMerma > lotes * Number(receta?.unidades_teoricas ?? 0) * 1.05 + 1) {
+            throw Object.assign(new Error(`Buenas + merma (${cantidadProducida + unidadesMerma}) superan lo preparado (${Math.round(lotes * Number(receta?.unidades_teoricas ?? 0))} unidades).`), { status: 422 });
+          }
           const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
             `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento AS cantidad
              FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
@@ -118,7 +172,14 @@ export async function rutasOperaciones(app: FastifyInstance) {
           );
 
           const consumidos: Array<{ insumo: string; cantidad: number }> = [];
-          for (const l of lineas.rows) {
+          let costoInsumos = 0;
+          if (requisicion) {
+            costoInsumos = Number((await c.query<{ c: string }>('SELECT coalesce(sum(costo_entregado), 0) c FROM core.requisicion_detalle WHERE requisicion_id = $1', [requisicion.id])).rows[0].c);
+            for (const x of d.consumoReal ?? []) {
+              await c.query('UPDATE core.requisicion_detalle SET cant_real_usada = $3 WHERE requisicion_id = $1 AND insumo_id = $2', [requisicion.id, x.insumoId, x.cantidad.toFixed(6)]);
+            }
+          }
+          for (const l of requisicion ? [] : lineas.rows) {
             const cantidadUsada = Number(l.cantidad) * cantidadProducida * (1 + mermaReal);
             const ins = await c.query<{ cpp: string; saldo: string }>(
               `SELECT i.cpp, coalesce((SELECT m.saldo_cantidad FROM core.movimiento_inventario m
@@ -150,13 +211,27 @@ export async function rutasOperaciones(app: FastifyInstance) {
             await c.query('UPDATE core.insumo SET stock = $1, actualizado_en = now() WHERE id = $2',
               [nuevoSaldo.toFixed(6), l.insumo_id]);
             consumidos.push({ insumo: l.insumo, cantidad: Number(cantidadUsada.toFixed(3)) });
+            costoInsumos += -valor;
           }
+
+          // RN-28: costo real de la OP = insumos entregados + mano de obra + CIF con las tarifas vigentes.
+          const t = (await c.query<Record<string, string | null>>(`SELECT
+              (SELECT costo_hora_hombre FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) hora,
+              (SELECT tarifa_hora_horno FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) th,
+              (SELECT tarifa_kg_masa FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tk,
+              (SELECT tarifa_unidad FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tu`)).rows[0];
+          const horasHombre = d.horasHombreReal ?? lotes * Number(receta?.horas_hombre_lote ?? 0);
+          const horasHorno = d.horasHornoReal ?? lotes * Number(receta?.horas_horno_lote ?? 0);
+          const costoMo = horasHombre * Number(t.hora ?? 0);
+          const costoCif = horasHorno * Number(t.th ?? 0) + Number(op.masa_kg ?? 0) * Number(t.tk ?? 0) + cantidadProducida * Number(t.tu ?? 0);
+          const costoTotal = costoInsumos + costoMo + costoCif;
 
           // ingreso del producto terminado al stock
           const pr = await c.query<{ costo_unitario: string; stock: string }>(
             'SELECT costo_unitario, stock FROM core.producto WHERE id = $1 FOR UPDATE', [op.producto_id],
           );
-          const costoProd = Number(pr.rows[0]?.costo_unitario ?? 0);
+          // El pan entra al almacén a su costo real (costo de la OP ÷ unidades buenas); sin unidades, al estándar.
+          const costoProd = cantidadProducida > 0 ? costoTotal / cantidadProducida : Number(pr.rows[0]?.costo_unitario ?? 0);
           const stockProd = Number(pr.rows[0]?.stock ?? 0);
           const nuevoStockProd = stockProd + cantidadProducida;
 
@@ -172,20 +247,25 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
           await c.query(
             `UPDATE core.orden_produccion
-             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3, motivo_merma = $4
+             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3, motivo_merma = $4,
+                 unidades_buenas = $3, unidades_merma = $5, motivo_merma_tipo = $6, horas_hombre_real = $7, horas_horno_real = $8,
+                 costo_total = $9, costo_unitario_real = $10
              WHERE id = $1`,
-            [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma],
+            [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma, unidadesMerma.toFixed(4), d.motivoMermaTipo ?? null,
+              horasHombre.toFixed(3), horasHorno.toFixed(3), costoTotal.toFixed(4), costoProd.toFixed(6)],
           );
           await c.query('SELECT core.recalcular_costos()');
 
-          return { codigo, estado: 'TERMINADA', producto: op.producto, cantidadProducida, consumidos };
+          return { codigo, estado: 'TERMINADA', producto: op.producto, cantidadProducida, unidadesMerma, consumidos,
+            costoTotal: Number(costoTotal.toFixed(2)), costoUnitario: Number(costoProd.toFixed(4)),
+            desglose: { insumos: Number(costoInsumos.toFixed(2)), manoDeObra: Number(costoMo.toFixed(2)), cif: Number(costoCif.toFixed(2)) } };
         }),
       );
 
       await auditar({
         actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
         accion: 'OP_CERRADA', entidad: 'orden_produccion', entidadId: codigo,
-        detalle: { cantidadProducida, mermaReal }, ip: req.ip,
+        detalle: { cantidadProducida, unidadesMerma, motivoMerma }, ip: req.ip,
       });
       return reply.send(resultado);
     } catch (e) {

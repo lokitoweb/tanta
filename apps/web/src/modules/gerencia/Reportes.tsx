@@ -11,10 +11,10 @@ import { useApp } from '@/core/app-state';
 interface Catalogo { codigo: string; titulo: string; columnas: ColRep[] }
 interface Resultado extends Catalogo { filas: Array<Record<string, unknown>>; resumen?: Record<string, unknown>; generadoEn: string }
 
-const GRUPOS: Record<string, string> = { G: 'Gerencia', V: 'Ventas y cobranza', A: 'Almacén', M: 'Maestros' };
+const GRUPOS: Record<string, string> = { G: 'Gerencia', V: 'Ventas y cobranza', A: 'Almacén', P: 'Producción', M: 'Maestros' };
 // Qué filtros tiene sentido mostrar en cada reporte (el resto no los usa).
 const CAMPOS: Record<string, Array<'categoria' | 'producto' | 'cliente' | 'vendedor'>> = {
-  'G-08': [], 'G-09': ['categoria'], 'G-10': [], 'G-11': [], 'G-12': [], 'G-13': [], 'V-01': ['cliente'], 'V-02': ['cliente'], 'A-01': ['producto'], 'A-02': [], 'M-01': ['producto'],
+  'G-08': [], 'G-09': ['categoria'], 'G-10': [], 'G-11': [], 'G-12': [], 'G-13': [], 'V-01': ['cliente'], 'V-02': ['cliente'], 'A-01': ['producto'], 'A-02': [], 'P-01': [], 'P-02': ['producto'], 'M-01': ['producto'],
 };
 
 const RESUMEN: Record<string, (r: Record<string, unknown>) => Array<[string, string]>> = {

@@ -10,6 +10,7 @@ import { Recetas } from '@/modules/maestros/Recetas';
 import { Produccion } from '@/modules/produccion/Produccion';
 import { Almacen } from '@/modules/almacen/Almacen';
 import { Kardex } from '@/modules/almacen/Kardex';
+import { Requisiciones } from '@/modules/almacen/Requisiciones';
 import { Pedidos } from '@/modules/ventas/Pedidos';
 import { Cobranza } from '@/modules/ventas/Cobranza';
 import { Catalogo } from '@/modules/cliente/Catalogo';
@@ -37,6 +38,7 @@ export function App() {
 
         <Route path="/produccion" element={<Gate permiso="produccion.ver" siNo={<SinAcceso />}><Produccion /></Gate>} />
         <Route path="/almacen" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Almacen /></Gate>} />
+        <Route path="/almacen/requisiciones" element={<Gate permiso="requisiciones.atender" siNo={<SinAcceso />}><Requisiciones /></Gate>} />
         <Route path="/almacen/kardex" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Kardex /></Gate>} />
 
         <Route path="/ventas/pedidos" element={<Gate permiso="pedidos.ver" siNo={<SinAcceso />}><Pedidos /></Gate>} />
