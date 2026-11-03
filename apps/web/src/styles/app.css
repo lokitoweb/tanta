@@ -1201,3 +1201,4 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 @keyframes entrar { from { opacity: 0; transform: translateY(24px) rotateX(12deg) scale(.96); } to { opacity: 1; } }
 @keyframes reflejo { 0%, 70% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
 @media (prefers-reduced-motion: reduce) { .tarjeta3d__tarjeta, .tarjeta3d__tarjeta::after { animation: none; } }
+.tarjeta3d .brandmark-img { display: block; margin: 0 auto; object-fit: contain; }
