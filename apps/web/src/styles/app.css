@@ -1214,3 +1214,7 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 /* Logo centrado en la cabecera del menú, con el botón de fijar a la derecha */
 .sidebar__logo { flex: 1; display: flex; justify-content: center; }
 .sidebar__logo .brandmark { align-items: center; }
+
+/* Menú: barra de desplazamiento fina visible solo con el menú abierto (fijo o al pasar el mouse); cerrado, oculta. */
+.shell--fijo .sidebar__nav, .shell:not(.shell--cerrado) .sidebar:is(:hover, :focus-within) .sidebar__nav { scrollbar-width: thin; }
+.shell--fijo .sidebar__nav::-webkit-scrollbar, .shell:not(.shell--cerrado) .sidebar:is(:hover, :focus-within) .sidebar__nav::-webkit-scrollbar { display: block; width: 6px; }

@@ -27,16 +27,8 @@ export function Panel() {
     <>
       <div className="saludo">
         <div>
-          <p className="saludo__eyebrow">{hoyLargo()}</p>
           <h1 className="saludo__title">{saludo}, {primerNombre}</h1>
           <p className="saludo__sub">{rol.nombre} · {rol.descripcion}</p>
-        </div>
-        <div className="saludo__periodo">
-          <span>Período</span>
-          <b>{dataset.periodo.etiqueta}</b>
-          <Insignia tono={dataset.periodo.estado === 'PROVISIONAL' ? 'warn' : 'ok'} punto>
-            {dataset.periodo.estado === 'PROVISIONAL' ? 'Provisional' : 'Definitivo'}
-          </Insignia>
         </div>
       </div>
 

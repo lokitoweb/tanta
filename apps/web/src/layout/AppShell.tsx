@@ -90,11 +90,10 @@ export function AppShell() {
           </div>
 
           <div className="topbar__right">
-            <span className="chip chip--periodo" title="Período de costos">
+            <span className="chip chip--periodo" title={`Período de costos: ${dataset.periodo.etiqueta}`}>
               <Icon name="clock" size={14} />
-              <span className="chip__dia">{fechaCorta(new Date())}</span>
+              <span className="chip__dia">{fechaCorta(new Date())} {new Date().getFullYear()}</span>
               <span className="chip__sep" aria-hidden />
-              {dataset.periodo.etiqueta}
               <b className="chip__estado">{dataset.periodo.estado === 'PROVISIONAL' ? 'Provisional' : 'Definitivo'}</b>
             </span>
             <span className="chip chip--sync" title="Conectado">
