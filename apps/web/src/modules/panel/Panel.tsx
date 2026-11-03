@@ -3,7 +3,10 @@ import { useApp } from '@/core/app-state';
 import { money, num, pct, semaforo } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
 import { Icon, type NombreIcono } from '@/ui/icons';
-import { hoyLargo } from '@/core/fecha';
+import { useState } from 'react';
+import { api } from '@/core/api';
+import { useEnVivo, aQuery, rango as rangoDias } from '@/ui/Filtros';
+import { SelectorFechas, etiquetaRango, type Rango } from '@/ui/SelectorFechas';
 
 export function Panel() {
   const { dataset, rol, sesion, navegacionVisible, puede } = useApp();
@@ -17,6 +20,18 @@ export function Panel() {
   const vista = puede('costos.ver') ? 'GERENCIA' : puede('produccion.ejecutar') ? 'PRODUCCION'
     : puede('inventario.mover') ? 'ALMACEN' : puede('cobranza.ver') ? 'VENDEDOR' : puede('catalogo.ver') ? 'CLIENTE' : 'SOPORTE';
   const k = dataset.kpis;
+  // Ventas y utilidad del rango elegido, recalculadas cada 30 s (solo perfiles con tablero).
+  const conTablero = puede('dashboard.ver');
+  const [rango, setRango] = useState<Rango>(() => rangoDias(30));
+  const [res, setRes] = useState<Record<string, { actual: number; variacion: number }> | null>(null);
+  const hace = useEnVivo(async () => {
+    if (!conTablero) return;
+    const r = await api<{ filas: Array<{ indicador: string; actual: number; variacion: number }> }>(`/reportes/G-01${aQuery(rango)}`);
+    setRes(Object.fromEntries(r.filas.map((x) => [x.indicador, x])));
+  }, [rango.desde, rango.hasta, conTablero], 30);
+  const ventas = res?.['Ventas netas'] ?? { actual: k.ventasNetas, variacion: k.variacionVentas };
+  const utilidad = res?.['Utilidad bruta']?.actual ?? k.utilidadBruta;
+  const margen = res?.['Margen bruto %']?.actual ?? k.margen;
   const hora = new Date().getHours();
   const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
   const primerNombre = sesion.usuario.nombre.split(' ')[0];
@@ -30,6 +45,12 @@ export function Panel() {
           <h1 className="saludo__title">{saludo}, {primerNombre}</h1>
           <p className="saludo__sub">{rol.nombre} · {rol.descripcion}</p>
         </div>
+        {conTablero && (
+          <div className="saludo__acciones">
+            <span className="en-vivo" title="Se actualiza solo cada 30 segundos"><i />En vivo · {hace === null ? 'cargando' : hace < 5 ? 'recién actualizado' : `hace ${hace} s`}</span>
+            <SelectorFechas valor={rango} onChange={setRango} />
+          </div>
+        )}
       </div>
 
       {vista === 'SOPORTE' ? (
@@ -45,8 +66,8 @@ export function Panel() {
           <div className="grid grid--auto">
             {vista === 'GERENCIA' && (
               <>
-                <Kpi label="Ventas netas" valor={money(k.ventasNetas)} delta={pct(k.variacionVentas)} deltaTono={k.variacionVentas >= 0 ? 'up' : 'down'} nota="30 días" icono="up" />
-                <Kpi label="Utilidad bruta" valor={money(k.utilidadBruta)} nota={pct(k.margen) + ' de margen'} icono="spark" />
+                <Kpi label="Ventas netas" valor={money(ventas.actual)} delta={pct(ventas.variacion)} deltaTono={ventas.variacion >= 0 ? 'up' : 'down'} nota={`${etiquetaRango(rango).toLowerCase()} · vs. período anterior`} icono="up" />
+                <Kpi label="Utilidad bruta" valor={money(utilidad)} nota={pct(margen) + ' de margen'} icono="spark" />
                 <Kpi label="Por cobrar" valor={money(k.porCobrar)} nota={money(k.vencido) + ' vencido'} icono="wallet" />
                 <Kpi label="Productos activos" valor={num(dataset.productos.length)} nota={`${dataset.recetas.length} recetas vigentes`} icono="bread" />
               </>

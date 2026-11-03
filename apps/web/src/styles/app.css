@@ -1218,3 +1218,46 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 /* Menú: barra de desplazamiento fina visible solo con el menú abierto (fijo o al pasar el mouse); cerrado, oculta. */
 .shell--fijo .sidebar__nav, .shell:not(.shell--cerrado) .sidebar:is(:hover, :focus-within) .sidebar__nav { scrollbar-width: thin; }
 .shell--fijo .sidebar__nav::-webkit-scrollbar, .shell:not(.shell--cerrado) .sidebar:is(:hover, :focus-within) .sidebar__nav::-webkit-scrollbar { display: block; width: 6px; }
+
+/* Selector de rango de fechas */
+.fechas { position: relative; }
+.fechas__boton { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--tanta-border-default); border-radius: 10px; background: var(--tanta-surface-card); font-size: .8125rem; color: var(--tanta-text-secondary); white-space: nowrap; }
+.fechas__boton:hover, .fechas__boton[aria-expanded="true"] { border-color: var(--tanta-ink-800); }
+.fechas__boton b { color: var(--tanta-text-primary); font-weight: 600; }
+.fechas__boton > svg { color: var(--tanta-text-muted); }
+.fechas__sep { width: 1px; height: 14px; background: var(--tanta-border-default); }
+.fechas__panel { position: absolute; z-index: 31; top: calc(100% + 8px); right: 0; display: grid; grid-template-columns: 190px 340px; background: var(--tanta-surface-card); border: 1px solid var(--tanta-border-subtle); border-radius: 14px; box-shadow: 0 24px 48px -12px rgba(30,20,15,.25); overflow: hidden; animation: subir 160ms cubic-bezier(.2,.8,.2,1); }
+.filtros .fechas__panel { right: auto; left: 0; }
+.fechas__atajos { background: var(--tanta-neutral-50); border-right: 1px solid var(--tanta-border-subtle); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+.fechas__atajos p { font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--tanta-text-muted); padding: 4px 10px 8px; }
+.fechas__atajos button { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border-radius: 8px; font-size: .875rem; color: var(--tanta-text-secondary); text-align: left; }
+.fechas__atajos button:hover { background: var(--tanta-surface-card); color: var(--tanta-text-primary); }
+.fechas__atajos button.is-active { background: var(--tanta-ink-800); color: var(--tanta-cream-50); font-weight: 600; }
+.fechas__cal { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.fechas__campos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fechas__campos label { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border: 1px solid var(--tanta-border-default); border-radius: 8px; }
+.fechas__campos label.is-activo { border-color: var(--tanta-ink-800); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tanta-ink-800) 10%, transparent); }
+.fechas__campos span { font-size: .625rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--tanta-text-muted); }
+.fechas__campos input { border: 0; padding: 0; font: inherit; font-size: .875rem; font-weight: 600; background: transparent; color: var(--tanta-text-primary); }
+.fechas__mes { display: flex; align-items: center; justify-content: space-between; }
+.fechas__mes b { font-size: .9375rem; }
+.fechas__mes button { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--tanta-text-secondary); }
+.fechas__mes button:hover { background: var(--tanta-neutral-50); }
+.fechas__mes button:first-child svg { rotate: 180deg; }
+.fechas__grilla { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.fechas__dsem { text-align: center; font-size: .6875rem; font-weight: 600; color: var(--tanta-text-muted); padding: 4px 0; }
+.fechas__grilla button { height: 36px; border-radius: 8px; font-size: .875rem; color: var(--tanta-text-primary); font-variant-numeric: tabular-nums; }
+.fechas__grilla button:hover { background: var(--tanta-neutral-50); }
+.fechas__grilla button.is-fuera { color: var(--tanta-text-muted); opacity: .5; }
+.fechas__grilla button.is-rango { background: color-mix(in srgb, var(--tanta-ink-800) 9%, transparent); border-radius: 0; }
+.fechas__grilla button.is-borde { background: var(--tanta-ink-800); color: var(--tanta-cream-50); font-weight: 650; border-radius: 8px; }
+.fechas__grilla button.is-hoy:not(.is-borde) { box-shadow: inset 0 0 0 1.5px var(--tanta-ink-800); }
+.fechas__pie { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--tanta-border-subtle); font-size: .75rem; color: var(--tanta-text-muted); }
+@media (max-width: 640px) { .fechas__panel { grid-template-columns: 1fr; right: auto; left: 0; width: calc(100vw - 32px); } .fechas__atajos { flex-direction: row; flex-wrap: wrap; border-right: 0; } .fechas__atajos p { width: 100%; } }
+
+/* Saludo del panel con selector y estado en vivo a la derecha */
+.saludo__acciones { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.en-vivo { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--tanta-text-muted); white-space: nowrap; }
+.en-vivo i { width: 7px; height: 7px; border-radius: 50%; background: var(--tanta-state-ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--tanta-state-ok) 60%, transparent); animation: latido 2s infinite; }
+@keyframes latido { 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.filtros .fechas__boton { height: 34px; border-radius: var(--tanta-radius-sm); }

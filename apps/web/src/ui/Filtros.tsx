@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
+import { SelectorFechas } from '@/ui/SelectorFechas';
 
 export interface Filtros { desde: string; hasta: string; categoria?: string; producto?: string; cliente?: string; vendedor?: string }
 interface Opciones { categorias: Array<{ id: string; nombre: string }>; productos: Array<{ id: string; nombre: string }>; clientes: Array<{ id: string; nombre: string }>; vendedores: string[] }
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
-export const rango = (dias: number): Pick<Filtros, 'desde' | 'hasta'> => ({ desde: iso(new Date(Date.now() - (dias - 1) * 86_400_000)), hasta: iso(new Date()) });
+// Fecha local (Lima), no UTC: de noche el UTC ya es "mañana".
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const rango = (dias: number): Pick<Filtros, 'desde' | 'hasta'> => { const h = new Date(); return { desde: iso(new Date(h.getFullYear(), h.getMonth(), h.getDate() - (dias - 1))), hasta: iso(h) }; };
 export const aQuery = (f: Filtros) => '?' + new URLSearchParams(Object.entries(f).filter(([, v]) => v) as Array<[string, string]>).toString();
 
 let opcionesCache: Promise<Opciones> | null = null;
@@ -16,18 +18,11 @@ export function BarraFiltros({ valor, onChange, campos = ['categoria', 'producto
 }) {
   const [op, setOp] = useState<Opciones | null>(null);
   useEffect(() => { (opcionesCache ??= api<Opciones>('/reportes-filtros')).then(setOp).catch(() => { opcionesCache = null; }); }, []);
-  const dias = Math.round((Date.parse(valor.hasta) - Date.parse(valor.desde)) / 86_400_000) + 1;
   const set = (k: keyof Filtros, v: string) => onChange({ ...valor, [k]: v || undefined });
 
   return (
     <div className="filtros" role="search">
-      <div className="filtros__campo"><span>Rango</span><div className="filtros__rapidos" role="group" aria-label="Rango rápido">
-        {[7, 30, 90].map((n) => (
-          <button key={n} className={`chipfilter ${dias === n && valor.hasta === iso(new Date()) ? 'is-active' : ''}`} onClick={() => onChange({ ...valor, ...rango(n) })}>{n} días</button>
-        ))}
-      </div></div>
-      <label className="filtros__campo"><span>Desde</span><input type="date" value={valor.desde} max={valor.hasta} onChange={(e) => e.target.value && set('desde', e.target.value)} /></label>
-      <label className="filtros__campo"><span>Hasta</span><input type="date" value={valor.hasta} min={valor.desde} onChange={(e) => e.target.value && set('hasta', e.target.value)} /></label>
+      <div className="filtros__campo"><span>Fechas</span><SelectorFechas valor={valor} onChange={(r) => onChange({ ...valor, ...r })} /></div>
       {campos.includes('categoria') && (
         <label className="filtros__campo"><span>Categoría</span>
           <select value={valor.categoria ?? ''} onChange={(e) => set('categoria', e.target.value)}><option value="">Todas</option>{op?.categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select>
