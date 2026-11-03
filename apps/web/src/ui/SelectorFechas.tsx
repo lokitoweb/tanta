@@ -41,7 +41,7 @@ export function SelectorFechas({ valor, onChange }: { valor: Rango; onChange: (r
   const abrir = () => { setBorrador(valor); setEligiendoFin(false); const d = deIso(valor.hasta); setMes(new Date(d.getFullYear(), d.getMonth(), 1)); setAbierto(true); };
   const aplicar = (r = borrador) => { onChange(r); setAbierto(false); };
   const elegir = (d: string) => {
-    if (!eligiendoFin) { setBorrador({ desde: d, hasta: d }); setEligiendoFin(true); return; }
+    if (!eligiendoFin) { setBorrador({ desde: d, hasta: d > borrador.hasta ? d : borrador.hasta }); setEligiendoFin(true); return; }
     setBorrador(d < borrador.desde ? { desde: d, hasta: borrador.desde } : { desde: borrador.desde, hasta: d });
     setEligiendoFin(false);
   };
@@ -73,10 +73,9 @@ export function SelectorFechas({ valor, onChange }: { valor: Rango; onChange: (r
             </div>
             <div className="fechas__cal">
               <div className="fechas__campos">
-                <label className={!eligiendoFin ? 'is-activo' : ''}><span>Desde</span>
-                  <input type="date" value={borrador.desde} max={borrador.hasta} onChange={(e) => e.target.value && setBorrador({ ...borrador, desde: e.target.value })} /></label>
-                <label className={eligiendoFin ? 'is-activo' : ''}><span>Hasta</span>
-                  <input type="date" value={borrador.hasta} min={borrador.desde} onChange={(e) => e.target.value && setBorrador({ ...borrador, hasta: e.target.value })} /></label>
+                {/* Solo muestran la fecha: se eligen en el calendario de abajo (sin un segundo calendario). */}
+                <button type="button" className={!eligiendoFin ? 'is-activo' : ''} onClick={() => setEligiendoFin(false)}><span>Desde</span><b>{dmy(borrador.desde)}</b></button>
+                <button type="button" className={eligiendoFin ? 'is-activo' : ''} onClick={() => setEligiendoFin(true)}><span>Hasta</span><b>{dmy(borrador.hasta)}</b></button>
               </div>
               <div className="fechas__mes">
                 <button type="button" aria-label="Mes anterior" onClick={() => setMes(new Date(mes.getFullYear(), mes.getMonth() - 1, 1))}><Icon name="chevron" size={16} /></button>

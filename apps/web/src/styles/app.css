@@ -1261,3 +1261,17 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .en-vivo i { width: 7px; height: 7px; border-radius: 50%; background: var(--tanta-state-ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--tanta-state-ok) 60%, transparent); animation: latido 2s infinite; }
 @keyframes latido { 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 .filtros .fechas__boton { height: 34px; border-radius: var(--tanta-radius-sm); }
+
+/* Selector de fechas: esquinas sobrias y sin anillos de foco al hacer clic (solo con teclado) */
+.fechas__boton { border-radius: 6px; }
+.fechas__panel { border-radius: 8px; }
+.fechas__atajos button, .fechas__mes button, .fechas__grilla button, .fechas__grilla button.is-borde { border-radius: 4px; }
+.fechas__campos button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 10px; border: 1px solid var(--tanta-border-default); border-radius: 6px; text-align: left; }
+.fechas__campos button.is-activo { border-color: var(--tanta-ink-800); box-shadow: none; }
+.fechas__campos b { font-size: .875rem; font-weight: 600; color: var(--tanta-text-primary); font-variant-numeric: tabular-nums; }
+.fechas :is(button, input):focus:not(:focus-visible) { outline: none; box-shadow: none; }
+.fechas :is(button):focus-visible { outline: 2px solid var(--tanta-ink-800); outline-offset: 1px; }
+/* Hoy: punto discreto bajo el número en vez de un recuadro */
+.fechas__grilla button.is-hoy:not(.is-borde) { box-shadow: none; position: relative; font-weight: 650; }
+.fechas__grilla button.is-hoy:not(.is-borde)::after { content: ''; position: absolute; left: 50%; bottom: 5px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--tanta-ink-800); }
+.fechas__pie .btn { border-radius: 6px; }
