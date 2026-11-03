@@ -1207,3 +1207,10 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .field__grupo--icono > svg { top: 0; bottom: 0; margin: auto 0; transform: none; translate: none; }
 .acceso__recordar { font-size: .8125rem; color: var(--tanta-text-secondary); gap: 8px; margin-top: -2px; }
 .acceso__recordar input { width: 16px; height: 16px; accent-color: var(--tanta-ink-800); }
+
+/* Menú: el icono queda en el centro exacto del recuadro de 48 px al colapsar (15 + 18 + 15),
+   y en la misma posición al expandir (sin salto). */
+.sidebar .navitem { padding-inline: 15px; }
+/* Logo centrado en la cabecera del menú, con el botón de fijar a la derecha */
+.sidebar__logo { flex: 1; display: flex; justify-content: center; }
+.sidebar__logo .brandmark { align-items: center; }
