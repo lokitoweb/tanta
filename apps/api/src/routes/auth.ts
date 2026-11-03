@@ -14,6 +14,8 @@ import { invalidar } from '../cache.js';
 const Login = z.object({
   usuario: z.string().min(1).max(80),
   clave: z.string().min(1).max(200),
+  // "Mantener sesión iniciada": sin él, la sesión muere al cerrar el navegador (y como máximo en 12 h).
+  recordar: z.boolean().default(true),
 });
 
 const Refresh = z.object({ refreshToken: z.string().min(10).max(200).optional() });
@@ -36,13 +38,14 @@ function esNavegador(req: { headers: Record<string, unknown> }): boolean {
   return Boolean(req.headers.origin);
 }
 
-function ponerCookie(reply: FastifyReply, token: string) {
+function ponerCookie(reply: FastifyReply, token: string, recordar = true) {
   reply.setCookie(COOKIE, token, {
     httpOnly: true,          // JavaScript no puede leerla: un XSS no se lleva la sesión
     secure: ES_PROD,         // solo por HTTPS en producción
     sameSite: 'strict',
     path: '/api/v1/auth',
-    maxAge: REFRESCO_DIAS * 24 * 60 * 60,
+    // Sin maxAge es cookie de sesión: el navegador la borra al cerrarse.
+    ...(recordar ? { maxAge: REFRESCO_DIAS * 24 * 60 * 60 } : {}),
   });
 }
 
@@ -142,7 +145,7 @@ export async function rutasAuth(app: FastifyInstance) {
       return reply.send({ mfaEnrolamiento: true, ticket, usuario: { nombre: fila.nombre } });
     }
 
-    return emitirSesion(req, reply, fila.id, fila.nombre, rol);
+    return emitirSesion(req, reply, fila.id, fila.nombre, rol, undefined, parseo.data.recordar);
   });
 
   /** POST /auth/mfa/enrolar — genera el secreto y la URL para la app autenticadora. */
@@ -240,8 +243,8 @@ export async function rutasAuth(app: FastifyInstance) {
 
     return tx(async (c) => {
       const hash = sha256(token);
-      const r = await c.query<{ id: string; usuario_id: string; familia: string; revocado_en: string | null; expira_en: string }>(
-        'SELECT id, usuario_id, familia, revocado_en, expira_en FROM core.refresh_token WHERE token_hash = $1 FOR UPDATE',
+      const r = await c.query<{ id: string; usuario_id: string; familia: string; revocado_en: string | null; expira_en: string; creado_en: string }>(
+        'SELECT id, usuario_id, familia, revocado_en, expira_en, creado_en FROM core.refresh_token WHERE token_hash = $1 FOR UPDATE',
         [hash],
       );
       const fila = r.rows[0];
@@ -269,13 +272,15 @@ export async function rutasAuth(app: FastifyInstance) {
 
       await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE id = $1', [fila.id]);
       const { token: nuevoToken, hash: nuevoHash } = nuevoRefreshToken();
+      // La sesión sin "recordar" (vida < 1 día) sigue siendo corta al renovarse.
+      const recordar = Date.parse(fila.expira_en) - Date.parse(fila.creado_en) > 86_400_000;
       await c.query(
         `INSERT INTO core.refresh_token (usuario_id, token_hash, familia, expira_en)
-         VALUES ($1,$2,$3, now() + interval '${REFRESCO_DIAS} days')`,
-        [fila.usuario_id, nuevoHash, fila.familia],
+         VALUES ($1,$2,$3, now() + $4::interval)`,
+        [fila.usuario_id, nuevoHash, fila.familia, recordar ? `${REFRESCO_DIAS} days` : '12 hours'],
       );
 
-      ponerCookie(reply, nuevoToken);
+      ponerCookie(reply, nuevoToken, recordar);
       const acceso = await firmarAcceso({ sub: u.id, nombre: u.nombre, rol, pv: 1 });
       return reply.send({
         accessToken: acceso,
@@ -435,6 +440,7 @@ export async function rutasAuth(app: FastifyInstance) {
     nombre: string,
     rol: string,
     codigosRecuperacion?: string[],
+    recordar = true,
   ) {
     const permisos = await permisosDeRol(rol);
     const acceso = await firmarAcceso({ sub: usuarioId, nombre, rol, pv: 1 });
@@ -443,13 +449,13 @@ export async function rutasAuth(app: FastifyInstance) {
 
     await q(
       `INSERT INTO core.refresh_token (usuario_id, token_hash, familia, expira_en)
-       VALUES ($1,$2,$3, now() + interval '${REFRESCO_DIAS} days')`,
-      [usuarioId, hash, familia],
+       VALUES ($1,$2,$3, now() + $4::interval)`,
+      [usuarioId, hash, familia, recordar ? `${REFRESCO_DIAS} days` : '12 hours'],
     );
     await q('UPDATE core.usuario SET ultimo_acceso = now() WHERE id = $1', [usuarioId]);
     await auditar({ actorId: usuarioId, actor: nombre, rol, accion: 'LOGIN', entidad: 'usuario', entidadId: usuarioId, ip: req.ip });
 
-    ponerCookie(reply, token);
+    ponerCookie(reply, token, recordar);
     return reply.send({
       accessToken: acceso,
       expiraEn: ACCESO_MIN * 60,

@@ -1202,3 +1202,8 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 @keyframes reflejo { 0%, 70% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
 @media (prefers-reduced-motion: reduce) { .tarjeta3d__tarjeta, .tarjeta3d__tarjeta::after { animation: none; } }
 .tarjeta3d .brandmark-img { display: block; margin: 0 auto; object-fit: contain; }
+
+/* Icono del campo: centrado vertical exacto (antes se sumaban dos desplazamientos) */
+.field__grupo--icono > svg { top: 0; bottom: 0; margin: auto 0; transform: none; translate: none; }
+.acceso__recordar { font-size: .8125rem; color: var(--tanta-text-secondary); gap: 8px; margin-top: -2px; }
+.acceso__recordar input { width: 16px; height: 16px; accent-color: var(--tanta-ink-800); }

@@ -160,10 +160,10 @@ export interface PideEnrolamiento {
 
 export type RespuestaLogin = SesionOk | PideSegundoFactor | PideEnrolamiento;
 
-export async function login(usuario: string, clave: string): Promise<RespuestaLogin> {
+export async function login(usuario: string, clave: string, recordar = true): Promise<RespuestaLogin> {
   const r = await api<RespuestaLogin>('/auth/login', {
     method: 'POST',
-    body: { usuario, clave },
+    body: { usuario, clave, recordar },
     sinAuth: true,
   });
   if ('accessToken' in r) guardarAcceso(r.accessToken);

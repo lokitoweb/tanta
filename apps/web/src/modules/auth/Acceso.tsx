@@ -32,6 +32,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
   const [error, setError] = useState<string | undefined>();
   const [trabajando, setTrabajando] = useState(false);
   const [verClave, setVerClave] = useState(false);
+  const [recordar, setRecordar] = useState(() => { try { return localStorage.getItem('tanta.recordar') !== '0'; } catch { return true; } });
   const [usarRecuperacion, setUsarRecuperacion] = useState(false);
   const [mayus, setMayus] = useState(false);
   const [recuperando, setRecuperando] = useState(false);
@@ -45,7 +46,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
     setError(undefined);
     setTrabajando(true);
     try {
-      const r = await login(usuario.trim(), clave);
+      const r = await login(usuario.trim(), clave, recordar);
       if ('accessToken' in r) {
         onSesion();
         return;
@@ -185,6 +186,12 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                 </div>
                 {mayus && <span className="field__aviso"><Icon name="alert" size={13} /> Bloq Mayús está activado</span>}
               </div>
+
+              <label className="check acceso__recordar">
+                <input type="checkbox" checked={recordar}
+                  onChange={(e) => { setRecordar(e.target.checked); try { localStorage.setItem('tanta.recordar', e.target.checked ? '1' : '0'); } catch { /* sin almacenamiento */ } }} />
+                Mantener sesión iniciada
+              </label>
               {avisoOk && <p className="form__ok" role="status"><Icon name="check" size={15} /> {avisoOk}</p>}
               {error && (
                 <p className="form__error" role="alert">
