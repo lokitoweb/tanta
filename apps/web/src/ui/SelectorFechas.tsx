@@ -96,7 +96,7 @@ export function SelectorFechas({ valor, onChange }: { valor: Rango; onChange: (r
                 })}
               </div>
               <div className="fechas__pie">
-                <span>{eligiendoFin ? 'Ahora elige la fecha final.' : 'Elige la fecha inicial. Se incluyen ambos días.'}</span>
+                <span>{eligiendoFin ? 'Elige el día final' : 'Elige el día inicial'}</span>
                 <button type="button" className="btn btn--primary btn--sm" onClick={() => aplicar()}>Aplicar</button>
               </div>
             </div>

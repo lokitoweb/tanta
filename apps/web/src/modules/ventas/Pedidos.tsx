@@ -1,3 +1,4 @@
+import { Paginador, usePaginado } from '@/ui/Paginador';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
@@ -59,6 +60,7 @@ export function Pedidos() {
   });
 
   const gestiona = puede('pedidos.gestionar');
+  const pagPedidos = usePaginado(filas, 25);
   return (
     <>
       <Encabezado titulo="Pedidos" descripcion="Del registro del cliente al despacho · cada cambio queda auditado"
@@ -88,7 +90,7 @@ export function Pedidos() {
         {filas.length === 0 ? <Vacio titulo="Sin pedidos" detalle="No hay pedidos con este filtro." icono="clipboard" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Pedido</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th className="t-right">Total</th><th className="t-right">Estado</th></tr></thead>
-            <tbody>{filas.map((p) => (
+            <tbody>{pagPedidos.visibles.map((p) => (
               <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: 'EFECTIVO', descuento: '0' }); setSel(p); }}>
                 <td><strong className="mono">{p.codigo}</strong>{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
                 <td>{p.cliente}</td>
@@ -99,6 +101,7 @@ export function Pedidos() {
               </tr>))}</tbody>
           </table></div>
         )}
+        <Paginador {...pagPedidos} />
         <div className="card__foot"><span className="t-muted">{num(filas.length)} pedidos · {money(filas.reduce((s, p) => s + p.total, 0))} en total</span></div>
       </Tarjeta>
 

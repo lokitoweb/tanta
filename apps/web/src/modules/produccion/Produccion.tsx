@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { num, num2, pct } from '@/core/format';
-import { Boton, Encabezado, Insignia, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Paginador, filtrarTexto, usePaginado } from '@/ui/Paginador';
 import { Dialogo } from '@/ui/Dialogo';
 import { Icon } from '@/ui/icons';
 import { desdeIso } from '@/core/fecha';
@@ -28,6 +29,9 @@ export function Produccion() {
   const [cerrar, setCerrar] = useState<{ op: Op; cantidad: string; merma: string; motivo: string } | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger' | 'warn'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const [tabOp, setTabOp] = useState<Op['estado']>('EN_PROCESO');
+  const [qOp, setQOp] = useState('');
+  const pagOps = usePaginado(filtrarTexto(ops.filter((o) => o.estado === tabOp), qOp), 10);
 
   const cargarConsolidado = () => api<Consolidado[]>('/produccion/consolidado').then(setConsolidado).catch(() => setConsolidado([]));
   useEffect(() => { void cargarConsolidado(); }, [dataset.ops]);
@@ -104,37 +108,53 @@ export function Produccion() {
         )}
       </Tarjeta>
 
-      <div className="board">
-        {COLUMNAS.map((col) => {
-          const items = ops.filter((o) => o.estado === col.id);
-          return (
-            <section className="board__col" key={col.id}>
-              <header className="board__head"><h3>{col.titulo}</h3><Insignia tono={col.tono}>{items.length}</Insignia></header>
-              <div className="board__list">
-                {items.map((op) => (
-                  <article className={`opcard opcard--${col.id.toLowerCase()}`} key={op.codigo}>
-                    <div className="opcard__top">
-                      <span className="opcard__cod">{op.codigo}</span>
-                      <span className="opcard__fecha"><Icon name="clock" size={13} /> {desdeIso(op.entrega)}</span>
-                    </div>
-                    <h4 className="opcard__producto">{op.producto}</h4>
-                    <p className="opcard__cantidad">{num(op.cantidad)} <span>unidades</span></p>
-                    <Progreso valor={op.avance} tono={col.id === 'TERMINADA' ? 'ok' : 'ink'} />
-                    <div className="opcard__foot">
-                      <span className="opcard__resp">{op.responsable}</span>
-                      {col.id === 'PENDIENTE' && puedeEjecutar && <Boton size="sm" variant="primary" icono="check" disabled={ocupado} onClick={() => void iniciar(op)}>Iniciar</Boton>}
-                      {col.id === 'EN_PROCESO' && puedeEjecutar && <Boton size="sm" variant="primary" icono="check" disabled={ocupado}
-                        onClick={() => setCerrar({ op, cantidad: String(op.cantidad), merma: String(Math.round(op.mermaEsperada * 1000) / 10), motivo: '' })}>Cerrar</Boton>}
-                      {col.id === 'TERMINADA' && <Insignia tono="ok" punto>Producto en stock</Insignia>}
-                    </div>
-                  </article>
-                ))}
-                {items.length === 0 && <div className="board__vacio">Sin órdenes en esta columna</div>}
-              </div>
-            </section>
-          );
-        })}
-      </div>
+      <Tarjeta padding="none">
+        <div className="ops__cab">
+          <div className="ops__tabs" role="tablist">
+            {COLUMNAS.map((col) => {
+              const n = ops.filter((o) => o.estado === col.id).length;
+              return (
+                <button key={col.id} role="tab" aria-selected={tabOp === col.id} className={`ops__tab ops__tab--${col.id.toLowerCase()} ${tabOp === col.id ? 'is-activo' : ''}`} onClick={() => setTabOp(col.id)}>
+                  {col.titulo}<b>{n}</b>
+                </button>
+              );
+            })}
+          </div>
+          <Buscador valor={qOp} onChange={setQOp} placeholder="Buscar producto, código o responsable…" />
+        </div>
+
+        {pagOps.total === 0 ? <Vacio titulo={qOp ? 'Sin resultados' : 'Sin órdenes'} detalle={qOp ? `Nada coincide con «${qOp}».` : 'No hay órdenes en este estado.'} icono="oven" /> : (
+          <ul className="ops__lista">
+            {pagOps.visibles.map((op) => {
+              const vencida = op.estado !== 'TERMINADA' && op.entrega < hoy();
+              const iniciales = op.responsable.split(' ').map((p) => p[0]).slice(0, 2).join('');
+              return (
+                <li key={op.codigo} className={`op op--${op.estado.toLowerCase()}`}>
+                  <span className="op__estado" aria-hidden><Icon name={op.estado === 'TERMINADA' ? 'check' : op.estado === 'EN_PROCESO' ? 'oven' : 'clock'} size={16} /></span>
+                  <div className="op__principal">
+                    <b>{op.producto}</b>
+                    <span className="mono">{op.codigo}</span>
+                  </div>
+                  <div className="op__cantidad"><b>{num(op.cantidad)}</b><span>unidades</span></div>
+                  <div className="op__avance">
+                    <div className="op__barra"><i style={{ width: `${Math.round(op.avance * 100)}%` }} /></div>
+                    <span>{pct(op.avance, 0)}</span>
+                  </div>
+                  <span className={`op__entrega ${vencida ? 'is-vencida' : ''}`}><Icon name="clock" size={13} />{desdeIso(op.entrega)}{vencida && ' · vencida'}</span>
+                  <span className="op__resp" title={op.responsable}><i>{iniciales}</i>{op.responsable}</span>
+                  <div className="op__accion">
+                    {op.estado === 'PENDIENTE' && puedeEjecutar && <Boton size="sm" variant="primary" disabled={ocupado} onClick={() => void iniciar(op)}>Iniciar</Boton>}
+                    {op.estado === 'EN_PROCESO' && puedeEjecutar && <Boton size="sm" variant="primary" disabled={ocupado}
+                      onClick={() => setCerrar({ op, cantidad: String(op.cantidad), merma: String(Math.round(op.mermaEsperada * 1000) / 10), motivo: '' })}>Cerrar</Boton>}
+                    {op.estado === 'TERMINADA' && <Insignia tono="ok" punto>En stock</Insignia>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <Paginador {...pagOps} />
+      </Tarjeta>
 
       <Dialogo abierto={nueva !== null} titulo="Nueva orden de producción" descripcion="El requerimiento de insumos se calcula con la receta vigente y la merma estándar."
         onCerrar={() => setNueva(null)}

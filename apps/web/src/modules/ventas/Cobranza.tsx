@@ -131,7 +131,7 @@ export function Cobranza() {
               <p className="card__sub">V-01 · deudas por cobrar con antigüedad</p>
             </div>
           </div>
-          <Tabla columnas={columnas} filas={dataset.clientes.filter((c) => c.saldo > 0)} clave={(c) => c.id}
+          <Tabla columnas={columnas} filas={dataset.clientes.filter((c) => c.saldo > 0)} clave={(c) => c.id} buscar="Buscar cliente…"
             vacio={<Vacio titulo="Sin clientes con deuda" icono="wallet" />} />
         </Tarjeta>
       </div>

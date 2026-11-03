@@ -1,9 +1,17 @@
 // node --test tests/sistema.test.mjs  (API en 127.0.0.1:3001 con la semilla)
 // Configuración central, perfil, versión móvil, roles y las barreras contra escalada de privilegios.
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql } from './_sql.mjs';
+
+// Estas pruebas cambian la Configuración: se guarda tal cual y se restaura al final,
+// para no borrar el dominio, el repositorio de la APK ni el webhook de quien las corre.
+let configOriginal = '';
+before(() => { configOriginal = sql("SELECT coalesce(json_agg(json_build_object('clave', clave, 'valor', valor)), '[]') FROM core.configuracion"); });
+after(() => {
+  sql(`UPDATE core.configuracion c SET valor = x.valor FROM json_to_recordset('${configOriginal.replace(/'/g, "''")}') AS x(clave text, valor jsonb) WHERE c.clave = x.clave`);
+});
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u, c = 'tanta') => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: c }) })).json()).accessToken;

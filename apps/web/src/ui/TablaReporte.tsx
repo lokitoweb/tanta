@@ -1,3 +1,5 @@
+import { Paginador, filtrarTexto, usePaginado } from './Paginador';
+import { Buscador } from './primitives';
 import { useMemo, useState } from 'react';
 import { money, num2, pct } from '@/core/format';
 import { Insignia } from './primitives';
@@ -21,20 +23,25 @@ export function formatear(v: unknown, tipo?: ColRep['tipo'], fila?: Fila): React
   return String(v);
 }
 
-/** Tabla de reporte: columnas tipadas, orden por clic y totales de columnas de dinero. */
+/** Tabla de reporte: columnas tipadas, orden por clic, buscador, paginación y totales de columnas de dinero. */
 export function TablaReporte({ columnas, filas, onFila }: { columnas: ColRep[]; filas: Fila[]; onFila?: (f: Fila) => void }) {
   const [orden, setOrden] = useState<{ key: string; asc: boolean } | null>(null);
+  const [texto, setTexto] = useState('');
   const ordenadas = useMemo(() => {
-    if (!orden) return filas;
-    return [...filas].sort((a, b) => {
+    const base = filtrarTexto(filas, texto);
+    if (!orden) return base;
+    return [...base].sort((a, b) => {
       const x = a[orden.key], y = b[orden.key];
       const r = typeof x === 'number' && typeof y === 'number' ? x - y : String(x ?? '').localeCompare(String(y ?? ''), 'es');
       return orden.asc ? r : -r;
     });
-  }, [filas, orden]);
+  }, [filas, orden, texto]);
+  const pag = usePaginado(ordenadas, 50);
   const sumables = columnas.filter((c) => c.tipo === 'dinero' && filas.length > 1 && filas.every((f) => typeof f[c.key] === 'number' && !f.tipo));
 
   return (
+    <>
+    {filas.length > 10 && <div className="tabla__barra"><Buscador valor={texto} onChange={setTexto} placeholder="Buscar en el reporte…" /><span className="t-muted">{ordenadas.length} filas</span></div>}
     <div className="table-wrap">
       <table className="table">
         <thead>
@@ -50,7 +57,7 @@ export function TablaReporte({ columnas, filas, onFila }: { columnas: ColRep[]; 
           })}</tr>
         </thead>
         <tbody>
-          {ordenadas.map((f, i) => (
+          {pag.visibles.map((f, i) => (
             <tr key={i} className={onFila ? 'is-clickable' : ''} onClick={onFila ? () => onFila(f) : undefined}>
               {columnas.map((c) => (
                 <td key={c.key} className={`${['dinero', 'pct', 'num'].includes(c.tipo ?? '') ? 't-right' : ''} ${c.tipo === 'pct' && typeof f[c.key] === 'number' && (f[c.key] as number) < 0 ? 't-neg' : ''}`}>
@@ -67,5 +74,7 @@ export function TablaReporte({ columnas, filas, onFila }: { columnas: ColRep[]; 
         )}
       </table>
     </div>
+    <Paginador {...pag} />
+    </>
   );
 }

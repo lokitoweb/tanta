@@ -119,7 +119,7 @@ export function Usuarios() {
               <p className="card__sub">{usuarios.length} usuarios · al bloquear se revocan sus sesiones</p>
             </div>
           </div>
-          <Tabla columnas={columnas} filas={usuarios} clave={(u) => u.id} />
+          <Tabla columnas={columnas} filas={usuarios} clave={(u) => u.id} buscar="Buscar por nombre, usuario o rol…" />
         </Tarjeta>
 
         <Tarjeta className="col-4">

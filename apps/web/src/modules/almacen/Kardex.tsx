@@ -1,9 +1,10 @@
+import { Paginador, filtrarTexto, usePaginado } from '@/ui/Paginador';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, num2 } from '@/core/format';
-import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio, Buscador } from '@/ui/primitives';
 
 interface Mov { fecha: string; tipo: string; documento: string; cantidad: number; costoUnitario?: number; valor?: number; saldoCantidad: number; saldoValor?: number; cpp?: number }
 
@@ -32,6 +33,12 @@ export function Kardex() {
     api<Mov[]>(`/kardex/${encodeURIComponent(codigo)}`).then((m) => { setMovs(m); setError(null); }).catch((e) => setError(e.message));
   }, [codigo, dataset.movimientos]);
 
+  // Buscador de ítem (escribe nombre o código) y de asientos, con paginación de 50.
+  const etiqueta = (i: { nombre: string; codigo: string }) => `${i.nombre} (${i.codigo})`;
+  const [busca, setBusca] = useState('');
+  const [filtroMov, setFiltroMov] = useState('');
+  const recientes = useMemo(() => filtrarTexto([...(movs ?? [])].reverse(), filtroMov), [movs, filtroMov]);
+  const pag = usePaginado(recientes, 50);
   const ultimo = movs?.at(-1); // el endpoint devuelve en orden cronológico: el último es el saldo vigente
 
   return (
@@ -43,12 +50,18 @@ export function Kardex() {
         </>} />
 
       <Tarjeta>
-        <label className="filtros__campo filtros__campo--ancho"><span>Insumo o producto</span>
-          <select value={codigo} onChange={(e) => setCodigo(e.target.value)}>
-            <optgroup label="Insumos">{items.filter((i) => i.tipo === 'Insumo').map((i) => <option key={i.codigo} value={i.codigo}>{i.nombre} ({i.codigo})</option>)}</optgroup>
-            <optgroup label="Productos">{items.filter((i) => i.tipo === 'Producto').map((i) => <option key={i.codigo} value={i.codigo}>{i.nombre} ({i.codigo})</option>)}</optgroup>
-          </select>
-        </label>
+        <div className="kardex__buscar">
+          <label className="filtros__campo"><span>Buscar insumo o producto</span>
+            <input list="kardex-items" placeholder={item ? etiqueta(item) : 'Escribe el nombre o el código…'} value={busca}
+              onChange={(e) => {
+                setBusca(e.target.value);
+                const hallado = items.find((i) => etiqueta(i) === e.target.value || i.codigo.toLowerCase() === e.target.value.trim().toLowerCase());
+                if (hallado) { setCodigo(hallado.codigo); setBusca(''); }
+              }} />
+            <datalist id="kardex-items">{items.map((i) => <option key={i.codigo} value={etiqueta(i)}>{i.tipo}</option>)}</datalist>
+          </label>
+          {item && <div className="kardex__actual"><span>Viendo</span><b>{item.nombre}</b><Insignia>{item.tipo} · {item.codigo}</Insignia></div>}
+        </div>
       </Tarjeta>
 
       <div className="grid grid--auto">
@@ -63,13 +76,15 @@ export function Kardex() {
           : movs === null ? <div className="tabla-cargando">Cargando movimientos…</div>
             : movs.length === 0 ? <Vacio titulo="Sin movimientos" detalle="Este ítem aún no tiene asientos en el kárdex." icono="ledger" />
               : (
+                <>
+                <div className="tabla__barra"><Buscador valor={filtroMov} onChange={setFiltroMov} placeholder="Buscar por documento, OP, venta o motivo…" /><span className="t-muted">{recientes.length} asientos</span></div>
                 <div className="table-wrap">
                   <table className="table table--kardex">
                     <thead><tr><th>Fecha</th><th>Movimiento</th><th>Documento / motivo</th><th className="t-right">Cantidad</th>
                       {valoriza && <><th className="t-right">Costo unit.</th><th className="t-right">Valor</th></>}
                       <th className="t-right">Saldo</th>{valoriza && <th className="t-right">Saldo valorizado</th>}</tr></thead>
                     <tbody>
-                      {[...movs].reverse().map((m, i) => {
+                      {pag.visibles.map((m, i) => {
                         const t = TIPOS[m.tipo] ?? { label: m.tipo, tono: 'neutral' as const };
                         return (
                           <tr key={`${m.fecha}-${i}`}>
@@ -86,6 +101,8 @@ export function Kardex() {
                     </tbody>
                   </table>
                 </div>
+                <Paginador {...pag} />
+                </>
               )}
       </Tarjeta>
     </>

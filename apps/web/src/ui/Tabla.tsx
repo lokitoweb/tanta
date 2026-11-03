@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { Paginador, filtrarTexto, usePaginado } from './Paginador';
+import { Buscador } from './primitives';
 import { useApp } from '@/core/app-state';
 import { Icon } from './icons';
 
@@ -20,15 +22,23 @@ interface Props<T> {
   onFila?: (row: T) => void;
   densa?: boolean;
   vacio?: ReactNode;
+  /** Muestra un buscador sobre la tabla (texto = placeholder). */
+  buscar?: string;
+  porPagina?: number;
 }
 
-export function Tabla<T>({ columnas, filas, clave, onFila, densa, vacio }: Props<T>) {
+export function Tabla<T>({ columnas, filas: todas, clave, onFila, densa, vacio, buscar, porPagina = 25 }: Props<T>) {
   const { puede } = useApp();
   const visibles = columnas.filter((c) => !c.permiso || puede(c.permiso));
+  const [texto, setTexto] = useState('');
+  const pag = usePaginado(filtrarTexto(todas, texto), porPagina);
+  const filas = pag.visibles;
 
-  if (filas.length === 0 && vacio) return <>{vacio}</>;
+  if (todas.length === 0 && vacio) return <>{vacio}</>;
 
   return (
+    <>
+    {buscar && <div className="tabla__barra"><Buscador valor={texto} onChange={setTexto} placeholder={buscar} /><span className="t-muted">{pag.total} resultados</span></div>}
     <div className={`table-wrap ${densa ? 'table-wrap--densa' : ''}`}>
       <table className="table">
         <thead>
@@ -52,6 +62,9 @@ export function Tabla<T>({ columnas, filas, clave, onFila, densa, vacio }: Props
           ))}
         </tbody>
       </table>
+      {filas.length === 0 && <p className="tabla__nada">Sin resultados para «{texto}».</p>}
     </div>
+    <Paginador {...pag} />
+    </>
   );
 }
