@@ -13,9 +13,8 @@ test('pan francés del modelo: masa, costo del lote, unidades, % panadero, mano 
     -- Escenario aislado: sin otros costos indirectos ni horas de horno de otros panes.
     UPDATE core.costo_indirecto SET activo = false;
     UPDATE core.producto SET horas_horno_lote = 0;
-    UPDATE core.parametro SET valor = '1500' WHERE clave = 'sueldo_base';
-    UPDATE core.parametro SET valor = '0'    WHERE clave = 'factor_beneficios';
-    UPDATE core.parametro SET valor = '192'  WHERE clave = 'horas_mes';
+    INSERT INTO core.parametro (clave, valor, tipo) VALUES ('sueldo_base','1500','numero'), ('factor_beneficios','0','porcentaje'), ('horas_mes','192','numero')
+      ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;
     INSERT INTO core.insumo (codigo, nombre, unidad, cpp, tipo, equiv_kg) VALUES
       ('T-HAR', 'Harina prueba', 'KG', 2.80, 'HARINA', 1),
       ('T-AGU', 'Agua prueba',   'L',  0,    'LIQUIDO', 1),

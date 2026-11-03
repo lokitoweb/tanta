@@ -231,6 +231,10 @@ async function main() {
       ['permitir_saldo_negativo', 'false', 'booleano', 'Política estricta de inventario'],
       ['cif_base_prorrateo', 'UNIDADES', 'texto', 'Base de prorrateo del CIF: UNIDADES o COSTO_INSUMOS'],
       ['descuento_maximo', '0.10', 'porcentaje', 'Descuento máximo que un vendedor puede aplicar en una venta'],
+      ['sueldo_base', '1500', 'numero', 'Sueldo mensual de referencia del personal de producción (S/)'],
+      ['factor_beneficios', '0', 'porcentaje', 'Beneficios y aportes sobre el sueldo (0.45 = 45 %)'],
+      ['horas_mes', '192', 'numero', 'Horas trabajadas al mes por persona'],
+      ['tolerancia_varianza', '0.03', 'porcentaje', 'Tolerancia del consumo real frente al teórico'],
     ]) {
       await c.query('INSERT INTO core.parametro (clave,valor,tipo,descripcion) VALUES ($1,$2,$3,$4)', [clave, valor, tipo, desc]);
     }
