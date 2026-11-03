@@ -1131,3 +1131,73 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .dialogo__cuerpo .table-wrap, .dialogo__cuerpo table { max-width: 100%; }
 .dialogo__desc { max-width: 60ch; }
 @media (max-width: 640px) { .dialogo { min-width: 100%; } .dialogo__cuerpo .form--2col { min-width: 0; } }
+
+/* Páginas públicas de privacidad y términos */
+.legal { max-width: 760px; margin: 0 auto; padding: 48px 20px 64px; line-height: 1.7; color: var(--tanta-text-primary); white-space: pre-line; }
+.legal h1 { font-size: 1.75rem; font-weight: 650; margin: 4px 0 20px; }
+.legal p { margin: 0 0 14px; }
+.legal__marca { font-size: 0.75rem; letter-spacing: .14em; text-transform: uppercase; color: var(--tanta-text-muted); }
+
+/* Configuración: campo + botón, módulos con interruptor y guía */
+.campo-boton { display: flex; gap: 8px; align-items: center; }
+.campo-boton .field__input { flex: 1; min-width: 0; }
+.field__label--fila { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.form__acciones--entre { justify-content: space-between; flex-wrap: wrap; }
+.modulos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.modulo { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--tanta-border-subtle); border-radius: var(--tanta-radius-md); cursor: pointer; }
+.modulo.is-on { border-color: color-mix(in srgb, var(--tanta-state-ok) 40%, transparent); background: color-mix(in srgb, var(--tanta-state-ok) 5%, transparent); }
+.modulo span { display: flex; flex-direction: column; gap: 2px; }
+.modulo b { font-size: 0.875rem; }
+.modulo small { font-size: 0.75rem; color: var(--tanta-text-muted); }
+.interruptor { appearance: none; width: 38px; height: 22px; border-radius: 999px; background: var(--tanta-border-default); position: relative; cursor: pointer; flex: 0 0 auto; transition: background 140ms; }
+.interruptor::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 140ms; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.interruptor:checked { background: var(--tanta-ink-800); }
+.interruptor:checked::after { transform: translateX(16px); }
+.interruptor:focus-visible { outline: 2px solid var(--tanta-ink-800); outline-offset: 2px; }
+.guia { padding: 12px 14px; border-radius: var(--tanta-radius-md); background: var(--tanta-neutral-50); border: 1px solid var(--tanta-border-subtle); font-size: 0.8125rem; color: var(--tanta-text-secondary); line-height: 1.6; }
+.guia ol { margin: 6px 0; padding-left: 18px; }
+@media (max-width: 640px) { .campo-boton { flex-direction: column; align-items: stretch; } }
+
+/* Menú lateral sin barra de scroll visible (sigue desplazándose con rueda o gesto) */
+.sidebar__nav { scrollbar-width: none; }
+.sidebar__nav::-webkit-scrollbar { display: none; }
+
+/* Período con el día dentro del mismo chip */
+.chip__dia { text-transform: capitalize; color: var(--tanta-text-primary); font-weight: 550; }
+.chip__sep { width: 1px; height: 12px; background: var(--tanta-border-default); margin: 0 3px; }
+
+/* Marca centrada: el espaciado de letras se compensa a ambos lados */
+.brandmark__word { margin-right: 0; padding-left: 0.18em; }
+.brandmark__pill { margin-right: 0; }
+.tarjeta3d .brandmark { align-items: center; gap: 14px; }
+
+/* Ingreso: encabezado centrado, campos con icono y pie centrado */
+.acceso__head { text-align: center; margin-bottom: 8px; }
+.acceso__head h1 { font-size: 1.875rem; }
+.acceso__pie { text-align: center; }
+.acceso__top { text-align: center; }
+.field__grupo--icono { position: relative; }
+.field__grupo--icono > svg { position: absolute; left: 13px; top: 50%; translate: 0 -50%; color: var(--tanta-text-muted); pointer-events: none; }
+.field__grupo--icono > .field__input { padding-left: 40px; height: 46px; border-radius: 10px; }
+.field__grupo--icono > .field__input:focus { border-color: var(--tanta-ink-800); box-shadow: 0 0 0 4px color-mix(in srgb, var(--tanta-ink-800) 10%, transparent); }
+.field__label--fila .acceso__olvido { margin: 0; font-size: .75rem; }
+.acceso__form .btn--primary { height: 48px; border-radius: 10px; }
+
+/* Tarjeta de marca: entrada, reflejo que recorre la tarjeta y borde luminoso sutil */
+.tarjeta3d { padding: 18px 0; }
+.tarjeta3d__tarjeta {
+  border-radius: 18px;
+  box-shadow: 0 40px 80px -30px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.10), inset 0 1px 0 rgba(255,255,255,.6);
+  animation: entrar 900ms cubic-bezier(.2,.8,.2,1) both, flotar 8s ease-in-out 900ms infinite;
+  background: radial-gradient(120% 90% at 0% 0%, #fffaf3, var(--tanta-cream-50) 55%, #efe4d4);
+}
+.tarjeta3d__tarjeta::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: linear-gradient(115deg, transparent 35%, rgba(255,255,255,.55) 48%, transparent 60%);
+  background-size: 250% 100%; animation: reflejo 6s ease-in-out 1.2s infinite;
+}
+.tarjeta3d__cuerpo { padding: 52px 34px 40px; }
+.tarjeta3d__banda { background: linear-gradient(120deg, var(--tanta-ink-900), var(--tanta-ink-700) 60%, #4a3527); }
+@keyframes entrar { from { opacity: 0; transform: translateY(24px) rotateX(12deg) scale(.96); } to { opacity: 1; } }
+@keyframes reflejo { 0%, 70% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
+@media (prefers-reduced-motion: reduce) { .tarjeta3d__tarjeta, .tarjeta3d__tarjeta::after { animation: none; } }

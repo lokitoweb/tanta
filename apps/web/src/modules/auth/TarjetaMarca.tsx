@@ -41,7 +41,6 @@ export function TarjetaMarca() {
         <div className="tarjeta3d__brillo" aria-hidden />
         <div className="tarjeta3d__cuerpo">
           <BrandMark variant="light" size="xl" />
-          {n?.claim && <p className="tarjeta3d__claim">{n.claim}</p>}
         </div>
         {(n?.representante || n?.whatsapp) && (
           <div className="tarjeta3d__banda">
@@ -58,7 +57,6 @@ export function TarjetaMarca() {
           </div>
         )}
       </div>
-      <div className="tarjeta3d__sombra" aria-hidden />
     </div>
   );
 }

@@ -71,9 +71,12 @@ const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
     mensajeActualizacion: z.string().trim().min(5).max(200),
     // Servidor que deben usar las apps instaladas: si cambia, se mudan solas al abrir.
     urlApi: urlHttps.optional().default(''),
+    // Secciones de la app que el superadmin activa o apaga para todos (además del permiso del rol).
+    modulos: z.record(z.string().regex(/^[a-z]+$/), z.boolean()).optional().default({}),
     // Repositorio que compila la APK (dueño/nombre): de su último release salen versión y enlace.
     repoGithub: z.union([z.literal(''), z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'Formato dueño/repositorio')]).optional().default('') }),
-  legal: z.object({ urlPrivacidad: urlHttps, urlTerminos: urlHttps, correoSoporte: z.union([z.literal(''), z.string().email()]) }),
+  legal: z.object({ urlPrivacidad: urlHttps, urlTerminos: urlHttps, correoSoporte: z.union([z.literal(''), z.string().email()]),
+    textoPrivacidad: z.string().max(60_000).optional().default(''), textoTerminos: z.string().max(60_000).optional().default('') }),
   firebase: z.object({ habilitado: z.boolean(), projectId: z.string().max(100), apiKey: z.string().max(100),
     appIdAndroid: z.string().max(100), appIdIos: z.string().max(100), senderId: z.string().max(40),
     cuentaServicio: z.string().max(10_000) }),
@@ -258,11 +261,24 @@ export async function rutasSistema(app: FastifyInstance) {
     const f = fb as Record<string, unknown>;
     // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
     reply.header('Cache-Control', 'no-cache');
+    const dominio = String((movil as { urlApi?: string }).urlApi ?? '');
+    const { textoPrivacidad: _p, textoTerminos: _t, ...legalPublico } = legal as Record<string, unknown>;
     return {
-      marca, movil, legal, negocio,
+      marca, legal: legalPublico, negocio,
+      movil: { ...movil, urlApi: dominio && !dominio.endsWith('/api/v1') ? `${dominio}/api/v1` : dominio },
       // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
       firebase: f.habilitado ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
     };
+  });
+
+  // Páginas públicas que exigen Google Play y App Store (no requieren sesión).
+  app.get('/legal/:doc', async (req, reply) => {
+    const { doc } = req.params as { doc: string };
+    if (doc !== 'privacidad' && doc !== 'terminos') return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Documento inexistente.'));
+    const [legal, negocio] = await Promise.all([leerConfig('legal'), leerNegocio()]) as [Record<string, string>, Record<string, string>];
+    const propio = doc === 'privacidad' ? legal.textoPrivacidad : legal.textoTerminos;
+    reply.header('Cache-Control', 'no-cache');
+    return { titulo: doc === 'privacidad' ? 'Política de privacidad' : 'Términos y condiciones', texto: propio || textoLegalBase(doc, negocio, legal.correoSoporte), negocio: negocio.nombre ?? '' };
   });
 
   app.get('/archivos/:id', async (req, reply) => {
@@ -292,6 +308,7 @@ export async function rutasSistema(app: FastifyInstance) {
     const entrada = { ...(req.body as Config) };
     // Un secreto que vuelve enmascarado significa "no lo cambié".
     for (const k of SECRETOS[seccion] ?? []) if (entrada[k] === MASCARA) entrada[k] = anterior[k] ?? '';
+    if (seccion === 'movil' && typeof entrada.urlApi === 'string') entrada.urlApi = entrada.urlApi.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '');
     const p = ESQUEMAS[seccion].safeParse(entrada);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(' · ')));
     if (seccion === 'webhook' && p.data.url && !(await destinoPublico(p.data.url))) {
@@ -353,7 +370,17 @@ export async function rutasSistema(app: FastifyInstance) {
 
   app.post('/sistema/push/probar', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'config.gestionar')) return;
-    try { return { enviados: await enviarPush(req.usuario!.id, 'Tanta', 'Notificación de prueba') }; }
+    const cfg = await leerConfig('firebase') as { habilitado?: boolean; projectId?: string; cuentaServicio?: string };
+    if (!cfg.habilitado) return reply.code(422).send(error(422, 'PUSH_INACTIVO', 'Activa "Enviar notificaciones push" y guarda.'));
+    if (!cfg.cuentaServicio) return reply.code(422).send(error(422, 'SIN_CUENTA_SERVICIO', 'Falta la cuenta de servicio: sin ella el servidor no puede enviar. Súbela con el botón "Cuenta de servicio (.json)" y guarda.'));
+    const quien = String((req.body as { destinatario?: string } | null)?.destinatario ?? '').trim().toLowerCase();
+    const u = quien
+      ? await uno<{ id: string; nombre: string }>('SELECT id, nombre FROM core.usuario WHERE lower(usuario) = $1 OR lower(email) = $1', [quien])
+      : { id: req.usuario!.id, nombre: req.usuario!.nombre };
+    if (!u) return reply.code(404).send(error(404, 'SIN_USUARIO', 'No existe un usuario con ese usuario o correo.'));
+    const tel = await uno<{ n: string }>('SELECT count(*) n FROM core.dispositivo WHERE usuario_id = $1 AND token_push IS NOT NULL', [u.id]);
+    if (!Number(tel?.n)) return reply.code(422).send(error(422, 'SIN_DISPOSITIVO', `${u.nombre} no tiene un teléfono con notificaciones activas: instala la app, inicia sesión y acepta el permiso de notificaciones.`));
+    try { return { enviados: await enviarPush(u.id, 'Tanta', 'Notificación de prueba'), destinatario: u.nombre }; }
     catch (e) { return reply.code(502).send(error(502, 'FIREBASE_ERROR', (e as Error).message)); }
   });
 
@@ -542,4 +569,43 @@ export async function rutasSistema(app: FastifyInstance) {
       mensaje: movil.mensajeActualizacion,
     };
   });
+}
+
+/** Texto base (Ley 29733 de Protección de Datos Personales, Perú). El superadmin lo reemplaza desde Configuración. */
+function textoLegalBase(doc: 'privacidad' | 'terminos', n: Record<string, string>, soporte?: string): string {
+  const empresa = n.nombre || 'La empresa';
+  const contacto = soporte || n.email || '';
+  const pie = `\n\nContacto: ${[contacto, n.telefono, n.direccion].filter(Boolean).join(' · ')}${n.ruc ? `\nRUC: ${n.ruc}` : ''}`;
+  if (doc === 'privacidad') return `${empresa} trata tus datos personales conforme a la Ley N.° 29733 y su reglamento.
+
+1. Datos que recopilamos
+Nombre, usuario, correo, teléfono y foto de perfil; pedidos, ventas y pagos que registras; datos técnicos del dispositivo (modelo, versión de la app y un identificador para notificaciones).
+
+2. Para qué los usamos
+Prestar el servicio (pedidos, entregas, cobranza), enviarte avisos sobre tus pedidos, mantener la seguridad de tu cuenta y cumplir obligaciones legales y tributarias.
+
+3. Con quién los compartimos
+No vendemos tus datos. Solo los compartimos con proveedores que nos ayudan a operar (alojamiento, correo y notificaciones de Google Firebase), bajo obligación de confidencialidad, o cuando la ley lo exige.
+
+4. Conservación y seguridad
+Conservamos los datos mientras tengas una cuenta y el tiempo que exija la ley. Las contraseñas se guardan cifradas y cada acceso queda auditado.
+
+5. Tus derechos
+Puedes acceder, rectificar, cancelar u oponerte al tratamiento de tus datos (derechos ARCO) y eliminar tu cuenta desde "Mi cuenta" en la app o escribiendo a ${contacto || 'nuestro correo de soporte'}.${pie}`;
+  return `Al usar el sistema y la aplicación de ${empresa} aceptas estas condiciones.
+
+1. Cuentas
+Cada cuenta es personal. Eres responsable de mantener tu contraseña en reserva y de las operaciones hechas con ella.
+
+2. Pedidos y precios
+Los precios incluyen IGV salvo que se indique lo contrario. Un pedido se confirma cuando cambia a "En producción"; la disponibilidad puede variar.
+
+3. Pagos y crédito
+Las ventas al crédito están sujetas al límite y plazo asignados a cada cliente. Los comprobantes internos no reemplazan al comprobante electrónico SUNAT.
+
+4. Uso aceptable
+No está permitido intentar acceder a cuentas ajenas, alterar información ni afectar el funcionamiento del sistema.
+
+5. Cambios
+Podemos actualizar estas condiciones; la versión vigente es la publicada en esta página.${pie}`;
 }

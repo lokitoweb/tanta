@@ -4,7 +4,7 @@ import { ApiError, activarMfa, enrolarMfa, login, verificarMfa } from '@/core/ap
 import { Boton } from '@/ui/primitives';
 import { TarjetaMarca } from './TarjetaMarca';
 import { Recuperar } from './Recuperar';
-import { api } from '@/core/api';
+import { api, leerConfigPublica, type ConfigPublica } from '@/core/api';
 import { Icon } from '@/ui/icons';
 
 /** Mensaje claro para el usuario; nunca revela si el usuario existe. */
@@ -115,10 +115,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
 
         <TarjetaMarca />
 
-        <div className="acceso__pie">
-          <p>Pedidos · Producción · Almacén · Ventas · Cobranza · Costos</p>
-          <p className="acceso__version">v0.1 · Lima, Perú</p>
-        </div>
+        <PieMarca />
       </aside>
 
       <main className="acceso__form">
@@ -142,6 +139,8 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
             <form className="form" onSubmit={(e) => { e.preventDefault(); void entrar(); }}>
               <label className="field">
                 <span className="field__label">Usuario</span>
+                <div className="field__grupo field__grupo--icono">
+                <Icon name="user" size={17} />
                 <input
                   className="field__input"
                   value={usuario}
@@ -152,13 +151,23 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                   required
                   maxLength={60}
                   autoFocus={!esDev}
+                  placeholder="Tu usuario"
                 />
+                </div>
               </label>
 
-              <label className="field">
-                <span className="field__label">Contraseña</span>
-                <div className="field__grupo">
+              <div className="field">
+                <span className="field__label field__label--fila">
+                  <label htmlFor="clave">Contraseña</label>
+                  {puedeRecuperar && (
+                    <button type="button" className="acceso__olvido" onClick={() => { setError(undefined); setAvisoOk(null); setRecuperando(true); }}>¿Olvidaste tu contraseña?</button>
+                  )}
+                </span>
+                <div className="field__grupo field__grupo--icono">
+                  <Icon name="shield" size={17} />
                   <input
+                    id="clave"
+                    placeholder="Tu contraseña"
                     className="field__input"
                     type={verClave ? 'text' : 'password'}
                     value={clave}
@@ -175,11 +184,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                   </button>
                 </div>
                 {mayus && <span className="field__aviso"><Icon name="alert" size={13} /> Bloq Mayús está activado</span>}
-              </label>
-
-              {puedeRecuperar && (
-                <button type="button" className="acceso__olvido" onClick={() => { setError(undefined); setAvisoOk(null); setRecuperando(true); }}>¿Olvidaste tu contraseña?</button>
-              )}
+              </div>
               {avisoOk && <p className="form__ok" role="status"><Icon name="check" size={15} /> {avisoOk}</p>}
               {error && (
                 <p className="form__error" role="alert">
@@ -317,6 +322,19 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+/** Pie del panel de marca: datos del negocio (Configuración → Marca), centrados. */
+function PieMarca() {
+  const [cfg, setCfg] = useState<ConfigPublica | null>(null);
+  useEffect(() => { leerConfigPublica().then(setCfg).catch(() => {}); }, []);
+  const n = cfg?.negocio;
+  return (
+    <div className="acceso__pie">
+      {n?.direccion && <p>{n.direccion}</p>}
+      <p className="acceso__version">© {new Date().getFullYear()} {n?.nombre ?? cfg?.marca.nombreApp ?? ''}{n?.ruc ? ` · RUC ${n.ruc}` : ''}</p>
     </div>
   );
 }

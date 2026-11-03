@@ -92,6 +92,8 @@ export function AppShell() {
           <div className="topbar__right">
             <span className="chip chip--periodo" title="Período de costos">
               <Icon name="clock" size={14} />
+              <span className="chip__dia">{fechaCorta(new Date())}</span>
+              <span className="chip__sep" aria-hidden />
               {dataset.periodo.etiqueta}
               <b className="chip__estado">{dataset.periodo.estado === 'PROVISIONAL' ? 'Provisional' : 'Definitivo'}</b>
             </span>
@@ -99,7 +101,6 @@ export function AppShell() {
               <Icon name="sync" size={14} />
               <span className="chip__txt">En línea</span>
             </span>
-            <span className="topbar__fecha">{fechaCorta(new Date())}</span>
             <div className="cuenta">
               <button className="cuenta__boton" onClick={() => setMenu((v) => !v)} aria-expanded={menu} aria-haspopup="menu">
                 <Avatar nombre={sesion.usuario.nombre} fotoUrl={sesion.usuario.fotoUrl} />
@@ -107,7 +108,7 @@ export function AppShell() {
                   <b>{sesion.usuario.nombre}</b>
                   <small>{rol.nombre}</small>
                 </span>
-                <Icon name="chevron" size={14} />
+                <Icon name="down" size={14} />
               </button>
               {menu && (
                 <>

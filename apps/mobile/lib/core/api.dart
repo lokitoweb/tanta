@@ -413,7 +413,13 @@ class Api {
         if (tokenPush != null) 'tokenPush': tokenPush,
       }) as Map<String, dynamic>;
 
-  bool puede(String permiso) => permisos.contains(permiso);
+  /// Permiso del rol Y módulo activo: el superadmin puede apagar una sección para todos
+  /// (Configuración → App móvil → Módulos). El servidor vuelve a validar el permiso igual.
+  bool puede(String permiso) => permisos.contains(permiso) && moduloActivo(_modulos[permiso.split('.').first] ?? '');
+
+  static const _modulos = {'pedidos': 'pedidos', 'ventas': 'ventas', 'cobranza': 'cobranza', 'produccion': 'produccion', 'inventario': 'almacen', 'catalogo': 'catalogo'};
+
+  bool moduloActivo(String modulo) => modulo.isEmpty || ((config['movil'] as Map?)?['modulos'] as Map?)?[modulo] != false;
 }
 
 class ApiException implements Exception {

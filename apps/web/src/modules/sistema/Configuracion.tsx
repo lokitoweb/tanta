@@ -9,6 +9,17 @@ type Seccion = 'marca' | 'movil' | 'legal' | 'correo' | 'integraciones';
 type Datos = Record<string, Record<string, unknown>>;
 interface Dispositivo { nombre: string; usuario: string; plataforma: string; version_app: string; ultimo_uso: string; push: boolean; desactualizada: boolean }
 
+// Secciones de la app móvil que el superadmin puede apagar para todos (el permiso del rol sigue mandando).
+const MODULOS: Array<[string, string, string]> = [
+  ['pedidos', 'Pedidos', 'Lista y cambio de estado de pedidos'],
+  ['ventas', 'Ventas', 'Nueva venta con comprobante en PDF'],
+  ['cobranza', 'Cobranza', 'Cartera y registro de cobros'],
+  ['produccion', 'Producción', 'Órdenes: crear, iniciar y cerrar con merma'],
+  ['almacen', 'Almacén', 'Stock, kárdex y bajas con motivo'],
+  ['catalogo', 'Catálogo', 'Pedidos del cliente y repetir pedido'],
+];
+const dominioActual = () => window.location.origin;
+
 const EVENTOS: Array<[string, string]> = [
   ['venta.creada', 'Venta registrada'], ['cobro.registrado', 'Cobro registrado'], ['pedido.estado', 'Cambio de estado de pedido'],
   ['inventario.movimiento', 'Movimiento de inventario'], ['usuario.eliminado', 'Cuenta eliminada'],
@@ -28,7 +39,12 @@ export function Configuracion() {
     setNegocio({ ...(await leerConfigPublica(true)).negocio });
     const d = await api<Datos>('/sistema/config');
     // Primera vez: el servidor de las apps es este mismo dominio (no se escribe a mano).
-    if (d.movil && !d.movil.urlApi && window.location.protocol === 'https:') d.movil = { ...d.movil, urlApi: `${window.location.origin}/api/v1` };
+    // Primera vez: dominio y páginas legales salen de este mismo servidor (solo por https).
+    if (window.location.protocol === 'https:') {
+      if (d.movil && !d.movil.urlApi) d.movil = { ...d.movil, urlApi: dominioActual() };
+      if (d.legal && !d.legal.urlPrivacidad) d.legal = { ...d.legal, urlPrivacidad: `${dominioActual()}/privacidad` };
+      if (d.legal && !d.legal.urlTerminos) d.legal = { ...d.legal, urlTerminos: `${dominioActual()}/terminos` };
+    }
     setCfg(d);
   };
   const guardarNegocio = async () => {
@@ -57,9 +73,10 @@ export function Configuracion() {
     }
   };
 
-  const probar = async (ruta: string, ok: (r: Record<string, unknown>) => string) => {
+  const [destinatario, setDestinatario] = useState('');
+  const probar = async (ruta: string, ok: (r: Record<string, unknown>) => string, body: Record<string, unknown> = {}) => {
     setAviso(null);
-    try { setAviso({ tono: 'info', texto: ok(await api(ruta, { method: 'POST', body: {} })) }); }
+    try { setAviso({ tono: 'ok', texto: ok(await api(ruta, { method: 'POST', body })) }); }
     catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'Falló la prueba.' }); }
   };
 
@@ -129,14 +146,37 @@ export function Configuracion() {
               <p className="dialogo__nota field--ancho">Con el repositorio indicado, cada APK que compila GitHub se detecta sola: la versión y el enlace de Android se actualizan aquí y los teléfonos reciben el aviso de actualización. La versión mínima la decides tú (obliga a actualizar).</p>
               <Campo etiqueta="Enlace Android (Google Play o APK)"><input className="field__input" type="url" placeholder="https://play.google.com/store/apps/details?id=…" value={movil.urlAndroid ?? ''} onChange={(e) => campo('movil', 'urlAndroid', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Enlace App Store"><input className="field__input" type="url" placeholder="https://apps.apple.com/app/id…" value={movil.urlIos ?? ''} onChange={(e) => campo('movil', 'urlIos', e.target.value.trim())} /></Campo>
-              <Campo etiqueta="Servidor de las apps (URL del API)" ancho>
-                <input className="field__input" type="url" placeholder="https://www.tantapanaderia.com/api/v1" value={movil.urlApi ?? ''}
-                  onChange={(e) => campo('movil', 'urlApi', e.target.value.trim())} />
-              </Campo>
-              <p className="dialogo__nota field--ancho">Por defecto es este mismo dominio y la APK se compila con él. Si mudas el sistema, escribe aquí el nuevo antes de apagar el actual: cada app instalada lo lee al abrir, comprueba que responde y se cambia sola.</p>
+              <div className="field field--ancho">
+                <span className="field__label field__label--fila">Dominio del servidor (API)
+                  {String(movil.urlApi ?? '').replace(/\/api\/v1$/, '') === dominioActual() && <Insignia tono="ok" punto>Dominio detectado automáticamente</Insignia>}</span>
+                <div className="campo-boton">
+                  <input className="field__input mono" type="url" placeholder="https://miempresa.com" value={String(movil.urlApi ?? '').replace(/\/api\/v1$/, '')}
+                    onChange={(e) => campo('movil', 'urlApi', e.target.value.trim())} />
+                  <Boton onClick={() => campo('movil', 'urlApi', dominioActual())}>Restablecer a dominio actual</Boton>
+                </div>
+                <p className="dialogo__nota">Se completa solo con el dominio de este servidor y la APK se compila con él. Cámbialo solo si las apps deben conectarse por otra dirección (por ejemplo un túnel de pruebas o una mudanza): las apps instaladas lo leen al abrir y se cambian solas. Escribe <code>https://</code> y sin <code>/api</code> al final.</p>
+              </div>
               <Campo etiqueta="Mensaje al pedir actualización" ancho><input className="field__input" maxLength={200} value={movil.mensajeActualizacion ?? ''} onChange={(e) => campo('movil', 'mensajeActualizacion', e.target.value)} /></Campo>
             </div>
             <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('movil')} disabled={guardando}>Guardar versiones</Boton></div>
+          </Tarjeta>
+
+          <Tarjeta>
+            <TarjetaTitulo titulo="Módulos de la app" subtitulo="Activa o apaga secciones para todos los teléfonos. Cada usuario además solo ve lo que su rol permite."
+              accion={<Insignia tono="info">{MODULOS.filter(([id]) => (movil.modulos as Record<string, boolean> | undefined)?.[id] !== false).length} / {MODULOS.length} activos</Insignia>} />
+            <div className="modulos">
+              {MODULOS.map(([id, nombre, desc]) => {
+                const activo = (movil.modulos as Record<string, boolean> | undefined)?.[id] !== false;
+                return (
+                  <label key={id} className={`modulo ${activo ? 'is-on' : ''}`}>
+                    <span><b>{nombre}</b><small>{desc}</small></span>
+                    <input type="checkbox" role="switch" className="interruptor" checked={activo}
+                      onChange={(e) => campo('movil', 'modulos', { ...(movil.modulos as Record<string, boolean> ?? {}), [id]: e.target.checked })} />
+                  </label>
+                );
+              })}
+            </div>
+            <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('movil')} disabled={guardando}>Guardar módulos</Boton></div>
           </Tarjeta>
 
           <Tarjeta padding="none">
@@ -165,11 +205,23 @@ export function Configuracion() {
         <Tarjeta>
           <TarjetaTitulo titulo="Legal y soporte" subtitulo="Apple y Google exigen una política de privacidad pública y un contacto de soporte" />
           <div className="form form--2col">
+            <p className="dialogo__nota field--ancho">El sistema publica estas páginas en <a href="/privacidad" target="_blank" rel="noreferrer">/privacidad</a> y <a href="/terminos" target="_blank" rel="noreferrer">/terminos</a> con los datos del negocio. Usa esos enlaces en Google Play y App Store, o pon los de tu propia web.</p>
             <Campo etiqueta="Política de privacidad (URL)"><input className="field__input" type="url" placeholder="https://www.tantapanaderia.com/privacidad" value={legal.urlPrivacidad ?? ''} onChange={(e) => campo('legal', 'urlPrivacidad', e.target.value.trim())} /></Campo>
             <Campo etiqueta="Términos y condiciones (URL)"><input className="field__input" type="url" placeholder="https://www.tantapanaderia.com/terminos" value={legal.urlTerminos ?? ''} onChange={(e) => campo('legal', 'urlTerminos', e.target.value.trim())} /></Campo>
             <Campo etiqueta="Correo de soporte"><input className="field__input" type="email" value={legal.correoSoporte ?? ''} onChange={(e) => campo('legal', 'correoSoporte', e.target.value.trim())} /></Campo>
+            <span />
+            <Campo etiqueta="Texto de la política de privacidad (vacío = texto base según la Ley 29733)" ancho>
+              <textarea className="field__input" rows={10} value={legal.textoPrivacidad ?? ''} placeholder="Deja vacío para usar el texto base con los datos del negocio, o pega aquí el tuyo." onChange={(e) => campo('legal', 'textoPrivacidad', e.target.value)} />
+            </Campo>
+            <Campo etiqueta="Texto de términos y condiciones (vacío = texto base)" ancho>
+              <textarea className="field__input" rows={10} value={legal.textoTerminos ?? ''} placeholder="Deja vacío para usar el texto base, o pega aquí el tuyo." onChange={(e) => campo('legal', 'textoTerminos', e.target.value)} />
+            </Campo>
           </div>
-          <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('legal')} disabled={guardando}>Guardar</Boton></div>
+          <div className="form__acciones">
+            <Boton onClick={() => void Promise.all(['privacidad', 'terminos'].map((d) => fetch(urlApi(`/legal/${d}`)).then((r) => r.json())))
+              .then(([p, t]) => setCfg((c) => c && { ...c, legal: { ...c.legal, textoPrivacidad: c.legal.textoPrivacidad || p.texto, textoTerminos: c.legal.textoTerminos || t.texto } }))}>Cargar texto base para editar</Boton>
+            <Boton variant="primary" onClick={() => void guardar('legal')} disabled={guardando}>Guardar</Boton>
+          </div>
         </Tarjeta>
       )}
 
@@ -217,13 +269,24 @@ export function Configuracion() {
               <span />
               <Campo etiqueta="App ID Android"><input className="field__input mono" placeholder="1:123:android:abc" value={firebase.appIdAndroid ?? ''} onChange={(e) => campo('firebase', 'appIdAndroid', e.target.value.trim())} /></Campo>
               <Campo etiqueta="App ID iOS"><input className="field__input mono" placeholder="1:123:ios:abc" value={firebase.appIdIos ?? ''} onChange={(e) => campo('firebase', 'appIdIos', e.target.value.trim())} /></Campo>
+              <div className="guia field--ancho">
+                <b>Dos archivos distintos, ambos de Firebase Console → ⚙ Configuración del proyecto:</b>
+                <ol>
+                  <li><b>google-services.json</b> (pestaña General → tu app Android): identifica la app; con él los teléfonos se registran para recibir avisos.</li>
+                  <li><b>Cuenta de servicio</b> (pestaña Cuentas de servicio → «Generar nueva clave privada»): es la llave con la que <i>este servidor</i> envía los avisos. Sin ella se envían 0. Se guarda cifrada.</li>
+                </ol>
+                <span>Después, cada persona debe abrir la app, iniciar sesión y aceptar el permiso de notificaciones: su teléfono aparece con Push «Sí» en App móvil → Dispositivos.</span>
+              </div>
               <Campo etiqueta="Cuenta de servicio (JSON) · secreta" ancho>
                 <textarea className="field__input mono" rows={4} spellCheck={false} placeholder='{"type":"service_account","project_id":"…","private_key":"…","client_email":"…"}'
                   value={firebase.cuentaServicio ?? ''} onChange={(e) => campo('firebase', 'cuentaServicio', e.target.value)} />
               </Campo>
             </div>
-            <div className="form__acciones">
-              <Boton onClick={() => void probar('/sistema/push/probar', (r) => `Push enviado a ${r.enviados} dispositivo(s) tuyos.`)}>Enviarme una prueba</Boton>
+            <div className="form__acciones form__acciones--entre">
+              <div className="campo-boton">
+                <input className="field__input" placeholder="Usuario o correo (vacío = tú)" value={destinatario} onChange={(e) => setDestinatario(e.target.value)} />
+                <Boton onClick={() => void probar('/sistema/push/probar', (r) => `Push enviado a ${r.enviados} teléfono(s) de ${r.destinatario}.`, { destinatario })}>Enviar push de prueba</Boton>
+              </div>
               <Boton variant="primary" onClick={() => void guardar('firebase')} disabled={guardando}>Guardar Firebase</Boton>
             </div>
           </Tarjeta>
@@ -235,7 +298,13 @@ export function Configuracion() {
               <label className="check"><input type="checkbox" checked={!!webhook.habilitado} onChange={(e) => campo('webhook', 'habilitado', e.target.checked)} /> Enviar eventos</label>
               <span />
               <Campo etiqueta="URL de destino (https)"><input className="field__input" type="url" placeholder="https://erp.miempresa.com/tanta" value={webhook.url ?? ''} onChange={(e) => campo('webhook', 'url', e.target.value.trim())} /></Campo>
-              <Campo etiqueta="Secreto de firma · secreto"><input className="field__input mono" type="password" autoComplete="off" value={webhook.secreto ?? ''} onChange={(e) => campo('webhook', 'secreto', e.target.value)} /></Campo>
+              <div className="field"><span className="field__label">Secreto de firma · secreto</span>
+                <div className="campo-boton">
+                  <input className="field__input mono" type="password" autoComplete="off" value={webhook.secreto ?? ''} onChange={(e) => campo('webhook', 'secreto', e.target.value)} />
+                  <Boton onClick={() => campo('webhook', 'secreto', Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join(''))}>Generar</Boton>
+                </div>
+                <p className="dialogo__nota">Tu servidor verifica <code>X-Tanta-Firma: sha256=HMAC(cuerpo, secreto)</code>. Guárdalo antes de salir: no se vuelve a mostrar.</p>
+              </div>
               <fieldset className="field field--ancho"><legend className="field__label">Eventos</legend>
                 <div className="checks">{EVENTOS.map(([id, txt]) => (
                   <label key={id} className="check"><input type="checkbox" checked={(webhook.eventos as string[] ?? []).includes(id)}

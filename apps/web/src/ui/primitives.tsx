@@ -19,8 +19,8 @@ export function BrandMark({ variant = 'light', size = 'md' }: { variant?: 'light
   }
   return (
     <div className={`brandmark brandmark--${variant} brandmark--${size}`}>
-      <span className="brandmark__word">TANTA</span>
-      <span className="brandmark__pill">PAN DE CASA</span>
+      <span className="brandmark__word">{(cfg?.marca.nombreApp ?? 'Tanta').toUpperCase()}</span>
+      {cfg?.negocio?.claim && <span className="brandmark__pill">{cfg.negocio.claim.toUpperCase()}</span>}
     </div>
   );
 }
