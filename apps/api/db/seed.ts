@@ -55,19 +55,22 @@ const PERMISOS: Array<[string, string, string]> = [
   ['ventas.anular', 'Ventas', 'Anular ventas: devuelve el stock y cancela la deuda'],
   ['requisiciones.atender', 'Almacén', 'Entregar a Producción los insumos de una requisición'],
   ['descuentos.aprobar', 'Ventas', 'Aprobar descuentos mayores al máximo permitido'],
+  ['proveedores.gestionar', 'Almacén', 'Registrar y editar proveedores'],
+  ['compras.registrar', 'Almacén', 'Registrar compras de insumos con su documento'],
+  ['conteo.aprobar', 'Almacén', 'Aprobar las diferencias del conteo físico'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'descuentos.aprobar']],
+    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'descuentos.aprobar', 'conteo.aprobar']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
-    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular']],
+    ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular', 'proveedores.gestionar']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
     ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'produccion.planificar', 'recetas.ver', 'inventario.ver', 'pedidos.ver', 'catalogo.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,
-    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver', 'requisiciones.atender']],
+    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver', 'requisiciones.atender', 'proveedores.gestionar', 'compras.registrar']],
   ['VENDEDOR', 'Vendedor', 'Ventas', 'Despacho, ventas a terceros y cobranza', 'app', 'truck', 5,
     ['panel.ver', 'pedidos.ver', 'pedidos.gestionar', 'pedidos.crear', 'ventas.registrar', 'cobranza.ver', 'cobranza.registrar', 'clientes.ver', 'catalogo.ver', 'reportes.ver']],
   ['CLIENTE', 'Cliente', 'Cliente', 'Catálogo, pedidos y saldo', 'app', 'user', 6,
@@ -82,6 +85,8 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-almacen', 'Operación', 'Almacén', '/almacen', 'box', 'inventario.ver', 3, 1],
   ['n-kardex', 'Operación', 'Kárdex', '/almacen/kardex', 'ledger', 'inventario.ver', 4, 1],
   ['n-requisiciones', 'Operación', 'Requisiciones', '/almacen/requisiciones', 'clipboard', 'requisiciones.atender', 5, 1],
+  ['n-compras', 'Operación', 'Compras', '/almacen/compras', 'sack', 'compras.registrar', 6, 1],
+  ['n-conteos', 'Operación', 'Conteo físico', '/almacen/conteos', 'clipboard', 'inventario.ver', 7, 1],
   ['n-pedidos', 'Comercial', 'Pedidos', '/ventas/pedidos', 'clipboard', 'pedidos.ver', 1, 2],
   ['n-cobranza', 'Comercial', 'Cobranza', '/ventas/cobranza', 'wallet', 'cobranza.ver', 2, 2],
   ['n-catalogo', 'Comercial', 'Catálogo', '/catalogo', 'bread', 'catalogo.ver', 3, 2],
@@ -89,6 +94,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-productos', 'Maestros', 'Productos', '/maestros/productos', 'bread', 'maestros.ver', 1, 3],
   ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 3],
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
+  ['n-proveedores', 'Maestros', 'Proveedores', '/maestros/proveedores', 'truck', 'proveedores.gestionar', 4, 3],
   ['n-categorias', 'Maestros', 'Categorías', '/maestros/categorias', 'clipboard', 'maestros.editar', 3, 3],
   ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 3],
   ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 3],
@@ -193,7 +199,7 @@ async function main() {
     await c.query('ALTER TABLE audit.evento DISABLE TRIGGER USER');
     await c.query(`TRUNCATE core.cobranza, core.cuenta_por_cobrar, core.venta_detalle, core.venta,
       core.pedido, core.orden_produccion, core.movimiento_inventario, core.receta_detalle, core.receta,
-      core.producto, core.insumo, core.cliente, core.categoria, core.usuario_rol, core.refresh_token,
+      core.producto, core.insumo, core.proveedor, core.compra, core.conteo, core.cliente, core.categoria, core.usuario_rol, core.refresh_token,
       core.usuario, core.rol_permiso, core.navegacion, core.permiso, core.rol, core.parametro,
       audit.evento RESTART IDENTITY CASCADE`);
     await c.query("UPDATE audit.cadena_estado SET hash_actual = '' WHERE id = 1");
@@ -272,6 +278,9 @@ async function main() {
       );
       idInsumo.set(codigo, r.rows[0].id);
     }
+    // MAE-09: los proveedores salen de los insumos de ejemplo y quedan vinculados.
+    await c.query(`INSERT INTO core.proveedor (razon_social) SELECT DISTINCT proveedor FROM core.insumo WHERE proveedor <> '' ON CONFLICT DO NOTHING`);
+    await c.query('UPDATE core.insumo i SET proveedor_id = p.id FROM core.proveedor p WHERE lower(i.proveedor) = lower(p.razon_social)');
 
     // --------------------------------------------------------- productos
     const cppInsumo = new Map(INSUMOS.map(([cod, , , cpp]) => [cod, cpp]));

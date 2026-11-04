@@ -24,8 +24,7 @@ test('flujo de inventario', async () => {
   assert.equal(exceso.s, 409);
 
   const conteo = await mover(alm, { tipo: 'CONTEO', insumoId: i0.id, cantidadContada: compra.b.saldo - 1, motivo: 'Conteo de prueba' });
-  assert.equal(conteo.s, 200);
-  assert.equal(conteo.b.diferencia, -1);
+  assert.equal(conteo.s, 403, 'el ajuste por conteo necesita la aprobación del Gerente');
 
   const k = randomUUID();
   const a = await mover(alm, { tipo: 'MERMA', insumoId: i0.id, cantidad: 0.5, motivo: 'Idempotencia' }, k);

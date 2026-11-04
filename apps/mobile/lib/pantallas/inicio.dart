@@ -362,6 +362,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('inventario.mover')) accion('Registrar baja', Icons.remove_shopping_cart_outlined, BajaInventario(datos: datos)),
       if (api.puede('produccion.planificar')) accion('Nueva OP', Icons.add_task_outlined, NuevaOrden(datos: datos)),
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
+      if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, const MisPedidos()),
       if (api.puede('pedidos.ver')) chip('Pedidos', Icons.receipt_long_outlined),
       if (api.puede('cobranza.ver')) chip('Cobranza', Icons.account_balance_wallet_outlined),

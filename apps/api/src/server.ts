@@ -13,6 +13,7 @@ import { rutasSistema } from './routes/sistema.js';
 import { rutasMaestros } from './routes/maestros.js';
 import { rutasReportes } from './routes/reportes.js';
 import { rutasCobranza } from './routes/cobranza.js';
+import { rutasAlmacen } from './routes/almacen.js';
 import { rutasFlujo } from './routes/flujo.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
@@ -132,6 +133,7 @@ export async function construir() {
     await api.register(rutasMaestros);
     await api.register(rutasReportes);
     await api.register(rutasCobranza);
+    await api.register(rutasAlmacen);
     await api.register(rutasFlujo);
   }, { prefix: '/api/v1' });
 

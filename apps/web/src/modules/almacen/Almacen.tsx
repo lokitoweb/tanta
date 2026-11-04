@@ -53,7 +53,7 @@ export function Almacen() {
       <Encabezado
         titulo="Almacén e inventario"
         descripcion="Stock de insumos y productos terminados, valorizado al costo promedio ponderado"
-        acciones={<><Boton icono="download" onClick={() => exportarExcel('inventario', insumos.map((i) => ({ codigo: i.codigo ?? i.id, insumo: i.nombre, unidad: i.unidad, stock: i.stock, minimo: i.minimo, ...(verValor ? { cpp: i.cpp, valorizado: i.valorizado } : {}), estado: i.estado })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{puede('inventario.mover') && <Boton variant="primary" icono="plus" onClick={() => setRegistrar(true)}>Registrar movimiento</Boton>}</>}
+        acciones={<><Boton icono="download" onClick={() => exportarExcel('inventario', insumos.map((i) => ({ codigo: i.codigo ?? i.id, insumo: i.nombre, unidad: i.unidad, stock: i.stock, minimo: i.minimo, ...(verValor ? { cpp: i.cpp, valorizado: i.valorizado } : {}), estado: i.estado })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{puede('inventario.mover') && <Boton variant="primary" icono="plus" onClick={() => setRegistrar(true)}>Registrar baja</Boton>}</>}
       />
 
       <div className="grid grid--auto">
@@ -99,11 +99,12 @@ export function Almacen() {
 }
 
 type TipoMov = 'COMPRA' | 'MERMA' | 'CONTEO';
-const TIPOS_MOV: Record<TipoMov, string> = { COMPRA: 'Compra (ingreso)', MERMA: 'Baja / merma', CONTEO: 'Toma de inventario físico' };
+// Compras (con proveedor y documento) y conteos (con aprobación) tienen su propia pantalla.
+const TIPOS_MOV: Partial<Record<TipoMov, string>> = { MERMA: 'Baja / merma' };
 
 /** Compra, baja con motivo o conteo físico. El servidor valida, recalcula el CPP y audita. */
 function RegistrarMovimiento({ insumos, onCerrar, onListo }: { insumos: Insumo[]; onCerrar: () => void; onListo: () => Promise<void> }) {
-  const [tipo, setTipo] = useState<TipoMov>('COMPRA');
+  const [tipo, setTipo] = useState<TipoMov>('MERMA');
   const [insumoId, setInsumoId] = useState(insumos[0]?.id ?? '');
   const [cantidad, setCantidad] = useState('');
   const [costo, setCosto] = useState('');
@@ -134,7 +135,7 @@ function RegistrarMovimiento({ insumos, onCerrar, onListo }: { insumos: Insumo[]
   return (
     <Dialogo
       abierto
-      titulo="Registrar movimiento de insumo"
+      titulo="Baja de insumo"
       descripcion="Queda en el kárdex con tu usuario y no se puede editar ni borrar."
       onCerrar={onCerrar}
       acciones={<>

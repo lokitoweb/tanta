@@ -372,6 +372,132 @@ class _RequisicionesState extends State<Requisiciones> {
   }
 }
 
+/* ------------------------------------------------------ conteo físico */
+/// M05: conteo contra el sistema; las diferencias se ajustan solo con la aprobación del Gerente.
+class Conteos extends StatefulWidget {
+  const Conteos({super.key, required this.datos});
+  final Map<String, dynamic> datos;
+  @override
+  State<Conteos> createState() => _ConteosState();
+}
+
+class _ConteosState extends State<Conteos> {
+  List<dynamic>? _conteos;
+  String? _error;
+
+  Future<void> _cargar() async {
+    try {
+      final l = await Api.instancia.conteos();
+      if (mounted) setState(() { _conteos = l; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _mensaje(e));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _nuevo() async {
+    final insumos = _lista(widget.datos, 'insumos');
+    final ctrls = {for (final i in insumos) '${i['id']}': TextEditingController()};
+    final obs = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      title: const Text('Nuevo conteo'),
+      content: SizedBox(width: double.maxFinite, child: ListView(shrinkWrap: true, children: [
+        const Text('Deja en blanco lo que no contaste.'),
+        for (final i in insumos) TextField(controller: ctrls['${i['id']}'], keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(labelText: '${i['nombre']} (${i['unidad']})', helperText: 'Sistema: ${i['stock']}')),
+        TextField(controller: obs, maxLength: 200, decoration: const InputDecoration(labelText: 'Observación')),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar a aprobación')),
+      ],
+    ));
+    if (ok != true || !mounted) return;
+    final items = [
+      for (final e in ctrls.entries)
+        if (double.tryParse(e.value.text.replaceAll(',', '.')) case final v? when v >= 0) {'insumoId': e.key, 'contado': v},
+    ];
+    if (items.isEmpty) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final r = await Api.instancia.registrarConteo(items, obs.text.trim());
+      aviso.showSnackBar(SnackBar(content: Text('${r['codigo']} enviado con ${r['diferencias']} diferencia(s)')));
+      _cargar();
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    }
+  }
+
+  Future<void> _ver(Map<String, dynamic> k) async {
+    final items = ((k['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final aprueba = k['estado'] == 'PENDIENTE' && Api.instancia.puede('conteo.aprobar');
+    final motivo = TextEditingController();
+    final r = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      title: Text('${k['codigo']} · ${'${k['estado']}'.toLowerCase()}'),
+      content: SizedBox(width: double.maxFinite, child: ListView(shrinkWrap: true, children: [
+        for (final i in items) ListTile(dense: true, contentPadding: EdgeInsets.zero,
+            title: Text('${i['insumo']}'),
+            subtitle: Text('Sistema ${i['sistema']} · contado ${i['contado']}'),
+            trailing: Text((i['diferencia'] as num).abs() < 0.0005 ? 'OK' : '${i['diferencia']}')),
+        if (aprueba) TextField(controller: motivo, decoration: const InputDecoration(labelText: 'Motivo (solo para rechazar)')),
+      ])),
+      actions: aprueba
+          ? [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Rechazar')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Aprobar y ajustar')),
+            ]
+          : [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
+    ));
+    if (!aprueba || r == null || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final res = await Api.instancia.resolverConteo('${k['id']}', r, motivo: motivo.text.trim());
+      aviso.showSnackBar(SnackBar(content: Text(r ? '${k['codigo']} aprobado: ${res['ajustes']} ajuste(s)' : '${k['codigo']} rechazado')));
+      _cargar();
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lista = (_conteos ?? const []).cast<Map<String, dynamic>>();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Conteo físico')),
+      floatingActionButton: Api.instancia.puede('inventario.mover')
+          ? FloatingActionButton.extended(onPressed: _nuevo, icon: const Icon(Icons.add), label: const Text('Nuevo conteo'))
+          : null,
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: _error != null
+            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            : _conteos == null
+                ? const Center(child: CircularProgressIndicator())
+                : lista.isEmpty
+                    ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('Sin conteos registrados'))])
+                    : ListView.separated(
+                        itemCount: lista.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final k = lista[i];
+                          return ListTile(
+                            title: Text('${k['codigo']} · ${k['registradoPor']}'),
+                            subtitle: Text('${(k['items'] as List).length} insumos'),
+                            trailing: Text('${k['estado']}'.toLowerCase()),
+                            onTap: () => _ver(k),
+                          );
+                        },
+                      ),
+      ),
+    );
+  }
+}
+
 /* ------------------------------------------------------ mis pedidos */
 /// A08/A09: historial del cliente con estado y cancelación antes de producir (PED-07).
 class MisPedidos extends StatefulWidget {

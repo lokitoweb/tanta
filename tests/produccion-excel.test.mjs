@@ -1,10 +1,10 @@
 // node --test tests/produccion-excel.test.mjs  (API en 127.0.0.1:3001 con la semilla)
 // Producción contra los casos de prueba del informe INF-TEC-001: CP-12 a CP-18 y CP-35.
 // Usa un pan y tres insumos propios (códigos únicos por ejecución): no toca los datos reales.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { sql } from './_sql.mjs';
+import { sql, sqlScript } from './_sql.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -109,3 +109,7 @@ test('PRO-12: anular con motivo; con insumos entregados no se anula', async () =
   await api(alm, 'POST', `/requisiciones/${req.codigo}/atender`, { lineas: [{ insumoId: harina, cantidad: 1 }] });
   assert.equal((await api(pro, 'POST', `/ordenes-produccion/${op2.codigo}/anular`, { motivo: 'Pedido cancelado' })).s, 409);
 });
+
+// El pan y los insumos de prueba no quedan activos en las listas.
+after(() => sqlScript(`UPDATE core.producto SET estado = 'INACTIVO' WHERE codigo = 'TP-${sufijo}';
+  UPDATE core.insumo SET activo = false WHERE codigo IN ('TH-${sufijo}', 'TA-${sufijo}', 'TL-${sufijo}');`));

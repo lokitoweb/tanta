@@ -799,6 +799,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = MovInsumo.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Revisa cantidad, costo y motivo (mínimo 3 caracteres).'));
     const m = parseo.data;
+    // INF-TEC-001: las diferencias de conteo se ajustan solo con aprobación del Gerente (POST /conteos).
+    if (m.tipo === 'CONTEO' && !req.usuario!.permisos.has('conteo.aprobar')) {
+      return reply.code(403).send(error(403, 'REQUIERE_APROBACION', 'El ajuste por conteo requiere aprobación: regístralo en Conteo físico.'));
+    }
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {

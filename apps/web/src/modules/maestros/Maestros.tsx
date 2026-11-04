@@ -156,3 +156,26 @@ export function Insumos() {
   );
 }
 
+
+/* ------------------------------------------------------------- Proveedores */
+// MAE-09: RUC único; un proveedor con compras no se elimina, se inactiva.
+export function Proveedores() {
+  return (
+    <Crud titulo="Proveedores" nombreExport="proveedores" descripcion="RUC, contacto e insumos que abastece. Un proveedor con compras solo se inactiva."
+      cargar={() => api<Reg[]>('/proveedores')}
+      nuevo={{ ruc: '', razonSocial: '', contacto: '', telefono: '', email: '', estado: 'ACTIVO' }}
+      crear={guardar('POST', '/proveedores')} editar={(id, d) => api(`/proveedores/${id}`, { method: 'PATCH', body: d })}
+      columnas={[
+        { key: 'ruc', label: 'RUC' }, { key: 'razonSocial', label: 'Razón social' }, { key: 'contacto', label: 'Contacto' },
+        { key: 'telefono', label: 'Teléfono' }, { key: 'insumos', label: 'Insumos que abastece' }, { key: 'compras', label: 'Compras', tipo: 'num' },
+        { key: 'estado', label: 'Estado' },
+      ]}
+      campos={[
+        { key: 'razonSocial', label: 'Razón social', requerido: true, ancho: true },
+        { key: 'ruc', label: 'RUC', max: 11, ayuda: '11 dígitos; empieza en 10, 15, 17 o 20' },
+        { key: 'contacto', label: 'Contacto', max: 120 },
+        { key: 'telefono', label: 'Teléfono', tipo: 'tel', max: 30 }, { key: 'email', label: 'Correo', tipo: 'email' },
+        { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
+      ]} />
+  );
+}
