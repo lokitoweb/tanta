@@ -8,6 +8,7 @@ import { Almacenes, Categorias, Clientes, CostosIndirectos, Insumos, Productos, 
 import { Compras } from '@/modules/almacen/Compras';
 import { Conteos } from '@/modules/almacen/Conteos';
 import { Deudas } from '@/modules/almacen/Deudas';
+import { Catalogos } from '@/modules/maestros/Catalogos';
 import { CajaChica } from '@/modules/ventas/CajaChica';
 import { Auditoria } from '@/modules/sistema/Auditoria';
 import { Recetas } from '@/modules/maestros/Recetas';
@@ -49,6 +50,7 @@ export function App() {
         <Route path="/compras/deudas" element={<Gate permiso="deudas.ver" siNo={<SinAcceso />}><Deudas /></Gate>} />
         <Route path="/caja" element={<Gate permiso="caja.abrir" siNo={<SinAcceso />}><CajaChica /></Gate>} />
         <Route path="/almacen/conteos" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Conteos /></Gate>} />
+        <Route path="/maestros/catalogos" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Catalogos /></Gate>} />
         <Route path="/maestros/almacenes" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Almacenes /></Gate>} />
         <Route path="/maestros/proveedores" element={<Gate permiso="proveedores.gestionar" siNo={<SinAcceso />}><Proveedores /></Gate>} />
 

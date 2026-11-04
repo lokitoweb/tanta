@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/catalogos.dart';
 import 'catalogo.dart';
 import '../core/tokens.dart';
 import '../core/comprobante.dart';
@@ -28,7 +29,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
   final _referencia = TextEditingController();
   bool _enviando = false;
   // COB-02: con tarjeta, Yape, Plin o transferencia se registra el número de operación.
-  bool get _conReferencia => _forma != 'EFECTIVO' && _forma != 'CREDITO';
+  bool get _conReferencia => requiereOperacion(_forma);
 
   double get _total {
     final d = (double.tryParse(_descuento.text.replaceAll(',', '.')) ?? 0) / 100;
@@ -92,8 +93,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
         DropdownButtonFormField<String>(
           initialValue: _forma,
           decoration: const InputDecoration(labelText: 'Forma de pago'),
-          items: const ['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA', 'TRANSFERENCIA', 'CREDITO']
-              .map((f) => DropdownMenuItem(value: f, child: Text(f == 'CREDITO' ? 'Crédito' : f[0] + f.substring(1).toLowerCase()))).toList(),
+          items: [for (final m in mediosPago('enVentas')) DropdownMenuItem(value: '${m['codigo']}', child: Text('${m['nombre']}'))],
           onChanged: (v) => setState(() => _forma = v!),
         ),
         if (_conReferencia) ...[
@@ -104,7 +104,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
         const SizedBox(height: 12),
         DropdownButtonFormField<String?>(
           initialValue: _cliente,
-          decoration: InputDecoration(labelText: _forma == 'CREDITO' ? 'Cliente (obligatorio)' : 'Cliente (opcional)'),
+          decoration: InputDecoration(labelText: esCredito(_forma) ? 'Cliente (obligatorio)' : 'Cliente (opcional)'),
           items: [
             const DropdownMenuItem<String?>(value: null, child: Text('Público general')),
             for (final c in clientes) DropdownMenuItem<String?>(value: '${c['id']}', child: Text('${c['nombre']}')),
@@ -119,7 +119,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: FilledButton(
-            onPressed: !hay || _enviando || (_forma == 'CREDITO' && _cliente == null) || (_conReferencia && _referencia.text.trim().length < 3) ? null : _registrar,
+            onPressed: !hay || _enviando || (esCredito(_forma) && _cliente == null) || (_conReferencia && _referencia.text.trim().length < 3) ? null : _registrar,
             child: Text(_enviando ? 'Registrando…' : 'Cobrar ${dinero(_total)}'),
           ),
         ),
@@ -468,8 +468,7 @@ class _NuevaCompraState extends State<NuevaCompra> {
           Expanded(child: DropdownButtonFormField<String>(
             initialValue: _docTipo,
             decoration: const InputDecoration(labelText: 'Documento'),
-            items: const [DropdownMenuItem(value: 'FACTURA', child: Text('Factura')), DropdownMenuItem(value: 'BOLETA', child: Text('Boleta')),
-              DropdownMenuItem(value: 'NOTA_VENTA', child: Text('Nota de venta')), DropdownMenuItem(value: 'GUIA', child: Text('Guía')), DropdownMenuItem(value: 'OTRO', child: Text('Otro'))],
+            items: [for (final t in tiposDocumento()) DropdownMenuItem(value: '${t['codigo']}', child: Text('${t['nombre']}'))],
             onChanged: (v) => setState(() => _docTipo = v!),
           )),
         ]),
@@ -927,7 +926,6 @@ class MisPedidos extends StatefulWidget {
 
 const _etiquetaPedido = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
   'DESPACHADO': 'En camino', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
-const _pagoEntrega = {'EFECTIVO': 'efectivo', 'YAPE': 'Yape', 'PLIN': 'Plin', 'TARJETA': 'tarjeta', 'CREDITO': 'crédito'};
 
 class _MisPedidosState extends State<MisPedidos> {
   List<dynamic>? _lista;
@@ -976,7 +974,7 @@ class _MisPedidosState extends State<MisPedidos> {
       expand: false, initialChildSize: 0.75, builder: (_, scroll) => ListView(controller: scroll, padding: const EdgeInsets.all(20), children: [
         Text('${p['codigo']}', style: Theme.of(ctx).textTheme.titleLarge),
         Text('Entrega ${p['fecha_entrega']}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' · ${p['hora_entrega']}'} · ${p['tipoEntrega'] == 'DELIVERY' ? 'delivery a ${p['direccion']}' : 'recojo en tienda'}'),
-        Text('Pago contra entrega: ${_pagoEntrega[p['pagoEntrega']] ?? 'efectivo'}'),
+        Text('Pago contra entrega: ${nombreMedio('${p['pagoEntrega'] ?? 'EFECTIVO'}').toLowerCase()}'),
         const SizedBox(height: 16),
         for (var k = 0; k < pasos.length; k++)
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

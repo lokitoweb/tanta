@@ -2,6 +2,7 @@ import 'dart:async';
 import 'acciones.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/catalogos.dart';
 import '../core/arranque.dart';
 import '../core/cola.dart';
 import '../core/tema.dart';
@@ -229,6 +230,7 @@ class _AvisoColaState extends State<_AvisoCola> {
       return;
     }
     ColaOffline.instancia.cargar().then((_) => ColaOffline.instancia.sincronizar(Api.instancia));
+    cargarCatalogos();
   }
 
   @override

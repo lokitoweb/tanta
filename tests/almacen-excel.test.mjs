@@ -42,7 +42,8 @@ test('MAE-09: proveedor con RUC único; con compras solo se inactiva', async () 
 test('compra con varias líneas: al verificar, stock y costo promedio ponderado; el documento no se repite', async () => {
   const p = await api(await login('lbermudez'), 'POST', '/proveedores', { ruc: ruc(), razonSocial: `Molino prueba ${randomUUID().slice(0, 6)}` });
   const a = insumo(10, 2), b = insumo(0, 0);
-  const doc = { docTipo: 'FACTURA', serie: 'F001', nro: nroUnico() };
+  // Boleta: sin crédito fiscal, el precio es el costo (la factura descuenta el IGV: lo prueba catalogos.test).
+  const doc = { docTipo: 'BOLETA', serie: 'B001', nro: nroUnico() };
   const c = await registrar(p.b.id, [{ insumoId: a, cantidad: 10, precioUnitario: 4 }, { insumoId: b, cantidad: 5, precioUnitario: 3 }], doc);
   assert.equal(c.s, 201, JSON.stringify(c.b));
   assert.equal(c.b.total, 55);

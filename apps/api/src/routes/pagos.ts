@@ -6,6 +6,7 @@ import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { notificar } from './notificaciones.js';
 import { actor, fallo, responder } from './almacen.js';
+import { medioPago, exigirOperacion } from './catalogos.js';
 
 /**
  * Deudas por pagar y cajas (informe de compra de insumos v1.1, secciones 3.2, 5.5 y RN-10 a RN-13).
@@ -120,11 +121,10 @@ export async function rutasPagos(app: FastifyInstance) {
   /* ------------------------------------------------------------------- pagos */
   const Pago = z.object({
     caja: z.enum(['CHICA', 'GRANDE']),
-    medio: z.enum(['EFECTIVO', 'PLIN', 'YAPE', 'TRANSFERENCIA', 'OTRO']),
+    medio: z.string().trim().toUpperCase().max(20),
     monto: z.number().positive().max(10_000_000),
     nroOperacion: z.string().trim().toUpperCase().max(30).default(''),
-  }).refine((d) => d.caja !== 'CHICA' || d.medio === 'EFECTIVO', { message: 'La caja chica solo paga en efectivo.', path: ['medio'] })
-    .refine((d) => ['EFECTIVO', 'OTRO'].includes(d.medio) || d.nroOperacion.length >= 3, { message: 'RN-12: indica el número de operación del pago digital o la transferencia.', path: ['nroOperacion'] });
+  });
 
   // RN-10 a RN-13: Administración decide caja y medio; varios pagos por compra; nunca más que el saldo.
   app.post('/compras/:codigo/pagos', { preHandler: autenticar }, async (req, reply) => {
@@ -140,6 +140,10 @@ export async function rutasPagos(app: FastifyInstance) {
     }
     return responder(reply, 'PAGO_INVALIDO', async () => {
       const r = await tx(async (c) => {
+        // Catálogo: medio habilitado para compras; RN-12 n.° de operación si el medio lo exige; caja chica solo con medios de caja.
+        const medio = await medioPago(c, d.medio, 'compras');
+        exigirOperacion(medio, d.nroOperacion);
+        if (d.caja === 'CHICA' && !medio.caja_chica) throw fallo(422, `La caja chica no paga con ${medio.nombre.toLowerCase()}.`);
         const k = (await c.query<{ id: string; estado: string; total: string }>('SELECT id, estado, total FROM core.compra WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
         if (!k) throw fallo(404, 'La compra no existe.');
         // Se paga lo que Almacén confirmó: una compra sin verificar todavía puede cambiar de monto.

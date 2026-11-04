@@ -6,6 +6,7 @@ import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
+import { medioPago, exigirOperacion } from './catalogos.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -285,8 +286,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
       // Un tope por línea evita desbordes numéricos y ventas absurdas por error de tecleo.
       cantidad: z.number().positive().max(10_000),
     })).min(1).max(50),
-    formaPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA', 'CREDITO']).default('EFECTIVO'),
-    // COB-02: número de operación obligatorio si no es efectivo ni crédito.
+    // Catálogo de medios de pago: el medio debe estar activo y habilitado para ventas.
+    formaPago: z.string().trim().toUpperCase().max(20).default('EFECTIVO'),
+    // COB-02: número de operación obligatorio si el medio lo exige (catálogo).
     referenciaPago: z.string().trim().max(60).default(''),
     // RN-36: un descuento sobre el tope solo con una aprobación vigente del Gerente.
     aprobacionDescuentoId: z.string().uuid().optional(),
@@ -294,12 +296,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     // Descuento autorizado (PDF §3.2): tope en Parámetros → descuento_maximo; queda auditado.
     descuentoPct: z.number().min(0).max(0.9).default(0),
     pedidoId: z.string().uuid().optional(),
-  }).refine(
-    // Una venta al crédito sin cliente no puede generar cuenta por cobrar.
-    (v) => v.formaPago !== 'CREDITO' || !!v.clienteId,
-    { message: 'Una venta al crédito requiere clienteId.', path: ['clienteId'] },
-  ).refine((v) => ['EFECTIVO', 'CREDITO'].includes(v.formaPago) || v.referenciaPago.length >= 3,
-    { message: 'Indica el número de operación del pago.', path: ['referenciaPago'] });
+  });
 
   app.post('/ventas', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'ventas.registrar')) return;
@@ -310,6 +307,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {
+      const medio = await medioPago(null, formaPago, 'ventas');
+      exigirOperacion(medio, referenciaPago);
+      // Una venta al crédito sin cliente no puede generar cuenta por cobrar.
+      if (medio.es_credito && !clienteId) throw Object.assign(new Error('Una venta al crédito requiere el cliente.'), { status: 422 });
       const venta = await conIdempotencia(clave, req.usuario!.id, 'crear-venta', () =>
         tx(async (c) => {
           const param = await c.query<{ clave: string; valor: string }>(`SELECT clave, valor FROM core.parametro WHERE clave IN ('igv','descuento_maximo')`);
@@ -459,7 +460,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
           // La cuenta por cobrar se inserta DENTRO de la misma transacción y sin `catch`:
           // si falla, la venta no existe. Antes el error se tragaba y se perdía la deuda.
           let cxcId: string | null = null;
-          if (formaPago === 'CREDITO') {
+          if (medio.es_credito) {
             const cliente = await c.query<{ limite_credito: string; deuda: string; dias_credito: number; condicion_pago: string }>(
               `SELECT c.limite_credito, c.dias_credito, c.condicion_pago,
                       coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x
@@ -571,9 +572,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
   const NuevaCobranza = z.object({
     cxcId: z.string().uuid(),
     monto: z.number().positive(),
-    medio: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA']),
+    medio: z.string().trim().toUpperCase().max(20),
     referencia: z.string().trim().max(60).optional(),
-  }).refine((d) => d.medio === 'EFECTIVO' || (d.referencia ?? '').length >= 3, { message: 'Indica el número de operación.', path: ['referencia'] });
+  });
 
   app.post('/cobranza', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'cobranza.registrar')) return;
@@ -583,6 +584,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {
+      exigirOperacion(await medioPago(null, medio, 'cobranza'), referencia ?? '');
       const res = await conIdempotencia(clave, req.usuario!.id, 'cobranza', () =>
         tx(async (c) => {
           const r = await c.query<{ saldo: string; estado: string }>(

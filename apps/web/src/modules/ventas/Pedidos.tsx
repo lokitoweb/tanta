@@ -1,6 +1,7 @@
 import { Paginador, usePaginado } from '@/ui/Paginador';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
+import { useCatalogos } from '@/core/catalogos';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, num2 } from '@/core/format';
@@ -19,7 +20,6 @@ const ESTADOS: Record<string, { label: string; tono: 'info' | 'warn' | 'ok' | 'd
 };
 // RN-26: siguiente paso natural. Un confirmado con stock puede pasar directo a Listo (reserva el stock).
 const SIGUIENTE: Record<string, string> = { REGISTRADO: 'CONFIRMADO', CONFIRMADO: 'LISTO', EN_PRODUCCION: 'LISTO' };
-const MEDIOS = ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA', 'CREDITO'];
 interface Aprobacion { id: string; porcentaje: number; estado: string; vigente: boolean }
 
 /** Pedidos: registro, avance por estados y despacho con venta vinculada (trazabilidad pedido → venta). */
@@ -31,6 +31,7 @@ export function Pedidos() {
   const [nuevo, setNuevo] = useState(false);
   const [sel, setSel] = useState<Pedido | null>(null);
   const [pago, setPago] = useState({ formaPago: 'EFECTIVO', descuento: '0', referencia: '' });
+  const medios = useCatalogos().mediosPago.filter((m) => m.enVentas);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [motivo, setMotivo] = useState<{ destino: 'RECHAZADO' | 'CANCELADO' | 'ENTREGADO'; texto: string } | null>(null);
@@ -43,7 +44,7 @@ export function Pedidos() {
     await api('/descuentos/solicitudes', { method: 'POST', body: { porcentaje: Number(pago.descuento) / 100, motivo: `Despacho del pedido ${p.codigo}`, clienteId: p.clienteId } });
     return `Descuento de ${pago.descuento} % enviado al Gerente para aprobación`;
   });
-  const conReferencia = !['EFECTIVO', 'CREDITO'].includes(pago.formaPago);
+  const conReferencia = !!medios.find((m) => m.codigo === pago.formaPago)?.requiereOperacion;
   const cargar = () => api<Pedido[]>('/pedidos').then(setPedidos).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
   useEffect(() => { void cargar(); }, []);
 
@@ -136,7 +137,7 @@ export function Pedidos() {
               {sel.items.map((i) => <tr key={i.productoId}><td>{i.producto}</td><td className="t-right">{num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
               <tr><td><strong>Total</strong></td><td /><td className="t-right"><strong>{money(sel.total)}</strong></td></tr>
             </tbody></table>
-            <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Delivery a: ${sel.direccion}` : 'Recojo en tienda'} · paga contra entrega con {(sel.pagoEntrega ?? 'EFECTIVO').toLowerCase()}</p>
+            <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Delivery a: ${sel.direccion}` : 'Recojo en tienda'} · paga contra entrega con {(medios.find((m) => m.codigo === sel.pagoEntrega)?.nombre ?? sel.pagoEntrega ?? 'efectivo').toLowerCase()}</p>
             {sel.observaciones && <p className="dialogo__nota">Observaciones: {sel.observaciones}</p>}
             {sel.motivo && <p className="dialogo__nota">Motivo: {sel.motivo}</p>}
             {sel.entregaObs && <p className="dialogo__nota">Entrega: {sel.entregaObs}</p>}
@@ -154,7 +155,7 @@ export function Pedidos() {
             {sel.estado === 'LISTO' && puede('ventas.registrar') && sel.items.length > 0 && (
               <div className="form form--2col form--dialogo">
                 <label className="field"><span className="field__label">Forma de pago</span>
-                  <select className="field__input" value={pago.formaPago} onChange={(e) => setPago({ ...pago, formaPago: e.target.value })}>{MEDIOS.map((m) => <option key={m} value={m}>{m[0] + m.slice(1).toLowerCase()}</option>)}</select></label>
+                  <select className="field__input" value={pago.formaPago} onChange={(e) => setPago({ ...pago, formaPago: e.target.value })}>{medios.map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}</select></label>
                 <label className="field"><span className="field__label">Descuento autorizado (%)</span>
                   <input className="field__input" type="number" min="0" max="90" step="0.5" value={pago.descuento} onChange={(e) => setPago({ ...pago, descuento: e.target.value })} />
                   {aprobacion ? <span className="field__ayuda">Aprobado por el Gerente hasta {Math.round(aprobacion.porcentaje * 100)} %</span>

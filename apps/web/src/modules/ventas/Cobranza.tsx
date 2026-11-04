@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
+import { useCatalogos } from '@/core/catalogos';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { Dialogo } from '@/ui/Dialogo';
 import { useApp } from '@/core/app-state';
@@ -8,7 +9,6 @@ import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo, Vac
 import { Tabla, type Columna } from '@/ui/Tabla';
 import type { Cliente } from '@/core/types';
 
-const MEDIOS = ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA'];
 interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }> }
 interface EstadoCuenta {
   cliente: { nombre: string; documento: string; condicion: string };
@@ -20,6 +20,7 @@ const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10
 
 export function Cobranza() {
   const { dataset, puede, refrescarDatos } = useApp();
+  const medios = useCatalogos().mediosPago.filter((m) => m.enCobranza);
   const k = dataset.kpis;
   const totalAging = dataset.aging.reduce((s, a) => s + a.monto, 0);
   const limiteTotal = dataset.clientes.reduce((s, c) => s + c.limiteCredito, 0);
@@ -34,7 +35,7 @@ export function Cobranza() {
 
   const abrirPago = (c = deudores[0]) => { setAviso(null); setPago({ clienteId: c?.id ?? '', monto: c ? c.saldo.toFixed(2) : '', medio: 'EFECTIVO', referencia: '' }); };
   const cuenta = deudores.find((c) => c.id === pago?.clienteId);
-  const conReferencia = pago !== null && pago.medio !== 'EFECTIVO';
+  const conReferencia = pago !== null && !!medios.find((m) => m.codigo === pago.medio)?.requiereOperacion;
   const registrar = async () => {
     if (!pago) return;
     setGuardando(true);
@@ -105,7 +106,7 @@ export function Cobranza() {
               <input className="field__input" type="number" min="0.01" step="0.01" max={cuenta?.saldo} value={pago.monto} onChange={(e) => setPago({ ...pago, monto: e.target.value })} />
               {cuenta && Number(pago.monto) > cuenta.saldo && <span className="field__aviso">Supera el saldo ({money(cuenta.saldo)})</span>}</label>
             <label className="field"><span className="field__label">Medio</span>
-              <select className="field__input" value={pago.medio} onChange={(e) => setPago({ ...pago, medio: e.target.value })}>{MEDIOS.map((m) => <option key={m} value={m}>{m[0] + m.slice(1).toLowerCase()}</option>)}</select></label>
+              <select className="field__input" value={pago.medio} onChange={(e) => setPago({ ...pago, medio: e.target.value })}>{medios.map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}</select></label>
             <label className="field field--ancho"><span className="field__label">N.° de operación {conReferencia ? '(obligatorio)' : '(opcional)'}</span>
               <input className="field__input" maxLength={60} value={pago.referencia} onChange={(e) => setPago({ ...pago, referencia: e.target.value })} /></label>
           </div>

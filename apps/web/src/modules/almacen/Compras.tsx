@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
+import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
@@ -26,7 +27,6 @@ const ESTADO: Record<Estado, { texto: string; tono: 'warn' | 'ok' | 'danger' | '
   REGISTRADA: { texto: 'Por verificar', tono: 'warn' }, VERIFICADA: { texto: 'Verificada', tono: 'ok' }, OBSERVADA: { texto: 'Observada', tono: 'danger' },
   EN_CORRECCION: { texto: 'En corrección', tono: 'info' }, ANULADA: { texto: 'Anulada', tono: 'neutral' },
 };
-const DOCS = [['FACTURA', 'Factura'], ['BOLETA', 'Boleta'], ['NOTA_VENTA', 'Nota de venta'], ['GUIA', 'Guía de remisión'], ['OTRO', 'Otro']];
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 const n4 = (x: number) => (Math.round(x * 10_000) / 10_000).toLocaleString('es-PE', { maximumFractionDigits: 4 });
 const u = (x: string) => x.toLowerCase();
@@ -48,6 +48,7 @@ export function Compras() {
   const [ocupado, setOcupado] = useState(false);
 
   const registra = puede('compras.registrar');
+  const docs = useCatalogos().tiposDocumento;
   const cargar = () => api<Compra[]>('/compras').then(setCompras).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
   useEffect(() => {
     void cargar();
@@ -138,7 +139,7 @@ export function Compras() {
               <select className="field__input" value={form.proveedorId} onChange={(e) => setForm({ ...form, proveedorId: e.target.value })}>
                 {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razonSocial}{p.ruc ? ` · ${p.ruc}` : ''}</option>)}</select></label>
             <label className="field"><span className="field__label">Documento</span>
-              <select className="field__input" value={form.docTipo} onChange={(e) => setForm({ ...form, docTipo: e.target.value })}>{DOCS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
+              <select className="field__input" value={form.docTipo} onChange={(e) => setForm({ ...form, docTipo: e.target.value })}>{docs.map((t) => <option key={t.codigo} value={t.codigo}>{t.nombre}</option>)}</select></label>
             <label className="field"><span className="field__label">Fecha del documento</span>
               <input className="field__input" type="date" max={hoy()} value={form.fechaCompra} onChange={(e) => setForm({ ...form, fechaCompra: e.target.value })} /></label>
             <label className="field"><span className="field__label">Serie</span>
@@ -153,6 +154,8 @@ export function Compras() {
             const contenido = ins?.contenido ?? 1, factor = ins?.factor ?? 1;
             const cant = Number(l.cantidad), precio = Number(l.precioUnitario);
             const uInv = u(ins?.unidadInventario ?? ins?.unidad ?? '');
+            // Mismo cálculo que el servidor: con crédito fiscal el costo va sin IGV (la tasa viene del parámetro igv).
+            const sinIgv = docs.find((t) => t.codigo === form.docTipo)?.creditoFiscal ? 1 / (1 + dataset.negocio.igv) : 1;
             return (
               <div key={i} className="linea-compra">
                 <div className="form form--2col">
@@ -161,7 +164,7 @@ export function Compras() {
                       {insumos.map((x) => <option key={x.id} value={x.id}>{x.nombre}{x.presentacion ? ` · ${x.presentacion}` : ''}</option>)}</select></label>
                   <label className="field"><span className="field__label">Cantidad ({ins?.presentacion || `de ${n4(contenido)} ${u(ins?.unidad ?? '')}`})</span>
                     <input className="field__input" type="number" min="0" step="any" value={l.cantidad} onChange={(e) => linea(i, { cantidad: e.target.value })} /></label>
-                  <label className="field"><span className="field__label">Precio por presentación (S/)</span>
+                  <label className="field"><span className="field__label">Precio por presentación (S/{docs.find((t) => t.codigo === form.docTipo)?.creditoFiscal ? ', con IGV' : ''})</span>
                     <input className="field__input" type="number" min="0" step="any" value={l.precioUnitario} onChange={(e) => linea(i, { precioUnitario: e.target.value })} /></label>
                   <label className="field"><span className="field__label">Lote (opcional)</span>
                     <input className="field__input" maxLength={40} value={l.lote} onChange={(e) => linea(i, { lote: e.target.value.toUpperCase() })} /></label>
@@ -171,7 +174,7 @@ export function Compras() {
                 {ins && cant > 0 && (
                   <p className="linea-compra__conv">
                     {n4(cant)} × {n4(contenido)} {u(ins.unidad)} = <b>{n4(cant * contenido)} {u(ins.unidad)}</b> · × {n4(factor)} = <b>{n4(cant * contenido * factor)} {uInv}</b> al inventario
-                    {precio > 0 && <> · <b>{money(precio / (contenido * factor))}</b> por {uInv} · importe {money(cant * precio)}</>}
+                    {precio > 0 && <> · <b>{money(precio * sinIgv / (contenido * factor))}</b> por {uInv}{sinIgv < 1 ? ' sin IGV' : ''} · importe {money(cant * precio)}</>}
                   </p>
                 )}
                 {form.lineas.length > 1 && <Boton onClick={() => setForm({ ...form, lineas: form.lineas.filter((_, j) => j !== i) })}>Quitar insumo</Boton>}

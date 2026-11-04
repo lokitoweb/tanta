@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '@/core/api';
+import { mismaFamilia, useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Boton } from '@/ui/primitives';
@@ -8,13 +9,12 @@ import type { Receta } from '@/core/types';
 
 interface Linea { insumoId: string; cantidad: string; unidad: string }
 
-// Unidades en que se puede escribir cada línea según la unidad base del insumo (MAE-07).
-const UNIDADES: Record<string, string[]> = { KG: ['KG', 'GR'], L: ['L', 'ML'], UNIDAD: ['UNIDAD'], BALON: ['BALON'] };
 const ETIQUETA: Record<string, string> = { KG: 'kg', GR: 'gr', L: 'L', ML: 'ml', UNIDAD: 'unid', BALON: 'balón' };
 
 /** Crea una versión nueva de la receta. Al guardar, el API convierte unidades y recalcula el costo. */
 export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (resultado?: string) => void }) {
   const { dataset, refrescarDatos } = useApp();
+  const { unidades } = useCatalogos();
   const [rend, setRend] = useState(String(receta.rendimiento));
   const [merma, setMerma] = useState(String(Math.round(receta.mermaEstandar * 1000) / 10));
   // Cada línea se muestra en la unidad en que se registró (gr, ml…), no en la base.
@@ -65,7 +65,8 @@ export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (
           <div className="editor-receta__cab"><span>Insumo</span><span>Cantidad por lote</span><span /></div>
           {lineas.map((l, i) => {
             const ins = insumos.find((x) => x.id === l.insumoId);
-            const opciones = UNIDADES[ins?.unidad ?? ''] ?? (ins ? [ins.unidad] : []);
+            // MAE-07: se escribe en cualquier unidad de la familia de la unidad base del insumo (catálogo de unidades).
+            const opciones = ins ? mismaFamilia(unidades, ins.unidad).map((x) => x.codigo) : [];
             return (
               <div key={i} className="editor-receta__fila">
                 <select className="field__input" value={l.insumoId} onChange={(e) => set(i, 'insumoId', e.target.value)} aria-label="Insumo">

@@ -5,6 +5,7 @@ import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
+import { medioPago, exigirOperacion } from './catalogos.js';
 
 /**
  * Cobranza y ventas del INF-TEC-001 (M07/M08): recibo aplicado a varios documentos (RN-34),
@@ -20,16 +21,19 @@ export async function rutasCobranza(app: FastifyInstance) {
   const NuevoRecibo = z.object({
     clienteId: z.string().uuid(),
     monto: z.number().positive().max(10_000_000),
-    medio: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA']),
+    medio: z.string().trim().toUpperCase().max(20),
     referencia: z.string().trim().max(60).default(''),
     cxcIds: z.array(z.string().uuid()).max(100).optional(),
-  }).refine((d) => d.medio === 'EFECTIVO' || d.referencia.length >= 3, { message: 'Indica el número de operación.', path: ['referencia'] });
+  });
 
   app.post('/cobranza/recibos', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'cobranza.registrar')) return;
     const p = NuevoRecibo.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pago inválido.'));
     const d = p.data;
+    try { exigirOperacion(await medioPago(null, d.medio, 'cobranza'), d.referencia); } catch (e) {
+      return reply.code(422).send(error(422, 'MEDIO_INVALIDO', (e as Error).message));
+    }
     const clave = req.headers['idempotency-key'] as string | undefined;
     if (clave) {
       const previo = await uno<{ numero: string }>('SELECT numero FROM core.recibo WHERE idempotency_key = $1', [clave]);

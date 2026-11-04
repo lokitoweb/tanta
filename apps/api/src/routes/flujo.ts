@@ -5,6 +5,7 @@ import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
+import { medioPago } from './catalogos.js';
 
 /**
  * Flujo operativo del PDF (Fig. 2): el cliente registra su pedido → Producción consolida y
@@ -65,7 +66,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).default('RECOJO'),
     direccion: z.string().trim().max(200).default(''),
     // Sin pasarela: el cliente paga al recibir; indica cómo para que el vendedor lleve vuelto o POS.
-    pagoEntrega: z.enum(['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA', 'CREDITO']).default('EFECTIVO'),
+    pagoEntrega: z.string().trim().toUpperCase().max(20).default('EFECTIVO'),
   }).refine((d) => d.tipoEntrega !== 'DELIVERY' || d.direccion.length >= 5, { message: 'Indica la dirección de entrega.', path: ['direccion'] });
 
   app.post('/pedidos', { preHandler: autenticar }, async (req, reply) => {
@@ -82,6 +83,7 @@ export async function rutasFlujo(app: FastifyInstance) {
 
     try {
       const r = await tx(async (c) => {
+        const pago = await medioPago(c, d.pagoEntrega, 'ventas');
         const cli = (await c.query<{ nombre: string; estado: string; limite_credito: string; deuda: string; condicion_pago: string }>(
           `SELECT c.nombre, c.estado, c.limite_credito, c.condicion_pago,
                   coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) deuda
@@ -100,10 +102,10 @@ export async function rutasFlujo(app: FastifyInstance) {
           const lento = prods.rows.find((x) => Number(x.anticipacion_horas) === horas)!.nombre;
           throw Object.assign(new Error(`${lento} se pide con ${horas} h de anticipación: elige una entrega posterior.`), { status: 422 });
         }
-        if (d.pagoEntrega === 'CREDITO' && cli.condicion_pago !== 'CREDITO') throw Object.assign(new Error('Tu cuenta compra al contado: elige cómo pagarás al recibir.'), { status: 422 });
+        if (pago.es_credito && cli.condicion_pago !== 'CREDITO') throw Object.assign(new Error('Tu cuenta compra al contado: elige cómo pagarás al recibir.'), { status: 422 });
         // PED-04 / RN-35: con línea de crédito, el pedido no puede superar el saldo disponible.
         // Solo si paga al crédito: un pedido contra entrega no consume línea.
-        if (d.pagoEntrega === 'CREDITO' && num(cli.limite_credito) > 0 && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
+        if (pago.es_credito && num(cli.limite_credito) > 0 && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
           throw Object.assign(new Error(`Supera la línea de crédito: debe S/ ${num(cli.deuda).toFixed(2)} de S/ ${num(cli.limite_credito).toFixed(2)}.`), { status: 409 });
         }
         // PED-09: el pedido que registra el vendedor ya queda confirmado; el del cliente espera confirmación (PED-08).

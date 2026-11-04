@@ -240,6 +240,9 @@ class Api {
           required String fechaCompra, required List<Map<String, dynamic>> items}) async =>
       await _post('/compras', {'proveedorId': proveedorId, 'docTipo': docTipo, 'serie': serie, 'nro': nro, 'fechaCompra': fechaCompra, 'items': items},
           idempotente: true) as Map<String, dynamic>;
+  /// Catálogos administrables: medios de pago, documentos, tipos de insumo y unidades.
+  Future<Map<String, dynamic>> catalogos() async => await _get('/catalogos') as Map<String, dynamic>;
+
   /// Caja chica (5.6 del informe de compras): el vendedor la abre y la cierra.
   Future<Map<String, dynamic>> cajaChica() async => await _get('/cajas/chica') as Map<String, dynamic>;
   Future<Map<String, dynamic>> abrirCajaChica(double monto) async =>

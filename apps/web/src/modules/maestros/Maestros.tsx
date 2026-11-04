@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
+import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money, num } from '@/core/format';
 import { Crud, type Campo } from '@/ui/Crud';
@@ -137,6 +138,8 @@ export function Productos() {
 /* ------------------------------------------------------------------ Insumos */
 export function Insumos() {
   const { dataset, puede, refrescarDatos } = useApp();
+  const cat = useCatalogos();
+  const op = (l: Array<{ codigo: string; nombre?: string; descripcion?: string }>) => l.map((x) => ({ valor: x.codigo, texto: x.nombre ?? `${x.descripcion} (${x.codigo.toLowerCase()})` }));
   // Insumos: Administración y Compras (informe de compra de insumos, sección 7).
   const editaInsumos = puede('maestros.editar') || puede('insumos.gestionar');
   const proveedores = useOpciones('/proveedores', (r) => String(r.razonSocial), (r) => String(r.razonSocial));
@@ -155,9 +158,9 @@ export function Insumos() {
       ]}
       campos={[
         { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 120 },
-        { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [['HARINA', 'Harina (suma 100 % panadero)'], ['GRASA', 'Grasa'], ['LACTEO', 'Lácteo'], ['AZUCAR', 'Azúcar'], ['LEVADURA', 'Levadura'], ['HUEVO', 'Huevo'], ['RELLENO', 'Relleno'], ['ADITIVO', 'Aditivo'], ['LIQUIDO', 'Líquido'], ['OTRO', 'Otro']].map(([v, t]) => ({ valor: v, texto: t })) },
-        { key: 'unidad', label: 'Unidad base', tipo: 'select', opciones: [['KG', 'Kilogramo (kg)'], ['L', 'Litro (L)'], ['UNIDAD', 'Unidad'], ['BALON', 'Balón']].map(([v, t]) => ({ valor: v, texto: t })), ayuda: 'En la receta se puede escribir en gr o ml: se convierte sola' },
-        { key: 'unidadInventario', label: 'Unidad de inventario (en la que se lleva el stock)', tipo: 'select', opciones: [['KG', 'Kilogramo (kg)'], ['GR', 'Gramo (g)'], ['L', 'Litro (L)'], ['ML', 'Mililitro (ml)'], ['UNIDAD', 'Unidad'], ['BALON', 'Balón']].map(([v, t]) => ({ valor: v, texto: t })), ayuda: 'Aceite: se compra en L y se lleva en kg. No se cambia si el insumo ya tiene stock.' },
+        { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: cat.tiposInsumo.map((t) => ({ valor: t.codigo, texto: t.esHarina ? `${t.nombre} (suma 100 % panadero)` : t.nombre })), ayuda: 'Se administran en Maestros → Catálogos' },
+        { key: 'unidad', label: 'Unidad base', tipo: 'select', opciones: op(cat.unidades), ayuda: 'En la receta se puede escribir en gr o ml: se convierte sola' },
+        { key: 'unidadInventario', label: 'Unidad de inventario (en la que se lleva el stock)', tipo: 'select', opciones: op(cat.unidades), ayuda: 'Aceite: se compra en L y se lleva en kg. No se cambia si el insumo ya tiene stock.' },
         { key: 'presentacion', label: 'Presentación de compra', max: 60, ayuda: 'Ej.: botella de 900 ml, saco de 50 kg' },
         { key: 'precioCompra', label: 'Precio de compra (S/ sin IGV)', tipo: 'numero' },
         { key: 'cantPresentacion', label: 'Contenido de la presentación (en unidad base)', tipo: 'numero', ayuda: 'Botella de 900 ml con unidad base L: 0.9' },

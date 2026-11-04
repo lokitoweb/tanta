@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
+import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
@@ -11,7 +12,6 @@ interface Deuda { codigo: string; estadoPago: 'PENDIENTE' | 'PARCIAL' | 'PAGADO'
 interface Caja { codigo: string; saldo: number }
 
 const TONO = { PENDIENTE: 'warn', PARCIAL: 'info', PAGADO: 'ok' } as const;
-const MEDIOS = [['EFECTIVO', 'Efectivo'], ['TRANSFERENCIA', 'Transferencia bancaria'], ['YAPE', 'Yape'], ['PLIN', 'Plin'], ['OTRO', 'Otro']];
 
 /**
  * Deudas por pagar (informe de compra de insumos v1.1): Administración decide la caja (chica o grande) y el medio
@@ -28,6 +28,8 @@ export function Deudas() {
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const paga = puede('compras.pagar');
+  const medios = useCatalogos().mediosPago.filter((m) => m.enCompras);
+  const mediosCaja = (caja: string) => medios.filter((m) => caja !== 'CHICA' || m.cajaChica);
 
   const cargar = async () => {
     const l = await api<Deuda[]>('/deudas-compra').catch((e) => { setAviso({ tono: 'danger', texto: e.message }); return [] as Deuda[]; });
@@ -41,7 +43,7 @@ export function Deudas() {
   const porPagar = deudas.filter((d) => d.estadoPago !== 'PAGADO');
   const vencido = porPagar.filter((d) => (d.dias ?? 1) < 0).reduce((s, d) => s + d.saldo, 0);
 
-  const digital = pago && !['EFECTIVO', 'OTRO'].includes(pago.medio);
+  const digital = !!pago && !!medios.find((m) => m.codigo === pago.medio)?.requiereOperacion;
   const monto = Number(pago?.monto);
   const errorPago = !pago || !ver ? '' : !(monto > 0) ? 'Indica el monto.' : monto > ver.saldo + 0.005 ? `No puede superar el saldo (${money(ver.saldo)}).`
     : pago.caja === 'CHICA' && !caja ? 'No hay caja chica abierta: el vendedor debe abrirla.'
@@ -114,11 +116,11 @@ export function Deudas() {
           {pago && (
             <div className="form form--2col form--dialogo">
               <label className="field"><span className="field__label">Caja</span>
-                <select className="field__input" value={pago.caja} onChange={(e) => setPago({ ...pago, caja: e.target.value as 'CHICA' | 'GRANDE', medio: e.target.value === 'CHICA' ? 'EFECTIVO' : pago.medio })}>
+                <select className="field__input" value={pago.caja} onChange={(e) => setPago({ ...pago, caja: e.target.value as 'CHICA' | 'GRANDE', medio: mediosCaja(e.target.value).some((m) => m.codigo === pago.medio) ? pago.medio : (mediosCaja(e.target.value)[0]?.codigo ?? '') })}>
                   <option value="GRANDE">Caja grande</option><option value="CHICA">Caja chica{caja ? ` (${money(caja.saldo)} disponible)` : ' (cerrada)'}</option></select></label>
               <label className="field"><span className="field__label">Medio</span>
-                <select className="field__input" value={pago.medio} disabled={pago.caja === 'CHICA'} onChange={(e) => setPago({ ...pago, medio: e.target.value })}>
-                  {MEDIOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
+                <select className="field__input" value={pago.medio} onChange={(e) => setPago({ ...pago, medio: e.target.value })}>
+                  {mediosCaja(pago.caja).map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}</select></label>
               <label className="field"><span className="field__label">Monto (S/)</span>
                 <input className="field__input" type="number" min="0" step="0.01" max={ver.saldo} value={pago.monto} onChange={(e) => setPago({ ...pago, monto: e.target.value })} /></label>
               <label className="field"><span className="field__label">N.° de operación{digital ? '' : ' (opcional)'}</span>

@@ -9,6 +9,8 @@ export interface Campo {
   tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel';
   opciones?: Array<{ valor: string; texto: string }>;
   requerido?: boolean; ayuda?: string; max?: number; ancho?: boolean;
+  /** Solo se escribe al crear (p. ej. el código de un catálogo): al editar se muestra sin cambiarlo. */
+  soloAlCrear?: boolean;
 }
 type Reg = Record<string, unknown> & { id?: string };
 
@@ -90,7 +92,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
                   {c.opciones?.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
                 </select>
               ) : (
-                <input className="field__input" required={c.requerido} maxLength={c.max ?? 160}
+                <input className="field__input" required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id}
                   type={c.tipo === 'numero' || c.tipo === 'pct' ? 'number' : c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : 'text'}
                   step={c.tipo === 'pct' ? '0.1' : c.tipo === 'numero' ? 'any' : undefined} min={c.tipo === 'numero' || c.tipo === 'pct' ? 0 : undefined}
                   value={valor(c)} onChange={(e) => set(c, e.target.value)} />

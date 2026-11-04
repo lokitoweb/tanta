@@ -17,6 +17,7 @@ import { rutasAlmacen, rutasAlmacenes, rutasLotes, despacharAlertasStock, despac
 import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
 import { rutasCompras } from './routes/compras.js';
 import { rutasPagos, despacharAvisosPago } from './routes/pagos.js';
+import { rutasCatalogos } from './routes/catalogos.js';
 import { rutasFlujo } from './routes/flujo.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
@@ -142,6 +143,7 @@ export async function construir() {
     await api.register(rutasNotificaciones);
     await api.register(rutasCompras);
     await api.register(rutasPagos);
+    await api.register(rutasCatalogos);
     await api.register(rutasFlujo);
   }, { prefix: '/api/v1' });
 

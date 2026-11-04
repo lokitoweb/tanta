@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/catalogos.dart';
 import '../core/cola.dart';
 import '../core/comprobante.dart';
 import '../core/tema.dart';
@@ -122,12 +123,12 @@ class _PedidosState extends State<Pedidos> {
   Future<void> _despachar(Map<String, dynamic> p) async {
     final forma = await showDialog<String>(context: context, builder: (_) => SimpleDialog(
       title: Text('Despachar ${p['codigo']}'),
-      children: [for (final f in const ['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA', 'TRANSFERENCIA', 'CREDITO'])
-        SimpleDialogOption(onPressed: () => Navigator.pop(context, f), child: Text(f == 'CREDITO' ? 'Crédito' : f[0] + f.substring(1).toLowerCase()))],
+      children: [for (final m in mediosPago('enVentas'))
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, '${m['codigo']}'), child: Text('${m['nombre']}'))],
     ));
     if (forma == null || !mounted) return;
     var referencia = '';
-    if (forma != 'EFECTIVO' && forma != 'CREDITO') {
+    if (requiereOperacion(forma)) {
       final r = await _pedirTexto('Pago con ${forma.toLowerCase()}', 'N.° de operación');
       if (r == null || !mounted) return;
       referencia = r;
@@ -302,15 +303,13 @@ class _CobranzaState extends State<Cobranza> {
               builder: (_, v, __) => DropdownButtonFormField<String>(
                 initialValue: v,
                 decoration: const InputDecoration(labelText: 'Medio'),
-                items: const ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA']
-                    .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                    .toList(),
+                items: [for (final m in mediosPago('enCobranza')) DropdownMenuItem(value: '${m['codigo']}', child: Text('${m['nombre']}'))],
                 onChanged: (x) => medio.value = x ?? 'EFECTIVO',
               ),
             ),
             ValueListenableBuilder<String>(
               valueListenable: medio,
-              builder: (_, v, __) => v == 'EFECTIVO'
+              builder: (_, v, __) => !requiereOperacion(v)
                   ? const SizedBox.shrink()
                   : TextField(controller: referencia, maxLength: 60, decoration: const InputDecoration(labelText: 'N.° de operación')),
             ),
@@ -327,7 +326,7 @@ class _CobranzaState extends State<Cobranza> {
 
     final monto = double.tryParse(controlador.text.replaceAll(',', '.'));
     if (monto == null || monto <= 0) return;
-    if (medio.value != 'EFECTIVO' && referencia.text.trim().length < 3) {
+    if (requiereOperacion(medio.value) && referencia.text.trim().length < 3) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Indica el número de operación')));
       return;
     }

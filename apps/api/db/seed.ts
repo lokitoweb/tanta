@@ -111,6 +111,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
   ['n-proveedores', 'Maestros', 'Proveedores', '/maestros/proveedores', 'truck', 'proveedores.gestionar', 4, 3],
   ['n-almacenes', 'Maestros', 'Almacenes', '/maestros/almacenes', 'box', 'maestros.editar', 5, 3],
+  ['n-catalogos', 'Maestros', 'Catálogos', '/maestros/catalogos', 'clipboard', 'maestros.editar', 9, 3],
   ['n-categorias', 'Maestros', 'Categorías', '/maestros/categorias', 'clipboard', 'maestros.editar', 3, 3],
   ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 3],
   ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 3],

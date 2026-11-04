@@ -9,6 +9,7 @@ import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { actor, fallo, responder } from './almacen.js';
 import { anularPagosDeCompra } from './pagos.js';
+import { tipoDocumento } from './catalogos.js';
 
 /**
  * Compra de insumos (Informe de Análisis v1.1).
@@ -30,7 +31,7 @@ const Linea = z.object({
 });
 const Compra = z.object({
   proveedorId: z.string().uuid(),
-  docTipo: z.enum(['FACTURA', 'BOLETA', 'NOTA_VENTA', 'GUIA', 'OTRO']),
+  docTipo: z.string().trim().toUpperCase().max(20),
   serie: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,4}$/, 'La serie tiene de 1 a 4 letras o números'),
   nro: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,10}$/, 'El número tiene de 1 a 10 letras o números'),
   fechaCompra: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -49,8 +50,12 @@ async function escribirCompra(c: PoolClient, d: DatosCompra, compraId: string | 
   // RN-05: proveedor + documento + serie + número, sin espacios ni mayúsculas, entre las no anuladas.
   if ((await c.query(`SELECT 1 FROM core.compra WHERE proveedor_id = $1 AND doc_tipo = $2 AND upper(trim(serie)) = $3 AND upper(trim(nro)) = $4
       AND estado <> 'ANULADA' AND id IS DISTINCT FROM $5`, [d.proveedorId, d.docTipo, d.serie, d.nro, compraId])).rowCount) {
-    throw fallo(409, `El documento ${d.docTipo.replace('_', ' ').toLowerCase()} ${d.serie}-${d.nro} de este proveedor ya está registrado.`);
+    throw fallo(409, `El documento ${d.docTipo} ${d.serie}-${d.nro} de este proveedor ya está registrado.`);
   }
+  // Catálogo: si el documento da crédito fiscal (factura), el precio trae IGV recuperable y el costo del insumo va sin él.
+  const doc = await tipoDocumento(c, d.docTipo);
+  const tasa = num((await c.query<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'igv'")).rows[0]?.valor ?? '0.18');
+  const sinIgv = doc.credito_fiscal ? 1 / (1 + tasa) : 1;
   const lineas = [];
   for (const [n, it] of d.items.entries()) {
     const ins = (await c.query<{ nombre: string; activo: boolean; contenido: string; factor: string | null; cpp: string }>(
@@ -60,13 +65,12 @@ async function escribirCompra(c: PoolClient, d: DatosCompra, compraId: string | 
     if (ins.factor === null) throw fallo(422, `${ins.nombre} no tiene factor de inventario: define su densidad en la ficha.`);
     const contenido = num(ins.contenido), factor = num(ins.factor);
     const base = it.cantidad * contenido, inventario = base * factor;           // F1, F2
-    const costo = it.precioUnitario / (contenido * factor);                     // F3
+    const costo = it.precioUnitario * sinIgv / (contenido * factor);            // F3 (sin IGV con crédito fiscal)
     lineas.push({ item: n + 1, ...it, contenido, factor, base, inventario, costo, precioLote: Math.round(it.cantidad * it.precioUnitario * 100) / 100, cpp: num(ins.cpp) });
   }
   const total = Math.round(lineas.reduce((s, l) => s + l.precioLote, 0) * 100) / 100;
-  // Con factura se separa la base y el IGV (punto 4 por confirmar del informe).
-  const tasa = num((await c.query<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'igv'")).rows[0]?.valor ?? '0.18');
-  const base = d.docTipo === 'FACTURA' ? Math.round(total / (1 + tasa) * 100) / 100 : null;
+  // Con crédito fiscal se separa la base y el IGV del total (punto 4 del informe).
+  const base = doc.credito_fiscal ? Math.round(total / (1 + tasa) * 100) / 100 : null;
   const params = [d.proveedorId, d.docTipo, d.serie, d.nro, `${d.serie}-${d.nro}`, d.fechaCompra, d.vencePago, total.toFixed(2),
     base?.toFixed(2) ?? null, base === null ? null : (total - base).toFixed(2), usuarioId];
   let id = compraId;
@@ -82,10 +86,10 @@ async function escribirCompra(c: PoolClient, d: DatosCompra, compraId: string | 
   }
   for (const l of lineas) {
     await c.query(`INSERT INTO core.compra_detalle (compra_id, insumo_id, item, cantidad_presentacion, precio_unitario, precio_lote, contenido, factor,
-        cantidad_base, cantidad_inventario, costo_unitario_inventario, cantidad, precio, cpp_anterior, cpp_nuevo, lote, vence_en)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10,$11,$12,$12,NULLIF($13,''),NULLIF($14,'')::date)`,
+        cantidad_base, cantidad_inventario, costo_unitario_inventario, cantidad, precio, cpp_anterior, cpp_nuevo, lote, vence_en, sin_igv)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$10,$11,$12,$12,NULLIF($13,''),NULLIF($14,'')::date,$15)`,
       [id, l.insumoId, l.item, l.cantidad.toFixed(4), l.precioUnitario.toFixed(4), l.precioLote.toFixed(2), l.contenido.toFixed(6), l.factor.toFixed(6),
-        l.base.toFixed(6), l.inventario.toFixed(6), l.costo.toFixed(6), l.cpp.toFixed(6), l.lote, l.venceEn]);
+        l.base.toFixed(6), l.inventario.toFixed(6), l.costo.toFixed(6), l.cpp.toFixed(6), l.lote, l.venceEn, doc.credito_fiscal]);
   }
   return total;
 }
@@ -99,7 +103,7 @@ async function detalleCompra(where: string, params: unknown[], valoriza: boolean
              'unidadInventario', i.unidad_inventario, 'cantidad', d.cantidad_presentacion, 'precioUnitario', d.precio_unitario, 'precioLote', d.precio_lote,
              'contenido', d.contenido, 'factor', d.factor, 'cantidadBase', d.cantidad_base, 'cantidadInventario', d.cantidad_inventario,
              'costoInventario', d.costo_unitario_inventario, 'cantidadVerificada', d.cantidad_verificada, 'observacion', d.observacion_almacen,
-             'lote', d.lote, 'venceEn', d.vence_en) ORDER BY d.item) items
+             'lote', d.lote, 'venceEn', d.vence_en, 'sinIgv', d.sin_igv) ORDER BY d.item) items
     FROM core.compra c JOIN core.proveedor p ON p.id = c.proveedor_id JOIN core.compra_detalle d ON d.compra_id = c.id JOIN core.insumo i ON i.id = d.insumo_id
     LEFT JOIN core.usuario ur ON ur.id = c.registrado_por LEFT JOIN core.usuario uv ON uv.id = c.verificado_por LEFT JOIN core.usuario ua ON ua.id = c.anulado_por
     WHERE ${where} GROUP BY c.id, p.razon_social, ur.nombre, uv.nombre, ua.nombre ORDER BY c.creado_en DESC LIMIT 300`, params);
@@ -112,7 +116,7 @@ async function detalleCompra(where: string, params: unknown[], valoriza: boolean
     items: (f.items as Array<Record<string, unknown>>).map((i) => ({
       item: i.item, insumoId: i.insumoId, insumo: i.insumo, presentacion: i.presentacion, unidadBase: i.unidadBase, unidadInventario: i.unidadInventario,
       cantidad: n(i.cantidad), contenido: n(i.contenido), factor: n(i.factor), cantidadBase: n(i.cantidadBase), cantidadInventario: n(i.cantidadInventario),
-      cantidadVerificada: n(i.cantidadVerificada), observacion: i.observacion, lote: i.lote, venceEn: i.venceEn,
+      cantidadVerificada: n(i.cantidadVerificada), observacion: i.observacion, lote: i.lote, venceEn: i.venceEn, sinIgv: Boolean(i.sinIgv),
       ...(valoriza ? { precioUnitario: n(i.precioUnitario), precioLote: n(i.precioLote), costoInventario: n(i.costoInventario) } : {}),
     })),
   }));

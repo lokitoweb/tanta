@@ -57,11 +57,11 @@
 <body>
 <main>
   <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
-  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: once fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: doce fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
 
   <div class="kpis">
-    <div class="kpi"><b>11</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>14</b><span>migraciones nuevas (024 a 037)</span></div>
+    <div class="kpi"><b>12</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>15</b><span>migraciones nuevas (024 a 038)</span></div>
     <div class="kpi"><b>83</b><span>pruebas automáticas en verde</span></div>
     <div class="kpi"><b>30 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
@@ -212,6 +212,17 @@
     <p class="meta">Criterios de aceptación 8 (pago mixto S/ 200 de caja chica + S/ 1,000 por transferencia = pagado) y 9 (caja chica sin saldo suficiente) con prueba automática y probados en pantalla con Vendedor y Administrador.</p>
   </section>
 
+  <section class="fase">
+    <header><h3>Fase 12 · Catálogos administrables, costo sin IGV y base de pruebas separada</h3><span class="meta">Revisión de arquitectura del informe de compra de insumos</span></header>
+    <ul>
+      <li><b>Nada fijo en el código</b>: medios de pago, documentos de compra, tipos de insumo y unidades son catálogos que el Administrador mantiene en <b>Maestros → Catálogos</b>. Las reglas salen de sus atributos: si el medio exige n.° de operación, si sale de caja chica, si es crédito, en qué procesos se usa; si el documento da crédito fiscal; qué tipos son harina para el % panadero. Los valores en uso no se borran: se desactivan.</li>
+      <li><b>Una sola tabla de unidades</b> para compras, recetas y producción (antes había dos). Una unidad en uso no cambia de familia ni de factor. Agregar una unidad (por ejemplo libra = 0.453592 kg) la habilita en recetas sin tocar código.</li>
+      <li><b>Costo sin IGV con factura</b> (punto 4 del informe): con un documento que da crédito fiscal, el precio se registra con IGV, la deuda con el proveedor es el total y el costo del insumo se calcula sin IGV (S/ 165.20 el saco de 50 kg = S/ 2.80 por kg). Con boleta el IGV forma parte del costo.</li>
+      <li><b>Pruebas en su propia base</b> (<code>tanta_test</code>, API en el puerto 3002): las pruebas automáticas ya no ensucian la base de uso diario. Se limpió la base dejando solo los datos de la panadería, los usuarios de demostración, el superadministrador y la configuración (con respaldo previo).</li>
+      <li>Web y app leen los catálogos: ventas, despacho, cobranza, pedidos del cliente, compras, deudas, insumos y recetas.</li>
+    </ul>
+  </section>
+
   <h2>Matriz de permisos aplicada</h2>
   <p>C crear · L consultar · M modificar · A anular · P aprobar. El servidor valida cada permiso; la web y la app solo muestran lo que el rol puede usar.</p>
   <div class="tabla"><table>
@@ -284,11 +295,12 @@
   </ul>
 
   <h2>Cómo verificarlo</h2>
-  <p>Con la API levantada en <code>127.0.0.1:3001</code> y la semilla cargada:</p>
-<pre>node --test --test-concurrency=1 tests/*.test.mjs
-node tests/concurrencia-ventas.mjs 12</pre>
+  <p>Con la API de pruebas levantada (configuración <code>api-pruebas</code>, puerto 3002, base <code>tanta_test</code>):</p>
+<pre>pnpm pruebas
+API=http://127.0.0.1:3002/api/v1 node tests/concurrencia-ventas.mjs 12</pre>
+  <p>El comando se niega a correr contra la base de uso diario.</p>
   <p>Las pruebas que siguen al Excel están en <code>tests/*-excel.test.mjs</code>: costos, producción, pedidos, ventas, almacén y permisos. GitHub Actions las corre en cada subida, junto con la revisión de tipos y el build de la web.</p>
-  <p>Usuarios de demostración (contraseña <code>tanta</code>): osquilcate (Gerente), lbermudez (Administrador), rquispe (Producción), jramos (Almacén), cmedina (Vendedor), mfernandez (Cliente).</p>
+  <p>Usuarios de demostración (contraseña <code>tanta</code>): osquilcate (Gerente), lbermudez (Administrador), rquispe (Producción), jramos (Almacén), psalas (Compras), cmedina (Vendedor), mfernandez (Cliente).</p>
 
   <footer>Sistema Integral de Gestión · Panadería Tanta · documento generado al cierre de la Fase 6.</footer>
 </main>

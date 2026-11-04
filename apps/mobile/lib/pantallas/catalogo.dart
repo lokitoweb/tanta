@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/catalogos.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 
@@ -273,7 +274,6 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   final _obs = TextEditingController();
   bool _enviando = false;
 
-  static const _pagos = {'EFECTIVO': 'Efectivo', 'YAPE': 'Yape', 'PLIN': 'Plin', 'TARJETA': 'Tarjeta (POS)'};
 
   @override
   void initState() {
@@ -349,8 +349,9 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
         const Text('Pagas al recibir tu pedido. Elige cómo para que llevemos vuelto o POS.', style: TextStyle(color: TantaColors.textMuted, fontSize: 12.5)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
-          for (final e in _pagos.entries)
-            ChoiceChip(label: Text(e.value), selected: _pago == e.key, onSelected: (_) => setState(() => _pago = e.key)),
+          // Medios de ventas del catálogo; el crédito no es pago contra entrega.
+          for (final m in mediosPago('enVentas').where((m) => m['esCredito'] != true))
+            ChoiceChip(label: Text('${m['nombre']}'), selected: _pago == m['codigo'], onSelected: (_) => setState(() => _pago = '${m['codigo']}')),
         ]),
         const SizedBox(height: 16),
         TextField(controller: _obs, maxLength: 500, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones (opcional)', hintText: 'Ej.: tocar el timbre, sin ajonjolí')),

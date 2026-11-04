@@ -85,10 +85,10 @@ export async function rutasMaestros(app: FastifyInstance) {
   /* --------------------------------------------------------------- insumos */
   // Hoja 'insumos' (MAE-01): tipo, presentación de compra y equivalente en kg.
   const Insumo = z.object({
-    nombre: texto(2, 120), unidad: z.enum(['KG', 'L', 'UNIDAD', 'BALON']), minimo: dinero,
+    nombre: texto(2, 120), unidad: z.string().trim().toUpperCase().max(20), minimo: dinero,
     // Unidad en la que se lleva el stock; por defecto, la unidad base.
-    unidadInventario: z.enum(['KG', 'GR', 'L', 'ML', 'UNIDAD', 'BALON']).optional(), proveedor: z.string().trim().max(120), activo: z.boolean().default(true),
-    tipo: z.enum(['HARINA', 'GRASA', 'LACTEO', 'AZUCAR', 'LEVADURA', 'HUEVO', 'RELLENO', 'ADITIVO', 'LIQUIDO', 'OTRO']).default('OTRO'),
+    unidadInventario: z.string().trim().toUpperCase().max(20).optional(), proveedor: z.string().trim().max(120), activo: z.boolean().default(true),
+    tipo: z.string().trim().toUpperCase().max(20).default('OTRO'),
     presentacion: z.string().trim().max(60).default(''),
     precioCompra: z.number().min(0).max(1_000_000).nullable().default(null),
     cantPresentacion: z.number().positive().max(1_000_000).nullable().default(null),
@@ -107,10 +107,12 @@ export async function rutasMaestros(app: FastifyInstance) {
   };
   // RN-03 con el servicio único de conversión de la base: misma familia → factor por unidades; volumen o conteo
   // a masa → la densidad, que entonces es obligatoria. El costo de referencia pasa a unidad de inventario (F3).
-  const unidades = async (d: { unidad: string; unidadInventario?: string; equivKg: number | null }):
+  const unidades = async (d: { unidad: string; unidadInventario?: string; equivKg: number | null; tipo: string }):
     Promise<{ error: string } | { unidadInventario: string; densidad: number; factor: number }> => {
     const unidadInventario = d.unidadInventario ?? d.unidad;
-    const fam = await q<{ codigo: string; familia: string }>('SELECT codigo, familia FROM core.unidad_medida WHERE codigo = ANY($1)', [[d.unidad, unidadInventario]]);
+    if (!(await uno('SELECT 1 FROM core.tipo_insumo WHERE codigo = $1 AND activo', [d.tipo]))) return { error: `El tipo de insumo ${d.tipo} no existe o está inactivo.` };
+    const fam = await q<{ codigo: string; familia: string }>('SELECT codigo, familia FROM core.unidad_medida WHERE codigo = ANY($1) AND activo', [[d.unidad, unidadInventario]]);
+    if (!fam.some((x) => x.codigo === d.unidad) || !fam.some((x) => x.codigo === unidadInventario)) return { error: 'Unidad inexistente o inactiva en el catálogo de unidades.' };
     const misma = fam.find((x) => x.codigo === d.unidad)?.familia === fam.find((x) => x.codigo === unidadInventario)?.familia;
     if (!misma && d.equivKg === null) return { error: `Para llevar el stock en ${unidadInventario} comprando en ${d.unidad} indica la densidad (${unidadInventario === 'KG' ? 'kg' : unidadInventario} por ${d.unidad}).` };
     const densidad = d.equivKg ?? 1;
@@ -174,7 +176,7 @@ export async function rutasMaestros(app: FastifyInstance) {
     rendimiento: z.number().positive().max(100_000),
     mermaEstandar: pct,
     // La cantidad se puede escribir en gr, kg, ml, L o unidades: se guarda convertida a la unidad base (MAE-07).
-    lineas: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().positive().max(100_000), unidad: z.enum(['GR', 'KG', 'ML', 'L', 'UNID', 'UNIDAD']).optional() })).min(1).max(40),
+    lineas: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().positive().max(100_000), unidad: z.string().trim().toUpperCase().max(20).optional() })).min(1).max(40),
   });
 
   app.put('/recetas/:productoId', { preHandler: autenticar }, async (req, reply) => {
@@ -203,18 +205,16 @@ export async function rutasMaestros(app: FastifyInstance) {
         await c.query('DELETE FROM core.receta_detalle WHERE receta_id = $1', [productoId]);
         const mapa = new Map(ins.rows.map((i) => [i.id, i]));
         let orden = 1;
-        const conv = new Map((await c.query<{ unidad_receta: string; unidad_base: string; factor: string }>('SELECT * FROM core.unidad_conversion')).rows
-          .map((x) => [x.unidad_receta, x]));
         for (const l of p.data.lineas) {
           const i = mapa.get(l.insumoId)!;
           const unidad = l.unidad ?? i.unidad;
-          const cv = conv.get(unidad);
-          // Unidad compatible: gr/kg con insumos en KG, ml/L con L, unidades con UNIDAD.
-          const base = cv?.unidad_base === 'UNID' ? 'UNIDAD' : cv?.unidad_base;
-          if (unidad !== i.unidad && base !== (i.unidad === 'UNID' ? 'UNIDAD' : i.unidad)) {
+          // Servicio único de conversión (catálogo de unidades): g → kg, ml → L; otra familia no se acepta.
+          const conv = (await c.query<{ base: string | null }>(`SELECT core.convertir_unidad($1, $2, $3) base
+            WHERE EXISTS (SELECT 1 FROM core.unidad_medida WHERE codigo = $2 AND activo)`, [l.cantidad, unidad, i.unidad])).rows[0]?.base;
+          if (conv === undefined || conv === null) {
             throw Object.assign(new Error(`${i.nombre} se mide en ${i.unidad}: no acepta ${unidad}.`), { status: 422 });
           }
-          const cantidad = unidad === i.unidad ? l.cantidad : l.cantidad * Number(cv!.factor);
+          const cantidad = Number(conv);
           await c.query(`INSERT INTO core.receta_detalle (receta_id, insumo_id, insumo, unidad, cantidad, cpp, costo, orden, unidad_receta, cantidad_original)
                          VALUES ($1,$2,$3,$4,$5,$6,$5::numeric * $6::numeric,$7,$8,$9)`,
             [productoId, i.id, i.nombre, i.unidad, cantidad, i.cpp, orden++, unidad, l.cantidad]);
