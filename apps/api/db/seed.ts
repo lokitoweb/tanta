@@ -125,11 +125,11 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-periodos', 'Gerencia', 'Períodos de costo', '/gerencia/periodos', 'report', 'periodos.cerrar', 3, 4],
 ];
 
+// Solo panadería: pan, pastelería y tortas, cada producto con su receta.
 const CATEGORIAS: Array<[string, string, number]> = [
   ['pan', 'Pan', 0.45],
   ['pasteleria', 'Pastelería', 0.6],
   ['tortas', 'Tortas', 0.55],
-  ['bebidas', 'Bebidas', 0.5],
 ];
 
 /** [categoria, nombre, unidad, precioConIgv, vendidos30d, peso de la receta] */
@@ -143,13 +143,10 @@ const PRODUCTOS: Array<[string, string, string, number, number]> = [
   ['pasteleria', 'Empanada de carne', 'UNIDAD', 4.5, 210],
   ['pasteleria', 'Croissant de mantequilla', 'UNIDAD', 5.5, 140],
   ['pasteleria', 'Alfajor de manjar', 'UNIDAD', 3.5, 180],
-  ['pasteleria', 'Pionono de lúcuma', 'PORCIÓN', 7.9, 64],
+  ['pasteleria', 'Pionono de lúcuma', 'PORCION', 7.9, 64],
   ['tortas', 'Torta de chocolate', 'UNIDAD', 45.0, 14],
   ['tortas', 'Torta de tres leches', 'UNIDAD', 42.0, 11],
   ['tortas', 'Cheesecake de maracuyá', 'UNIDAD', 48.0, 9],
-  ['bebidas', 'Café pasado', 'VASO', 5.0, 320],
-  ['bebidas', 'Chocolate caliente', 'VASO', 7.0, 150],
-  ['bebidas', 'Jugo de naranja', 'VASO', 6.5, 120],
 ];
 
 const INSUMOS: Array<[string, string, string, number, number, number, string]> = [
@@ -181,9 +178,6 @@ const PESOS: Record<string, Array<[string, number]>> = {
   'Torta de chocolate': [['INS-001', 1], ['INS-010', 0.35], ['INS-007', 0.6], ['INS-005', 0.4], ['INS-003', 0.45]],
   'Torta de tres leches': [['INS-001', 1], ['INS-006', 0.9], ['INS-007', 0.6], ['INS-003', 0.4]],
   'Cheesecake de maracuyá': [['INS-001', 1], ['INS-005', 0.5], ['INS-007', 0.5], ['INS-003', 0.35]],
-  'Café pasado': [['INS-010', 0.02]],
-  'Chocolate caliente': [['INS-010', 0.05], ['INS-006', 0.6]],
-  'Jugo de naranja': [['INS-003', 0.15]],
 };
 
 const CLIENTES: Array<[string, string, string, string, number, number, string]> = [
@@ -313,7 +307,7 @@ async function main() {
 
     // Cada categoría tiene su propia estructura de costo: el pan es volumen con margen ajustado,
     // la pastelería tiene margen alto. Sin esta variación el dashboard miente por uniformidad.
-    const RATIO_COSTO: Record<string, number> = { pan: 0.58, pasteleria: 0.43, tortas: 0.48, bebidas: 0.44 };
+    const RATIO_COSTO: Record<string, number> = { pan: 0.58, pasteleria: 0.43, tortas: 0.48 };
 
     // Gramos del insumo principal por unidad vendida. Son cantidades FÍSICAS: una ciabatta
     // lleva ~110 g de harina, no 500. Las recetas se derivan de aquí y el costo cae donde cae.
@@ -323,7 +317,6 @@ async function main() {
       'Empanada de carne': 0.080, 'Croissant de mantequilla': 0.075,
       'Alfajor de manjar': 0.050, 'Pionono de lúcuma': 0.090,
       'Torta de chocolate': 1.100, 'Torta de tres leches': 1.200, 'Cheesecake de maracuyá': 1.100,
-      'Café pasado': 0.018, 'Chocolate caliente': 0.020, 'Jugo de naranja': 0.250,
     };
 
     for (const [categoria, nombre, unidad, precio, vendidos] of PRODUCTOS) {

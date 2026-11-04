@@ -51,7 +51,7 @@ export async function rutasMaestros(app: FastifyInstance) {
   /* ------------------------------------------------------------- productos */
   // Datos de producción de la hoja 'pan' (MAE-03): con ellos el motor calcula unidades, MO y CIF.
   const Producto = z.object({
-    nombre: texto(2, 120), categoriaId: texto(1, 40), unidad: texto(1, 20),
+    nombre: texto(2, 120), categoriaId: texto(1, 40), unidad: z.string().trim().toUpperCase().max(20),
     precioConIgv: z.number().positive().max(100_000), estado: z.enum(['ACTIVO', 'INACTIVO']),
     pesoMasaG: z.number().positive().max(100_000).nullable().optional(),
     anticipacionHoras: z.number().int().min(0).max(720).nullable().optional(),
@@ -64,6 +64,8 @@ export async function rutasMaestros(app: FastifyInstance) {
     const p = Producto.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
     const antes = await uno<Record<string, string>>('SELECT nombre, precio_con_igv, estado FROM core.producto WHERE id = $1', [id]);
+    // Unidad de venta del catálogo de unidades (Maestros → Catálogos).
+    if (!(await uno('SELECT 1 FROM core.unidad_medida WHERE codigo = $1 AND activo', [p.data.unidad]))) return reply.code(422).send(error(422, 'UNIDAD_INVALIDA', `La unidad ${p.data.unidad} no existe o está inactiva.`));
     if (!antes) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El producto no existe.'));
     if (!(await uno('SELECT 1 FROM core.categoria WHERE id = $1', [p.data.categoriaId]))) return reply.code(422).send(error(422, 'CATEGORIA_INEXISTENTE', 'La categoría no existe.'));
     await tx(async (c) => {

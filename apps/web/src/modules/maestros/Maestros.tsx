@@ -106,6 +106,8 @@ export function Categorias() {
 export function Productos() {
   const { dataset, puede, refrescarDatos } = useApp();
   const cats = dataset.categorias.map((c) => ({ valor: c.id, texto: c.nombre }));
+  // Unidad de venta: unidades de conteo o masa del catálogo.
+  const unidadesVenta = useCatalogos().unidades.filter((u) => u.familia !== 'VOLUMEN').map((u) => ({ valor: u.codigo, texto: u.descripcion }));
   const columnas: ColRep[] = [
     { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Producto' }, { key: 'categoria', label: 'Categoría' },
     { key: 'precioConIgv', label: 'Precio (con IGV)', tipo: 'dinero' }, { key: 'stock', label: 'Stock', tipo: 'num' },
@@ -123,7 +125,7 @@ export function Productos() {
       campos={[
         { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 120 },
         { key: 'categoriaId', label: 'Categoría', tipo: 'select', opciones: cats },
-        { key: 'unidad', label: 'Unidad de venta', tipo: 'select', opciones: ['UNIDAD', 'KG', 'DOCENA', 'PORCION', 'VASO', 'TORTA'].map((u) => ({ valor: u, texto: u })) },
+        { key: 'unidad', label: 'Unidad de venta', tipo: 'select', opciones: unidadesVenta, ayuda: 'Se administran en Maestros → Catálogos → Unidades' },
         { key: 'precioConIgv', label: 'Precio con IGV (S/)', tipo: 'numero', requerido: true },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
         { key: 'pesoMasaG', label: 'Peso de masa cruda por unidad (g)', tipo: 'numero', ayuda: 'Con este dato las unidades por lote salen de la masa de la receta' },
@@ -165,7 +167,7 @@ export function Insumos() {
         { key: 'precioCompra', label: 'Precio de compra (S/ sin IGV)', tipo: 'numero' },
         { key: 'cantPresentacion', label: 'Contenido de la presentación (en unidad base)', tipo: 'numero', ayuda: 'Botella de 900 ml con unidad base L: 0.9' },
         { key: 'equivKg', label: 'Densidad: kg por 1 unidad base', tipo: 'numero', ayuda: 'Obligatoria si la unidad base es L o unidad y el stock va en kg. Aceite: 0.917 · huevo: 0.05' },
-        { key: 'minimo', label: 'Stock mínimo', tipo: 'numero' },
+        { key: 'minimo', label: 'Stock mínimo (en la unidad de inventario)', tipo: 'numero', ayuda: 'Por debajo se avisa a Almacén y Gerencia (RN-25)' },
         { key: 'proveedor', label: 'Proveedor habitual', ancho: true, tipo: 'select', opciones: [{ valor: '', texto: 'Sin proveedor' }, ...proveedores], ayuda: 'Se elige del maestro de proveedores' },
         { key: 'activo', label: 'Activo', tipo: 'bool' },
       ]} />

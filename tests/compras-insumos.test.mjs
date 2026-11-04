@@ -189,6 +189,23 @@ test('punto 7: no se anula una compra cuyo stock ya se usó', async () => {
   assert.equal(stock(id), 7, 'no cambia nada');
 });
 
+test('Excel y PDF coinciden: CP-19 (RN-02) y RN-03 con la densidad del Excel dan lo mismo que F2 y F4', async () => {
+  // CP-19 / RN-02 del Excel por el flujo del PDF: 120 kg a S/ 2.80 y compra verificada de 500 kg a S/ 2.95 → S/ 2.921.
+  const id = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo) VALUES ('T-${sufijo}-CP', 'Insumo prueba anulación', 'KG', 2.80, 120, 0) RETURNING id) SELECT id FROM i`);
+  sql('SELECT core.cuadrar_lotes()');
+  const r = await registrar(prov, [{ insumoId: id, cantidad: 500, precioUnitario: 2.95 }], { docTipo: 'BOLETA', serie: 'B001' });
+  await verificar(r.b);
+  cerca(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${id}'`)), (120 * 2.80 + 500 * 2.95) / 620, 1e-6, 'CP-19');
+  assert.equal(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${id}'`)).toFixed(2), '2.92');
+  // RN-03 del Excel (peso de la receta) y F4 del PDF (salida a inventario) usan la misma densidad: con 0.92, 200 ml = 0.184 kg.
+  const aceite = await api(compras, 'POST', '/insumos', { nombre: `Aceite Excel ${sufijo}`, unidad: 'L', unidadInventario: 'KG', equivKg: 0.92, minimo: 0, proveedor: '', tipo: 'GRASA' });
+  assert.equal(aceite.s, 201, JSON.stringify(aceite.b));
+  const prod = sql(`WITH p AS (INSERT INTO core.producto (codigo, nombre, categoria_id, precio_con_igv, estado, peso_masa_g, perdida_coccion) SELECT 'TX-${sufijo}', 'Pan prueba Excel ${sufijo}', id, 1, 'INACTIVO', 50, 0 FROM core.categoria ORDER BY orden LIMIT 1 RETURNING id) SELECT id FROM p`);
+  assert.equal((await api(await login('superadmin'), 'PUT', `/recetas/${prod}`, { rendimiento: 10, mermaEstandar: 0, lineas: [{ insumoId: aceite.b.id, cantidad: 200, unidad: 'ML' }] })).s, 200);
+  cerca(Number(sql(`SELECT peso_kg FROM core.receta_detalle WHERE receta_id = '${prod}'`)), 0.184, 1e-9, 'RN-03 peso');
+  cerca(Number(sql(`SELECT cantidad * core.factor_inventario(insumo_id) FROM core.receta_detalle WHERE receta_id = '${prod}'`)), 0.184, 1e-9, 'F4 salida');
+});
+
 test('sección 7 y alertas: cada rol hace lo suyo; Almacén recibe la compra por verificar sin ver precios', async () => {
   const r = await registrar(prov, [{ insumoId: harina, cantidad: 1, precioUnitario: 140 }]);
   assert.equal((await api(almacen, 'POST', '/compras', { proveedorId: prov, docTipo: 'GUIA', serie: 'G1', nro: nroUnico(), fechaCompra: hoyLima(), items: [{ insumoId: harina, cantidad: 1, precioUnitario: 1 }] })).s, 403, 'Almacén no registra');
