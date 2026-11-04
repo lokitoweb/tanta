@@ -61,9 +61,9 @@
 
   <div class="kpis">
     <div class="kpi"><b>6</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>6</b><span>migraciones nuevas (024 a 029)</span></div>
-    <div class="kpi"><b>71</b><span>pruebas automáticas en verde</span></div>
-    <div class="kpi"><b>28 de 38</b><span>casos de prueba del Excel verificados</span></div>
+    <div class="kpi"><b>7</b><span>migraciones nuevas (024 a 030)</span></div>
+    <div class="kpi"><b>72</b><span>pruebas automáticas en verde</span></div>
+    <div class="kpi"><b>29 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
   </div>
 
@@ -129,9 +129,10 @@
       <li>Maestro de proveedores: RUC único; con compras solo se inactiva.</li>
       <li>Compras con proveedor, documento (factura, boleta o guía) y varias líneas; actualizan stock y costo promedio ponderado, con vista previa del nuevo costo.</li>
       <li>Un documento de un proveedor no se registra dos veces.</li>
+      <li>Alerta de stock mínimo: la base calcula el estado del insumo en cualquier movimiento y, al cruzar el mínimo, registra una sola alerta que se envía a quien tiene el permiso <code>alertas.stock</code> (Almacén y Gerente). No se repite hasta que el stock se recupere.</li>
       <li>Conteo físico: Almacén cuenta y envía; el stock solo se ajusta cuando el Gerente aprueba. El ajuste respeta los movimientos ocurridos después del conteo.</li>
     </ul>
-    <p class="meta">Casos verificados: CP-19, CP-22.</p>
+    <p class="meta">Casos verificados: CP-19, CP-21, CP-22.</p>
   </section>
 
   <section class="fase">
@@ -186,7 +187,7 @@
       <tr><td>CP-12 a CP-18</td><td>Lotes, consumo, requisición, cierre, merma y costo real</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-19</td><td>Costo promedio ponderado</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-20</td><td>Baja sin motivo rechazada</td><td><span class="et ok">Prueba automática</span></td></tr>
-      <tr><td>CP-21</td><td>Notificación única de stock mínimo</td><td><span class="et no">Pendiente</span></td></tr>
+      <tr><td>CP-21</td><td>Notificación única de stock mínimo</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-22</td><td>Ajuste de conteo con aprobación del Gerente</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-23, CP-24</td><td>Despacho y venta a terceros</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-25 a CP-29</td><td>Descuento con aprobación, IGV, pagos parciales, pago mayor al saldo y crédito</td><td><span class="et ok">Prueba automática</span></td></tr>
@@ -212,7 +213,6 @@
 
   <h2>Pendiente o fuera de alcance</h2>
   <ul>
-    <li><b>Alerta única de stock mínimo</b> (CP-21) a Almacén y Gerente: hoy el insumo se marca bajo mínimo, pero no se envía una notificación única.</li>
     <li><b>Lotes y fechas de vencimiento de insumos</b> (AIN-11): el Excel lo marca como ampliación.</li>
     <li><b>Varios almacenes</b>: la panadería opera con uno; llevar stock por almacén es un cambio mayor.</li>
     <li><b>Compras desde la app</b>: se registran en la web.</li>

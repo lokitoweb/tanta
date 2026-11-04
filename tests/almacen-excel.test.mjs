@@ -82,3 +82,30 @@ test('conteo físico: las diferencias se ajustan solo con aprobación del Gerent
 // Los insumos y proveedores de prueba no quedan activos en las listas.
 after(() => sqlScript(`UPDATE core.insumo SET activo = false WHERE nombre = 'Insumo prueba almacén';
   UPDATE core.proveedor SET estado = 'INACTIVO' WHERE razon_social LIKE 'Proveedor prueba %' OR razon_social LIKE 'Molino prueba %';`));
+
+test('CP-21: al bajar del mínimo hay una sola alerta hasta que el stock se recupere', async () => {
+  const alm = await login('jramos');
+  const id = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo)
+    VALUES ('T-${randomUUID().slice(0, 8)}', 'Insumo prueba almacén', 'KG', 1, 10, 5) RETURNING id) SELECT id FROM i`);
+  const alertas = () => Number(sql(`SELECT count(*) FROM core.alerta_stock WHERE insumo_id = '${id}'`));
+  const baja = (cantidad) => api(alm, 'POST', '/inventario/movimientos', { tipo: 'MERMA', insumoId: id, cantidad, motivo: 'Prueba de alerta' });
+  assert.equal((await baja(3)).s, 200);
+  assert.equal(alertas(), 0, 'sobre el mínimo no alerta');
+  assert.equal((await baja(4)).s, 200);
+  assert.equal(sql(`SELECT estado FROM core.insumo WHERE id = '${id}'`), 'BAJO_MINIMO', 'el estado lo calcula la base en cualquier movimiento');
+  assert.equal(alertas(), 1, 'cruzó el mínimo: una alerta');
+  assert.equal((await baja(1)).s, 200);
+  assert.equal(alertas(), 1, 'sigue bajo el mínimo: no se repite');
+  const p = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` });
+  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'GUIA', docNumero: `G-${Date.now() % 1e6}`, items: [{ insumoId: id, cantidad: 10, precio: 1 }] })).s, 201);
+  assert.equal(sql(`SELECT estado FROM core.insumo WHERE id = '${id}'`), 'OK', 'la compra lo recupera');
+  assert.equal((await baja(9)).s, 200);
+  assert.equal(alertas(), 2, 'volvió a bajar: nueva alerta');
+  // El despachador la envía una sola vez (revisa cada 15 s).
+  let enviadas = 0;
+  for (let i = 0; i < 25 && enviadas < 2; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    enviadas = Number(sql(`SELECT count(*) FROM core.alerta_stock WHERE insumo_id = '${id}' AND enviada_en IS NOT NULL`));
+  }
+  assert.equal(enviadas, 2, 'cada alerta se envía');
+});

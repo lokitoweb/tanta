@@ -44,6 +44,7 @@ const PERMISOS: Array<[string, string, string]> = [
   ['reportes.ver', 'Gerencia', 'Ver y exportar reportes'],
   ['usuarios.gestionar', 'Seguridad', 'Alta, baja y bloqueo de usuarios'],
   ['usuarios.ver', 'Seguridad', 'Consultar usuarios y sus roles (solo lectura)'],
+  ['alertas.stock', 'Almacén', 'Recibir la alerta de insumos bajo el stock mínimo'],
   ['catalogo.ver', 'Cliente', 'Ver catálogo y precios de venta'],
   ['parametros.gestionar', 'Seguridad', 'Cambiar parámetros de negocio'],
   ['periodos.cerrar', 'Gerencia', 'Calcular y cerrar el período de costos'],
@@ -65,13 +66,13 @@ const ROLES: Array<[string, string, string, string, string, string, number, stri
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'descuentos.aprobar', 'conteo.aprobar', 'usuarios.ver', 'clientes.ver']],
+    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'descuentos.aprobar', 'conteo.aprobar', 'usuarios.ver', 'clientes.ver', 'alertas.stock']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
     ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular', 'proveedores.gestionar', 'usuarios.ver', 'compras.registrar']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
     ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'produccion.planificar', 'recetas.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'catalogo.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,
-    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver', 'requisiciones.atender', 'compras.registrar', 'maestros.ver', 'pedidos.ver']],
+    ['panel.ver', 'inventario.ver', 'inventario.mover', 'recetas.ver', 'catalogo.ver', 'produccion.ver', 'reportes.ver', 'requisiciones.atender', 'compras.registrar', 'maestros.ver', 'pedidos.ver', 'alertas.stock']],
   ['VENDEDOR', 'Vendedor', 'Ventas', 'Despacho, ventas a terceros y cobranza', 'app', 'truck', 5,
     ['panel.ver', 'pedidos.ver', 'pedidos.gestionar', 'pedidos.crear', 'ventas.registrar', 'cobranza.ver', 'cobranza.registrar', 'clientes.ver', 'clientes.gestionar', 'inventario.ver', 'catalogo.ver', 'reportes.ver']],
   ['CLIENTE', 'Cliente', 'Cliente', 'Catálogo, pedidos y saldo', 'app', 'user', 6,
@@ -200,7 +201,7 @@ async function main() {
     await c.query('ALTER TABLE audit.evento DISABLE TRIGGER USER');
     await c.query(`TRUNCATE core.cobranza, core.cuenta_por_cobrar, core.venta_detalle, core.venta,
       core.pedido, core.orden_produccion, core.movimiento_inventario, core.receta_detalle, core.receta,
-      core.producto, core.insumo, core.proveedor, core.compra, core.conteo, core.cliente, core.categoria, core.usuario_rol, core.refresh_token,
+      core.producto, core.insumo, core.proveedor, core.compra, core.conteo, core.alerta_stock, core.cliente, core.categoria, core.usuario_rol, core.refresh_token,
       core.usuario, core.rol_permiso, core.navegacion, core.permiso, core.rol, core.parametro,
       audit.evento RESTART IDENTITY CASCADE`);
     await c.query("UPDATE audit.cadena_estado SET hash_actual = '' WHERE id = 1");

@@ -7,7 +7,16 @@ import { sql, sqlScript } from './_sql.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
-const login = (u) => { if (!sesiones.has(u)) sesiones.set(u, fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) }).then((r) => r.json()).then((j) => j.accessToken)); return sesiones.get(u); };
+// Si el límite antiabuso de login responde 429 (suite completa en local), espera y reintenta.
+const entrar = async (u) => {
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) });
+    if (r.status !== 429) return (await r.json()).accessToken;
+    await new Promise((ok) => setTimeout(ok, 7000));
+  }
+  throw new Error('login bloqueado por el límite');
+};
+const login = (u) => { if (!sesiones.has(u)) sesiones.set(u, entrar(u)); return sesiones.get(u); };
 const api = (t, m, ruta, body) => fetch(B + ruta, {
   method: m, headers: { Authorization: 'Bearer ' + t, ...(body ? { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() } : {}) },
   body: body ? JSON.stringify(body) : undefined,
@@ -40,7 +49,7 @@ for (const [rol, si, no] of MATRIZ) {
 }
 
 test('matriz en la API: cada rol solo hace lo suyo', async () => {
-  const [ven, ger, alm, pro] = await Promise.all(['cmedina', 'osquilcate', 'jramos', 'rquispe'].map(login));
+  const ven = await login('cmedina'), ger = await login('osquilcate'), alm = await login('jramos'), pro = await login('rquispe');
   // Fila 5: el Vendedor crea clientes; el Gerente solo los consulta.
   const doc = String(10_000_000 + Math.floor(Math.random() * 89_999_999));
   const c = await api(ven, 'POST', '/clientes', { nombre: 'Cliente del vendedor', docTipo: 'DNI', docNumero: doc, telefono: '', email: '', direccion: '', listaPrecio: 'MINORISTA', diasCredito: 0, limiteCredito: 0 });

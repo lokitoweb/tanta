@@ -253,3 +253,24 @@ export async function rutasAlmacen(app: FastifyInstance) {
     });
   });
 }
+
+/**
+ * CP-21: envía una sola vez cada alerta de stock mínimo que registró la base (trigger core.estado_insumo)
+ * a quien tiene el permiso alertas.stock. SKIP LOCKED: con varias instancias, cada alerta sale una vez.
+ */
+export async function despacharAlertasStock(): Promise<number> {
+  const alertas = await tx(async (c) => (await c.query<{ insumo: string; unidad: string; stock: string; minimo: string }>(`
+    UPDATE core.alerta_stock a SET enviada_en = now() FROM core.insumo i
+    WHERE a.id IN (SELECT id FROM core.alerta_stock WHERE enviada_en IS NULL ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED) AND i.id = a.insumo_id
+    RETURNING i.nombre insumo, i.unidad, a.stock, a.minimo`)).rows);
+  if (!alertas.length) return 0;
+  const destinatarios = await q<{ id: string }>(`SELECT DISTINCT ur.usuario_id id FROM core.usuario_rol ur
+    JOIN core.rol_permiso rp ON rp.rol_id = ur.rol_id JOIN core.usuario u ON u.id = ur.usuario_id
+    WHERE rp.permiso_id = 'alertas.stock' AND u.estado = 'ACTIVO'`);
+  for (const a of alertas) {
+    const texto = `${a.insumo}: quedan ${num(a.stock).toFixed(2)} ${a.unidad.toLowerCase()} (mínimo ${num(a.minimo).toFixed(2)})`;
+    void emitirEvento('stock.bajo_minimo', { insumo: a.insumo, stock: num(a.stock), minimo: num(a.minimo) });
+    for (const u of destinatarios) void enviarPush(u.id, 'Stock bajo el mínimo', texto).catch(() => {});
+  }
+  return alertas.length;
+}
