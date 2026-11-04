@@ -182,6 +182,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.cream50))
                               : const Text('Ingresar'),
                         ),
+                        TextButton(
+                          onPressed: _cargando ? null : () async {
+                            final msg = await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => const RegistroCliente()));
+                            if (msg != null && mounted) setState(() { _ok = msg; _error = null; });
+                          },
+                          child: const Text('¿Eres cliente nuevo? Crear cuenta'),
+                        ),
                         if (_esDemo) ...[
                           const SizedBox(height: 24),
                           const Text('ACCESO RÁPIDO DE DEMOSTRACIÓN', textAlign: TextAlign.center,
@@ -290,6 +297,68 @@ class _RecuperarClaveState extends State<RecuperarClave> {
         ),
         if (_enviado) TextButton(onPressed: () => setState(() { _enviado = false; _info = null; }), child: const Text('No me llegó: pedir otro código')),
       ]),
+    );
+  }
+}
+
+/// A03 / SEG-04: registro del cliente. El servidor valida DNI/RUC (dígito verificador) y que no se repitan.
+class RegistroCliente extends StatefulWidget {
+  const RegistroCliente({super.key});
+  @override
+  State<RegistroCliente> createState() => _RegistroClienteState();
+}
+
+class _RegistroClienteState extends State<RegistroCliente> {
+  final _c = {for (final k in ['nombre', 'docNumero', 'telefono', 'email', 'direccion', 'usuario', 'clave']) k: TextEditingController()};
+  String _docTipo = 'DNI';
+  bool _enviando = false;
+  String? _error;
+
+  Future<void> _registrar() async {
+    setState(() { _enviando = true; _error = null; });
+    try {
+      final msg = await Api.instancia.registrarse({for (final e in _c.entries) e.key: e.value.text.trim(), 'docTipo': _docTipo});
+      if (mounted) Navigator.pop(context, msg);
+    } on ApiException catch (e) {
+      setState(() => _error = e.mensaje);
+    } catch (_) {
+      setState(() => _error = 'Sin conexión: intenta de nuevo');
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
+  Widget _campo(String k, String etiqueta, IconData icono, {TextInputType? teclado, bool oculto = false, String? ayuda}) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextField(controller: _c[k], keyboardType: teclado, obscureText: oculto, autocorrect: false,
+            decoration: InputDecoration(labelText: etiqueta, prefixIcon: Icon(icono), helperText: ayuda)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Crear cuenta')),
+      body: SafeArea(
+        child: ListView(padding: const EdgeInsets.all(20), children: [
+          _campo('nombre', 'Nombre o razón social', Icons.person_outline),
+          SegmentedButton<String>(
+            segments: const [ButtonSegment(value: 'DNI', label: Text('DNI')), ButtonSegment(value: 'RUC', label: Text('RUC'))],
+            selected: {_docTipo},
+            onSelectionChanged: (v) => setState(() => _docTipo = v.first),
+          ),
+          const SizedBox(height: 12),
+          _campo('docNumero', _docTipo == 'DNI' ? 'Número de DNI (8 dígitos)' : 'Número de RUC (11 dígitos)', Icons.badge_outlined, teclado: TextInputType.number),
+          _campo('telefono', 'Teléfono', Icons.phone_outlined, teclado: TextInputType.phone),
+          _campo('email', 'Correo', Icons.mail_outline, teclado: TextInputType.emailAddress),
+          _campo('direccion', 'Dirección de entrega', Icons.place_outlined),
+          _campo('usuario', 'Usuario', Icons.alternate_email, ayuda: '4 a 30 letras o números'),
+          _campo('clave', 'Contraseña', Icons.lock_outline, oculto: true, ayuda: 'Mínimo 10 caracteres'),
+          if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+          FilledButton(onPressed: _enviando ? null : _registrar, child: Text(_enviando ? 'Creando…' : 'Crear cuenta')),
+          const SizedBox(height: 10),
+          const Text('Al registrarte aceptas la política de privacidad (Ley 29733).', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+        ]),
+      ),
     );
   }
 }

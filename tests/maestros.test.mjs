@@ -11,6 +11,8 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
   method: m, headers: { Authorization: 'Bearer ' + t, ...(body ? { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() } : {}) },
   body: body ? JSON.stringify(body) : undefined,
 }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }));
+// RUC único por ejecución con dígito verificador válido (el documento ya no se puede repetir).
+const rucValido = () => { const b = '20' + String(Math.floor(Math.random() * 1e8)).padStart(8, '0'); const p = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]; const r = 11 - ([...b].reduce((s, d, i) => s + Number(d) * p[i], 0) % 11); return b + (r === 10 ? 0 : r === 11 ? 1 : r); };
 const ficha = async (t, id) => (await api(t, 'GET', `/reportes/M-01?producto=${id}`)).b.filas.find((f) => f.concepto === 'Costo total unitario').costo;
 
 test('CIF: subir un costo indirecto sube el costo de los productos, al instante', async () => {
@@ -48,10 +50,10 @@ test('Clientes: alta con validación de documento y edición', async () => {
   const adm = await login('lbermudez');
   const base = { docTipo: 'RUC', telefono: '+51 999 000 111', email: 'compras@ejemplo.pe', direccion: 'Av. Prueba 123', listaPrecio: 'MAYORISTA', diasCredito: 15, limiteCredito: 2500, estado: 'ACTIVO' };
   assert.equal((await api(adm, 'POST', '/clientes', { ...base, nombre: 'Mal RUC', docNumero: '123' })).s, 422);
-  const c = await api(adm, 'POST', '/clientes', { ...base, nombre: 'Cafetería Prueba ' + Date.now(), docNumero: '20123456789' });
+  const c = await api(adm, 'POST', '/clientes', { ...base, nombre: 'Cafetería Prueba ' + Date.now(), docNumero: rucValido() });
   assert.equal(c.s, 201);
   assert.match(c.b.codigo, /^CLI-\d{4}$/);
-  assert.equal((await api(adm, 'PATCH', `/clientes/${c.b.id}`, { ...base, nombre: 'Cafetería editada', docNumero: '20123456789', estado: 'INACTIVO' })).s, 200);
+  assert.equal((await api(adm, 'PATCH', `/clientes/${c.b.id}`, { ...base, nombre: 'Cafetería editada', docNumero: c.b.docNumero, estado: 'INACTIVO' })).s, 200);
   assert.equal((await api(await login('rquispe'), 'GET', '/clientes')).s, 403, 'Producción no gestiona clientes');
 });
 

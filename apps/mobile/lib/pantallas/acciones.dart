@@ -361,3 +361,72 @@ class _RequisicionesState extends State<Requisiciones> {
     );
   }
 }
+
+/* ------------------------------------------------------ mis pedidos */
+/// A08/A09: historial del cliente con estado y cancelación antes de producir (PED-07).
+class MisPedidos extends StatefulWidget {
+  const MisPedidos({super.key});
+  @override
+  State<MisPedidos> createState() => _MisPedidosState();
+}
+
+class _MisPedidosState extends State<MisPedidos> {
+  List<dynamic>? _lista;
+  static const _etiqueta = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
+    'DESPACHADO': 'En camino', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
+
+  Future<void> _cargar() async {
+    try { final l = await Api.instancia.misPedidos(); if (mounted) setState(() => _lista = l); } catch (_) { if (mounted) setState(() => _lista = const []); }
+  }
+
+  @override
+  void initState() { super.initState(); _cargar(); }
+
+  Future<void> _cancelar(Map<String, dynamic> p) async {
+    final c = TextEditingController();
+    final motivo = await showDialog<String>(context: context, builder: (_) => AlertDialog(
+      title: Text('Cancelar ${p['codigo']}'),
+      content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: const InputDecoration(labelText: 'Motivo')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Volver')),
+        FilledButton(onPressed: () { if (c.text.trim().length >= 3) Navigator.pop(context, c.text.trim()); }, child: const Text('Cancelar pedido')),
+      ],
+    ));
+    if (motivo == null || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      await Api.instancia.cancelarPedido('${p['codigo']}', motivo);
+      _cargar();
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = (_lista ?? const []).cast<Map<String, dynamic>>();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Mis pedidos')),
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: _lista == null
+            ? const Center(child: CircularProgressIndicator())
+            : l.isEmpty
+                ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('Aún no tienes pedidos'))])
+                : ListView.separated(
+                    itemCount: l.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final p = l[i];
+                      final cancelable = p['estado'] == 'REGISTRADO' || p['estado'] == 'CONFIRMADO';
+                      return ListTile(
+                        title: Text('${p['codigo']} · ${dinero(((p['total'] as num?) ?? 0).toDouble())}'),
+                        subtitle: Text('${_etiqueta[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'),
+                        trailing: cancelable ? TextButton(onPressed: () => _cancelar(p), child: const Text('Cancelar')) : null,
+                      );
+                    },
+                  ),
+      ),
+    );
+  }
+}

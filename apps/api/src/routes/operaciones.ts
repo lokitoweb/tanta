@@ -323,13 +323,35 @@ export async function rutasOperaciones(app: FastifyInstance) {
           // Una sola consulta para todos los productos, bloqueados en orden de id
           // (orden determinista = sin deadlocks entre ventas concurrentes).
           const ids = [...new Set(items.map((i) => i.productoId))].sort();
-          const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; costo_unitario: string; stock: string }>(
-            `SELECT id, nombre, precio_con_igv, costo_unitario, stock
+          const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; costo_unitario: string; stock: string; reservado: string }>(
+            `SELECT id, nombre, precio_con_igv, costo_unitario, stock, reservado
              FROM core.producto WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
             [ids],
           );
           const mapa = new Map(prods.rows.map((r) => [r.id, r]));
           const stockRestante = new Map(prods.rows.map((r) => [r.id, Number(r.stock)]));
+          const reservado = new Map(prods.rows.map((r) => [r.id, Number(r.reservado)]));
+          if (pedidoId) {
+            // VEN-02/05: despacho de un pedido listo; no más de lo pedido. Su reserva se libera aquí.
+            const ped = (await c.query<{ estado: string }>('SELECT estado FROM core.pedido WHERE id = $1 FOR UPDATE', [pedidoId])).rows[0];
+            if (!ped) throw Object.assign(new Error('El pedido no existe.'), { status: 404 });
+            if (ped.estado !== 'LISTO') throw Object.assign(new Error('Solo se despacha un pedido en estado Listo.'), { status: 409 });
+            const pedidas = new Map((await c.query<{ producto_id: string; cantidad: string }>(
+              'SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id', [pedidoId])).rows.map((r) => [r.producto_id, Number(r.cantidad)]));
+            for (const it of items) {
+              if (it.cantidad > (pedidas.get(it.productoId) ?? 0) + 1e-6) throw Object.assign(new Error('No se puede despachar más de lo pedido.'), { status: 422 });
+            }
+            for (const [prod, cant] of pedidas) {
+              if (!reservado.has(prod)) continue;
+              reservado.set(prod, Math.max(0, (reservado.get(prod) ?? 0) - cant));
+              await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [prod, cant]);
+            }
+            for (const [prod, cant] of pedidas) if (!reservado.has(prod)) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [prod, cant]);
+            for (const it of items) {
+              await c.query('UPDATE core.pedido_detalle SET cantidad_despachada = $3 WHERE pedido_id = $1 AND producto_id = $2', [pedidoId, it.productoId, it.cantidad]);
+            }
+            await c.query("UPDATE core.pedido SET estado = 'DESPACHADO', despachado_en = now() WHERE id = $1", [pedidoId]);
+          }
 
           for (const it of items) {
             const prod = mapa.get(it.productoId);
@@ -351,9 +373,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
             });
 
             const nuevoStock = (stockRestante.get(prod.id) ?? 0) - it.cantidad;
-            if (nuevoStock < -0.000001) {
+            // RN-29: lo reservado por pedidos listos no se vende a terceros.
+            if (nuevoStock - (reservado.get(prod.id) ?? 0) < -0.000001) {
               throw Object.assign(
-                new Error(`STOCK_INSUFICIENTE:${prod.nombre} (disponible ${stockRestante.get(prod.id) ?? 0})`),
+                new Error(`STOCK_INSUFICIENTE:${prod.nombre} (disponible ${Math.max(0, (stockRestante.get(prod.id) ?? 0) - (reservado.get(prod.id) ?? 0))})`),
                 { status: 409 },
               );
             }
@@ -597,16 +620,22 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
   /* -------------------------------------------------------------- pedidos */
   const CambioPedido = z.object({
-    estado: z.enum(['EN_PRODUCCION', 'LISTO', 'DESPACHADO', 'ENTREGADO', 'CANCELADO']),
-  });
+    estado: z.enum(['CONFIRMADO', 'RECHAZADO', 'EN_PRODUCCION', 'LISTO', 'DESPACHADO', 'ENTREGADO', 'CANCELADO']),
+    motivo: z.string().trim().max(200).default(''),
+    observaciones: z.string().trim().max(250).default(''),
+  }).refine((d) => !['RECHAZADO', 'CANCELADO'].includes(d.estado) || d.motivo.length >= 3, { message: 'Indica el motivo.', path: ['motivo'] });
 
   /** Transiciones permitidas: es una máquina de estados, no un campo libre. */
+  // RN-26: Registrado → Confirmado → En producción → Listo → Despachado → Entregado; Rechazado y Cancelado con motivo.
+  // Con stock suficiente, un pedido confirmado puede pasar directo a Listo.
   const TRANSICIONES: Record<string, string[]> = {
-    REGISTRADO: ['EN_PRODUCCION', 'CANCELADO'],
+    REGISTRADO: ['CONFIRMADO', 'RECHAZADO', 'CANCELADO'],
+    CONFIRMADO: ['EN_PRODUCCION', 'LISTO', 'CANCELADO'],
     EN_PRODUCCION: ['LISTO', 'CANCELADO'],
     LISTO: ['DESPACHADO', 'CANCELADO'],
     DESPACHADO: ['ENTREGADO'],
     ENTREGADO: [],
+    RECHAZADO: [],
     CANCELADO: [],
   };
 
@@ -614,8 +643,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (!exigir(req, reply, 'pedidos.gestionar')) return;
     const { codigo } = req.params as { codigo: string };
     const parseo = CambioPedido.safeParse(req.body);
-    if (!parseo.success) return reply.code(422).send(error(422, 'ESTADO_INVALIDO', 'Estado de pedido inválido.'));
+    if (!parseo.success) return reply.code(422).send(error(422, 'ESTADO_INVALIDO', parseo.error.issues[0]?.message ?? 'Estado de pedido inválido.'));
     const destino = parseo.data.estado;
+    const { motivo, observaciones } = parseo.data;
 
     const pedido = await uno<{ id: string; estado: string; cliente: string }>(
       'SELECT id, estado, cliente FROM core.pedido WHERE codigo = $1', [codigo],
@@ -628,13 +658,44 @@ export async function rutasOperaciones(app: FastifyInstance) {
         `No se puede pasar de ${pedido.estado} a ${destino}.`));
     }
 
-    // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
-    const cambio = await q('UPDATE core.pedido SET estado = $1 WHERE id = $2 AND estado = $3 RETURNING id', [destino, pedido.id, pedido.estado]);
-    if (!cambio.length) return reply.code(409).send(error(409, 'PEDIDO_CAMBIADO', 'Otro usuario cambió este pedido. Recarga e intenta de nuevo.'));
+    // Despachar es vender: se hace con POST /ventas indicando el pedido (descuenta stock y libera la reserva).
+    if (destino === 'DESPACHADO') return reply.code(409).send(error(409, 'USA_DESPACHO', 'Despacha el pedido con "Despachar y vender".'));
+    try {
+      await tx(async (c) => {
+        // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
+        const cambio = await c.query(`UPDATE core.pedido SET estado = $1,
+            motivo = CASE WHEN $1 IN ('RECHAZADO','CANCELADO') THEN $4 ELSE motivo END,
+            confirmado_en = CASE WHEN $1 = 'CONFIRMADO' THEN now() ELSE confirmado_en END,
+            entregado_en = CASE WHEN $1 = 'ENTREGADO' THEN now() ELSE entregado_en END,
+            entrega_obs = CASE WHEN $1 = 'ENTREGADO' THEN $5 ELSE entrega_obs END
+          WHERE id = $2 AND estado = $3 RETURNING id`, [destino, pedido.id, pedido.estado, motivo, observaciones]);
+        if (!cambio.rowCount) throw Object.assign(new Error('Otro usuario cambió este pedido. Recarga e intenta de nuevo.'), { status: 409 });
+        const lineas = (await c.query<{ producto_id: string; producto: string; cantidad: string }>(
+          'SELECT producto_id, producto, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id, producto ORDER BY producto_id', [pedido.id])).rows;
+        if (destino === 'LISTO') {
+          // RN-29 / APT-04: el pedido listo reserva su stock; queda fuera de la venta a terceros.
+          for (const l of lineas) {
+            const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.producto_id])).rows[0];
+            const disponible = num(p.stock) - num(p.reservado);
+            if (disponible + 1e-6 < num(l.cantidad)) {
+              throw Object.assign(new Error(`No hay stock para reservar ${l.producto}: disponible ${disponible.toFixed(0)}, pedido ${num(l.cantidad).toFixed(0)}.`), { status: 409 });
+            }
+            await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [l.producto_id, l.cantidad]);
+          }
+        }
+        if (pedido.estado === 'LISTO' && destino === 'CANCELADO') {
+          for (const l of lineas) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
+        }
+      });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'PEDIDO_INVALIDO', err.message));
+    }
     await auditar({
       actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
       accion: `PEDIDO_${destino}`, entidad: 'pedido', entidadId: codigo,
-      detalle: { de: pedido.estado, a: destino, cliente: pedido.cliente }, ip: req.ip,
+      detalle: { de: pedido.estado, a: destino, cliente: pedido.cliente, motivo: motivo || undefined }, ip: req.ip,
     });
     void emitirEvento('pedido.estado', { codigo, de: pedido.estado, a: destino });
     // PDF 3.2: el cliente recibe push cuando su pedido cambia de estado.

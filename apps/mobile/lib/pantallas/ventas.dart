@@ -20,15 +20,18 @@ class _PedidosState extends State<Pedidos> {
   late List<Map<String, dynamic>> _pedidos;
   String? _ocupado;
 
+  // RN-26. "Listo" se despacha vendiendo (botón propio); "Registrado" también se puede rechazar.
   static const _siguiente = <String, String>{
-    'REGISTRADO': 'EN_PRODUCCION',
+    'REGISTRADO': 'CONFIRMADO',
+    'CONFIRMADO': 'LISTO',
     'EN_PRODUCCION': 'LISTO',
-    'LISTO': 'DESPACHADO',
     'DESPACHADO': 'ENTREGADO',
   };
 
   static const _etiqueta = <String, String>{
-    'REGISTRADO': 'Registrado',
+    'REGISTRADO': 'Por confirmar',
+    'CONFIRMADO': 'Confirmado',
+    'RECHAZADO': 'Rechazado',
     'EN_PRODUCCION': 'En producción',
     'LISTO': 'Listo',
     'DESPACHADO': 'Despachado',
@@ -90,6 +93,61 @@ class _PedidosState extends State<Pedidos> {
     );
   }
 
+  /// Pide un texto (motivo u observación) y devuelve null si se cancela.
+  Future<String?> _pedirTexto(String titulo, String etiqueta, {bool obligatorio = true}) async {
+    final c = TextEditingController();
+    return showDialog<String>(context: context, builder: (_) => AlertDialog(
+      title: Text(titulo),
+      content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: InputDecoration(labelText: etiqueta)),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Volver')),
+        FilledButton(onPressed: () { if (!obligatorio || c.text.trim().length >= 3) Navigator.pop(context, c.text.trim()); }, child: const Text('Confirmar')),
+      ],
+    ));
+  }
+
+  Future<void> _rechazar(Map<String, dynamic> p) async {
+    final motivo = await _pedirTexto('Rechazar ${p['codigo']}', 'Motivo del rechazo');
+    if (motivo == null || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      await Api.instancia.cambiarEstadoPedido('${p['codigo']}', 'RECHAZADO', motivo: motivo);
+      setState(() => p['estado'] = 'RECHAZADO');
+    } on ApiException catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
+    }
+  }
+
+  /// VEN-02/05: despachar = vender lo pedido (descuenta stock, libera la reserva y deja el pedido despachado).
+  Future<void> _despachar(Map<String, dynamic> p) async {
+    final forma = await showDialog<String>(context: context, builder: (_) => SimpleDialog(
+      title: Text('Despachar ${p['codigo']}'),
+      children: [for (final f in const ['EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'CREDITO'])
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, f), child: Text(f == 'CREDITO' ? 'Crédito' : f[0] + f.substring(1).toLowerCase()))],
+    ));
+    if (forma == null || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    setState(() => _ocupado = p['codigo'] as String);
+    try {
+      final completo = (await Api.instancia.misPedidos()).cast<Map<String, dynamic>>().firstWhere((x) => x['codigo'] == p['codigo']);
+      final items = ((completo['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+      final v = await Api.instancia.registrarVenta(
+        items: [for (final i in items) {'productoId': i['productoId'], 'cantidad': i['cantidad']}],
+        formaPago: forma, clienteId: '${completo['clienteId']}', pedidoId: '${completo['id']}');
+      setState(() => p['estado'] = 'DESPACHADO');
+      await compartirComprobante(
+        titulo: 'Venta', numero: '${v['codigo']}', cliente: '${p['cliente'] ?? '-'}', vendedor: Api.instancia.nombre,
+        total: dinero(((p['total'] as num?) ?? 0).toDouble()),
+        lineas: [for (final i in items) ('${i['cantidad']} × ${i['producto']}', '')]);
+    } on ApiException catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: intenta de nuevo')));
+    } finally {
+      if (mounted) setState(() => _ocupado = null);
+    }
+  }
+
   Color _tono(String estado) => switch (estado) {
         'ENTREGADO' => TantaColors.stateOk,
         'LISTO' || 'DESPACHADO' => TantaColors.stateInfo,
@@ -145,6 +203,10 @@ class _PedidosState extends State<Pedidos> {
                       Text(dinero((p['total'] as num?)?.toDouble() ?? 0),
                           style: estiloDisplay.copyWith(fontSize: 16)),
                       const Spacer(),
+                      if (puedeGestionar && estado == 'REGISTRADO')
+                        TextButton(onPressed: ocupado ? null : () => _rechazar(p), child: const Text('Rechazar')),
+                      if (puedeGestionar && estado == 'LISTO' && Api.instancia.puede('ventas.registrar'))
+                        FilledButton(onPressed: ocupado ? null : () => _despachar(p), child: const Text('Despachar y vender')),
                       if (puedeGestionar && siguiente != null)
                         SizedBox(
                           height: 34,

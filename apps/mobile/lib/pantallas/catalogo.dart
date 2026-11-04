@@ -46,12 +46,20 @@ class _CatalogoState extends State<Catalogo> {
       lastDate: hoy.add(const Duration(days: 60)),
     );
     if (fecha == null || !mounted) return;
+    // PED-03: recojo o delivery; para delivery se propone la primera dirección guardada.
+    var guardadas = <dynamic>[];
+    try { guardadas = await Api.instancia.misDirecciones(); } catch (_) {}
+    if (!mounted) return;
+    final entrega = await showModalBottomSheet<(String, String)>(context: context, isScrollControlled: true, builder: (_) => _Entrega(direcciones: guardadas));
+    if (entrega == null || !mounted) return;
     setState(() => _enviando = true);
     final aviso = ScaffoldMessenger.of(context);
     try {
       final r = await Api.instancia.crearPedido(
         items: _carrito.entries.map((e) => {'productoId': e.key, 'cantidad': e.value}).toList(),
         fechaEntrega: fecha.toIso8601String().substring(0, 10),
+        tipoEntrega: entrega.$1,
+        direccion: entrega.$2,
       );
       setState(() => _carrito.clear());
       aviso.showSnackBar(SnackBar(content: Text('Pedido ${r['codigo'] ?? ''} registrado')));
@@ -264,6 +272,44 @@ class _Producto extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Hoja de entrega: recojo en tienda o delivery con dirección (guardada o escrita).
+class _Entrega extends StatefulWidget {
+  const _Entrega({required this.direcciones});
+  final List<dynamic> direcciones;
+  @override
+  State<_Entrega> createState() => _EntregaState();
+}
+
+class _EntregaState extends State<_Entrega> {
+  String _tipo = 'RECOJO';
+  late final _dir = TextEditingController(text: widget.direcciones.isEmpty ? '' : '${(widget.direcciones.first as Map)['direccion']}');
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('¿Cómo lo recibes?', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 14),
+        SegmentedButton<String>(
+          segments: const [ButtonSegment(value: 'RECOJO', label: Text('Recojo en tienda')), ButtonSegment(value: 'DELIVERY', label: Text('Delivery'))],
+          selected: {_tipo},
+          onSelectionChanged: (v) => setState(() => _tipo = v.first),
+        ),
+        if (_tipo == 'DELIVERY') ...[
+          const SizedBox(height: 14),
+          TextField(controller: _dir, maxLength: 200, decoration: const InputDecoration(labelText: 'Dirección de entrega')),
+        ],
+        const SizedBox(height: 10),
+        FilledButton(
+          onPressed: _tipo == 'DELIVERY' && _dir.text.trim().length < 5 ? null : () => Navigator.pop(context, (_tipo, _tipo == 'DELIVERY' ? _dir.text.trim() : '')),
+          child: const Text('Confirmar pedido'),
+        ),
+      ]),
     );
   }
 }

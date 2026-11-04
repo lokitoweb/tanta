@@ -323,6 +323,49 @@ export async function rutasAuth(app: FastifyInstance) {
 
   app.get('/auth/recuperar/disponible', async () => ({ disponible: await correoDisponible() }));
 
+  // SEG-04: autorregistro del cliente desde la app. El documento no se repite (CP-04) y el RUC
+  // se valida con su dígito verificador. La cuenta nace con el rol Cliente, nunca con otro.
+  const Registro = z.object({
+    nombre: z.string().trim().min(3).max(150),
+    docTipo: z.enum(['DNI', 'RUC']),
+    docNumero: z.string().trim(),
+    telefono: z.string().trim().min(6).max(20).regex(/^[0-9+ ]+$/, 'Teléfono inválido'),
+    email: z.string().trim().toLowerCase().email().max(160),
+    direccion: z.string().trim().min(5).max(200),
+    usuario: z.string().trim().toLowerCase().regex(/^[a-z0-9._-]{4,30}$/, 'Usuario de 4 a 30 letras o números'),
+    clave: z.string().min(10).max(128),
+  }).refine((d) => docValido(d.docTipo, d.docNumero), { message: 'Número de documento inválido', path: ['docNumero'] });
+
+  app.post('/auth/registro', { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (req, reply) => {
+    const p = Registro.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Revisa tus datos.'));
+    const d = p.data;
+    try {
+      await tx(async (c) => {
+        if ((await c.query('SELECT 1 FROM core.cliente WHERE doc_tipo = $1 AND doc_numero = $2', [d.docTipo, d.docNumero])).rowCount) {
+          throw Object.assign(new Error('Ese documento ya está registrado. Si es tuyo, recupera tu contraseña.'), { status: 409 });
+        }
+        if ((await c.query('SELECT 1 FROM core.usuario WHERE lower(usuario) = $1 OR lower(email) = $2', [d.usuario, d.email])).rowCount) {
+          throw Object.assign(new Error('Ese usuario o correo ya existe.'), { status: 409 });
+        }
+        const cli = (await c.query<{ id: string }>(`INSERT INTO core.cliente (codigo, nombre, doc_tipo, doc_numero, telefono, email, direccion)
+          VALUES ('CLI-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.cliente WHERE codigo ~ '^CLI-[0-9]+$')::text, 4, '0'),
+                  $1,$2,$3,$4,$5,$6) RETURNING id`, [d.nombre, d.docTipo, d.docNumero, d.telefono, d.email, d.direccion])).rows[0];
+        await c.query('INSERT INTO core.direccion_cliente (cliente_id, direccion) VALUES ($1,$2)', [cli.id, d.direccion]);
+        const u = (await c.query<{ id: string }>('INSERT INTO core.usuario (nombre, usuario, email, telefono, clave_hash, cliente_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+          [d.nombre, d.usuario, d.email, d.telefono, hashClave(d.clave), cli.id])).rows[0];
+        await c.query("INSERT INTO core.usuario_rol (usuario_id, rol_id) VALUES ($1, 'CLIENTE')", [u.id]);
+        await auditar({ actorId: u.id, actor: d.nombre, rol: 'CLIENTE', accion: 'CLIENTE_AUTORREGISTRO', entidad: 'cliente', entidadId: cli.id, detalle: { docTipo: d.docTipo }, ip: req.ip });
+      });
+      return reply.code(201).send({ ok: true, mensaje: 'Cuenta creada. Ya puedes iniciar sesión.' });
+    } catch (e) {
+      const err = e as Error & { status?: number; code?: string };
+      if (err.code === '23505') return reply.code(409).send(error(409, 'DUPLICADO', 'Ese documento, usuario o correo ya está registrado.'));
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'REGISTRO_INVALIDO', err.message));
+    }
+  });
+
   app.post('/auth/recuperar', { config: { rateLimit: { max: 5, timeWindow: '15 minutes' } } }, async (req, reply) => {
     const p = z.object({ identificador: z.string().trim().min(3).max(160) }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Escribe tu usuario o correo.'));
@@ -467,4 +510,13 @@ export async function rutasAuth(app: FastifyInstance) {
       ...(codigosRecuperacion ? { codigosRecuperacion } : {}),
     });
   }
+}
+
+/** DNI: 8 dígitos. RUC: 11 dígitos, empieza en 10/15/17/20 y cumple el dígito verificador (módulo 11). */
+export function docValido(tipo: 'DNI' | 'RUC', n: string): boolean {
+  if (tipo === 'DNI') return /^\d{8}$/.test(n);
+  if (!/^(10|15|17|20)\d{9}$/.test(n)) return false;
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const r = 11 - ([...n.slice(0, 10)].reduce((s, d, i) => s + Number(d) * pesos[i], 0) % 11);
+  return (r === 10 ? 0 : r === 11 ? 1 : r) === Number(n[10]);
 }

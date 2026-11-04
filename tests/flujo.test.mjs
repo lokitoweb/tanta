@@ -17,6 +17,11 @@ const manana = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
 test('el cliente registra su pedido y solo ve los suyos', async () => {
   const cli = await login('mfernandez');
   const prods = (await api(cli, 'GET', '/datos')).b.productos;
+  // Este cliente de ejemplo ya debe más que su línea (PED-04 lo bloquearía): la prueba la suspende y la restaura.
+  const cond = "(SELECT cliente_id FROM core.usuario WHERE usuario='mfernandez')";
+  const limite = sql(`SELECT limite_credito FROM core.cliente WHERE id = ${cond}`);
+  sql(`UPDATE core.cliente SET limite_credito = 0 WHERE id = ${cond}`);
+  try {
   const otroCliente = sql("SELECT id FROM core.cliente WHERE id <> (SELECT cliente_id FROM core.usuario WHERE usuario='mfernandez') LIMIT 1");
   const r = await api(cli, 'POST', '/pedidos', { clienteId: otroCliente, items: [{ productoId: prods[0].id, cantidad: 3 }], fechaEntrega: manana, horaEntrega: '08:30', observaciones: 'Sin azúcar' });
   assert.equal(r.s, 201);
@@ -27,6 +32,7 @@ test('el cliente registra su pedido y solo ve los suyos', async () => {
   assert.ok(mios.some((p) => p.codigo === r.b.codigo && p.items.length === 1));
   assert.equal((await api(cli, 'POST', '/pedidos', { items: [{ productoId: prods[0].id, cantidad: 1 }], fechaEntrega: '2020-01-01' })).s, 422, 'fecha pasada');
   assert.equal((await api(await login('jramos'), 'POST', '/pedidos', { items: [{ productoId: prods[0].id, cantidad: 1 }], fechaEntrega: manana })).s, 403);
+  } finally { sql(`UPDATE core.cliente SET limite_credito = ${limite} WHERE id = ${cond}`); }
 });
 
 test('OP: requerimiento, requisición entregada por Almacén y cierre sin doble descuento', async () => {

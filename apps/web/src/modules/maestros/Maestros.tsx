@@ -119,6 +119,7 @@ export function Productos() {
         { key: 'perdidaCoccion', label: 'Pérdida por cocción (%)', tipo: 'pct' },
         { key: 'horasHombreLote', label: 'Horas hombre por lote', tipo: 'numero' },
         { key: 'horasHornoLote', label: 'Horas de horno por lote', tipo: 'numero' },
+        { key: 'anticipacionHoras', label: 'Anticipación mínima del pedido (horas)', tipo: 'numero', ayuda: 'Ej.: 24 para tortas por encargo' },
       ]} />
   );
 }

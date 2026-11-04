@@ -6,7 +6,9 @@ import { randomUUID } from 'node:crypto';
 import { sql } from './_sql.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
-const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
+// Una sesión por usuario: sin ráfagas de login que choquen con el límite antiabuso.
+const sesiones = new Map();
+const login = (u) => { if (!sesiones.has(u)) sesiones.set(u, fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) }).then((r) => r.json()).then((j) => j.accessToken)); return sesiones.get(u); };
 const api = (t, m, ruta, body) => fetch(B + ruta, {
   method: m, headers: { Authorization: 'Bearer ' + t, ...(body ? { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() } : {}) },
   body: body ? JSON.stringify(body) : undefined,

@@ -54,6 +54,7 @@ export async function rutasMaestros(app: FastifyInstance) {
     nombre: texto(2, 120), categoriaId: texto(1, 40), unidad: texto(1, 20),
     precioConIgv: z.number().positive().max(100_000), estado: z.enum(['ACTIVO', 'INACTIVO']),
     pesoMasaG: z.number().positive().max(100_000).nullable().optional(),
+    anticipacionHoras: z.number().int().min(0).max(720).nullable().optional(),
     perdidaCoccion: pct.nullable().optional(), horasHombreLote: z.number().min(0).max(100).nullable().optional(), horasHornoLote: z.number().min(0).max(100).nullable().optional(),
   });
 
@@ -69,10 +70,11 @@ export async function rutasMaestros(app: FastifyInstance) {
       await c.query(`UPDATE core.producto SET nombre=$2, categoria_id=$3, unidad=$4, precio_con_igv=$5, estado=$6,
           peso_masa_g = CASE WHEN $7::boolean THEN $8::numeric ELSE peso_masa_g END,
           perdida_coccion = coalesce($9::numeric, perdida_coccion),
-          horas_hombre_lote = coalesce($10::numeric, horas_hombre_lote), horas_horno_lote = coalesce($11::numeric, horas_horno_lote)
+          horas_hombre_lote = coalesce($10::numeric, horas_hombre_lote), horas_horno_lote = coalesce($11::numeric, horas_horno_lote),
+          anticipacion_horas = coalesce($12::int, anticipacion_horas)
         WHERE id=$1`,
         [id, p.data.nombre, p.data.categoriaId, p.data.unidad, p.data.precioConIgv.toFixed(4), p.data.estado,
-          p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, p.data.perdidaCoccion ?? null, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null]);
+          p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, p.data.perdidaCoccion ?? null, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null, p.data.anticipacionHoras ?? null]);
       await c.query('SELECT core.recalcular_costos()');
     });
     await auditar({ ...actor(req), accion: 'PRODUCTO_EDITADO', entidad: 'producto', entidadId: id,

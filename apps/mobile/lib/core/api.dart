@@ -230,10 +230,12 @@ class Api {
 
   Future<List<dynamic>> kardex(String codigo) async => await _get('/kardex/$codigo') as List<dynamic>;
 
-  Future<Map<String, dynamic>> registrarVenta({required List<Map<String, dynamic>> items, required String formaPago, String? clienteId, double descuentoPct = 0}) async =>
+  /// Con pedidoId, la venta despacha ese pedido (VEN-05): libera su reserva y lo marca despachado.
+  Future<Map<String, dynamic>> registrarVenta({required List<Map<String, dynamic>> items, required String formaPago, String? clienteId, double descuentoPct = 0, String? pedidoId}) async =>
       await _post('/ventas', {
         'items': items, 'formaPago': formaPago, 'descuentoPct': descuentoPct,
         if (clienteId != null) 'clienteId': clienteId,
+        if (pedidoId != null) 'pedidoId': pedidoId,
       }, idempotente: true) as Map<String, dynamic>;
 
   /// Insumo: merma/consumo/vencimiento/ajuste. Producto: merma/vencimiento o devolución de cliente.
@@ -289,8 +291,17 @@ class Api {
       ) as Map<String, dynamic>;
 
   /// Cambia el estado de un pedido. El servidor valida la transición.
-  Future<Map<String, dynamic>> cambiarEstadoPedido(String codigo, String estado) async =>
-      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': estado}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> cambiarEstadoPedido(String codigo, String estado, {String motivo = ''}) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': estado, 'motivo': motivo, 'observaciones': motivo}) as Map<String, dynamic>;
+
+  /// PED-07: el cliente cancela su pedido (solo antes de producción), con motivo.
+  Future<void> cancelarPedido(String codigo, String motivo) async => await _post('/pedidos/$codigo/cancelar', {'motivo': motivo});
+
+  Future<List<dynamic>> misDirecciones() async => await _get('/mis-direcciones') as List<dynamic>;
+
+  /// SEG-04: autorregistro del cliente (sin sesión). Devuelve el mensaje del servidor.
+  Future<String> registrarse(Map<String, dynamic> datos) async =>
+      '${(await _post('/auth/registro', datos, sinAuth: true) as Map)['mensaje']}';
 
   /// PATCH/PUT/DELETE con renovación de token y tiempo límite, igual que _get/_post.
   Future<dynamic> _enviar(String metodo, String ruta, Map<String, dynamic> cuerpo, {bool reintentar = true}) async {
@@ -383,8 +394,10 @@ class Api {
   /* ------------------------------------------------------- pedidos y OP */
   Future<List<dynamic>> misPedidos() async => await _get('/pedidos') as List<dynamic>;
 
-  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, required String fechaEntrega, String hora = '', String observaciones = ''}) async =>
-      await _post('/pedidos', {'items': items, 'fechaEntrega': fechaEntrega, 'horaEntrega': hora, 'observaciones': observaciones}, idempotente: true) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, required String fechaEntrega, String hora = '', String observaciones = '',
+          String tipoEntrega = 'RECOJO', String direccion = ''}) async =>
+      await _post('/pedidos', {'items': items, 'fechaEntrega': fechaEntrega, 'horaEntrega': hora, 'observaciones': observaciones,
+        'tipoEntrega': tipoEntrega, 'direccion': direccion}, idempotente: true) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;
 

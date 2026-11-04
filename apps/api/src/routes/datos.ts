@@ -100,7 +100,7 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
                p.precio_con_igv, p.costo_unitario, p.merma_pct, p.vendidos_30d, p.stock, p.estado,
-               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote,
+               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, p.anticipacion_horas,
                p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) AS precio_neto,
                CASE WHEN p.precio_con_igv > 0
                     THEN (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) - p.costo_unitario) / (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')))
@@ -279,6 +279,7 @@ export async function rutasDatos(app: FastifyInstance) {
           mermaPct: num(pr.merma_pct), margenObjetivo: num(pr.margen_objetivo),
           pesoMasaG: pr.peso_masa_g === null ? null : num(pr.peso_masa_g), perdidaCoccion: num(pr.perdida_coccion),
           horasHombreLote: num(pr.horas_hombre_lote), horasHornoLote: num(pr.horas_horno_lote),
+          reservado: num(pr.reservado), disponible: num(pr.stock) - num(pr.reservado), anticipacionHoras: Number(pr.anticipacion_horas),
         };
         if (!verCosto) return base;
         return { ...base, costoUnitario: num(pr.costo_unitario), margen: num(pr.margen) };

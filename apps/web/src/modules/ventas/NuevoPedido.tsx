@@ -25,6 +25,8 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
   const [fecha, setFecha] = useState(manana());
   const [hora, setHora] = useState('08:00');
   const [obs, setObs] = useState('');
+  const [tipoEntrega, setTipoEntrega] = useState<'RECOJO' | 'DELIVERY'>('RECOJO');
+  const [direccion, setDireccion] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
 
@@ -42,7 +44,7 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
     try {
       const r = await api<{ codigo: string }>('/pedidos', {
         method: 'POST', conIdempotencia: true,
-        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad) })), fechaEntrega: fecha, horaEntrega: hora, observaciones: obs },
+        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad) })), fechaEntrega: fecha, horaEntrega: hora, observaciones: obs, tipoEntrega, direccion },
       });
       onCerrar(r.codigo);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar.'); }
@@ -72,6 +74,8 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
         </div>
         <label className="field"><span className="field__label">Fecha de entrega</span><input className="field__input" type="date" min={hoy()} value={fecha} onChange={(e) => setFecha(e.target.value)} /></label>
         <label className="field"><span className="field__label">Hora</span><input className="field__input" type="time" value={hora} onChange={(e) => setHora(e.target.value)} /></label>
+        <label className="field"><span className="field__label">Tipo de entrega</span><select className="field__input" value={tipoEntrega} onChange={(e) => setTipoEntrega(e.target.value as 'RECOJO')}><option value="RECOJO">Recojo en tienda</option><option value="DELIVERY">Delivery</option></select></label>
+        {tipoEntrega === 'DELIVERY' ? <label className="field"><span className="field__label">Dirección de entrega</span><input className="field__input" maxLength={200} value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle, número, distrito" /></label> : <span />}
         <label className="field field--ancho"><span className="field__label">Observaciones / personalización</span><input className="field__input" maxLength={500} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ej.: torta con mensaje «Feliz cumpleaños Ana»" /></label>
         {error && <p className="form__error field--ancho" role="alert">{error}</p>}
       </div>
