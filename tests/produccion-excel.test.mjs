@@ -5,7 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { flujoCompras, hoyLima, nroUnico, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -113,5 +113,6 @@ test('PRO-12: anular con motivo; con insumos entregados no se anula', async () =
 });
 
 // El pan y los insumos de prueba no quedan activos en las listas.
-after(() => sqlScript(`UPDATE core.producto SET estado = 'INACTIVO' WHERE codigo = 'TP-${sufijo}';
+after(() => sqlScript(`${ANULAR_COMPRAS_DE_PRUEBA}
+  UPDATE core.producto SET estado = 'INACTIVO' WHERE codigo = 'TP-${sufijo}';
   UPDATE core.insumo SET activo = false WHERE codigo IN ('TH-${sufijo}', 'TA-${sufijo}', 'TL-${sufijo}');`));

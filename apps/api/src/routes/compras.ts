@@ -8,6 +8,7 @@ import { invalidar } from '../cache.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { actor, fallo, responder } from './almacen.js';
+import { anularPagosDeCompra } from './pagos.js';
 
 /**
  * Compra de insumos (Informe de Análisis v1.1).
@@ -226,7 +227,13 @@ export async function rutasCompras(app: FastifyInstance) {
         await c.query('SELECT core.recalcular_costos()');
         return { estado: 'VERIFICADA' as const, resumen: '' };
       });
-      if (r.estado === 'VERIFICADA') invalidar('cat:');
+      if (r.estado === 'VERIFICADA') {
+        invalidar('cat:');
+        const k = await uno<{ total: string; proveedor: string; vence: string | null }>(`SELECT c.total, p.razon_social proveedor, c.vence_pago::text vence
+          FROM core.compra c JOIN core.proveedor p ON p.id = c.proveedor_id WHERE c.codigo = $1`, [codigo]);
+        if (k) avisar([{ permiso: 'compras.pagar' }], { tipo: 'compra', titulo: `Deuda ${codigo} por pagar`, ruta: '/compras/deudas',
+          cuerpo: `Almacén verificó la compra: S/ ${num(k.total).toFixed(2)} a ${k.proveedor}${k.vence ? ` · vence ${k.vence}` : ''}` });
+      }
       await auditar({ ...actor(req), accion: r.estado === 'VERIFICADA' ? 'COMPRA_VERIFICADA' : 'COMPRA_OBSERVADA', entidad: 'compra', entidadId: codigo, detalle: { observacion: r.resumen || undefined } });
       void emitirEvento(r.estado === 'VERIFICADA' ? 'compra.verificada' : 'compra.observada', { codigo });
       if (r.estado === 'OBSERVADA') {
@@ -255,6 +262,7 @@ export async function rutasCompras(app: FastifyInstance) {
     const p = z.object({ motivo: z.string().trim().min(5).max(300) }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo de la anulación (mínimo 5 caracteres).'));
     return responder(reply, 'ANULACION_INVALIDA', async () => {
+      let pagosAnulados = 0;
       const revertidas = await tx(async (c) => {
         const k = (await c.query<{ id: string; estado: string }>('SELECT id, estado FROM core.compra WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
         if (!k) throw fallo(404, 'La compra no existe.');
@@ -292,11 +300,12 @@ export async function rutasCompras(app: FastifyInstance) {
           await c.query('SELECT core.recalcular_costos()');
         }
         await c.query(`UPDATE core.compra SET estado = 'ANULADA', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3 WHERE id = $1`, [k.id, req.usuario!.id, p.data.motivo]);
+        pagosAnulados = await anularPagosDeCompra(c, k.id, req.usuario!.id, p.data.motivo);
         return n;
       });
       if (revertidas) invalidar('cat:');
-      await auditar({ ...actor(req), accion: 'COMPRA_ANULADA', entidad: 'compra', entidadId: codigo, detalle: { motivo: p.data.motivo, lineasRevertidas: revertidas } });
-      return { codigo, estado: 'ANULADA', lineasRevertidas: revertidas };
+      await auditar({ ...actor(req), accion: 'COMPRA_ANULADA', entidad: 'compra', entidadId: codigo, detalle: { motivo: p.data.motivo, lineasRevertidas: revertidas, pagosAnulados } });
+      return { codigo, estado: 'ANULADA', lineasRevertidas: revertidas, pagosAnulados };
     });
   });
 }

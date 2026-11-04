@@ -4,7 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { flujoCompras, hoyLima, nroUnico, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -84,5 +84,6 @@ test('alerta de vencimiento: una sola vez por lote, a quien tiene alertas.stock'
   assert.ok((await api(alm, 'GET', `/lotes?dias=${dias}`)).b.some((x) => x.lote === lote), 'aparece en los lotes por vencer');
 });
 
-after(() => sqlScript(`UPDATE core.insumo SET activo = false WHERE nombre = 'Insumo prueba lotes';
+after(() => sqlScript(`${ANULAR_COMPRAS_DE_PRUEBA}
+  UPDATE core.insumo SET activo = false WHERE nombre = 'Insumo prueba lotes';
   UPDATE core.proveedor SET estado = 'INACTIVO' WHERE razon_social LIKE 'Proveedor prueba %';`));

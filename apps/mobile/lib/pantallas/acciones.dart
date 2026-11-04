@@ -626,6 +626,106 @@ class _VerificarComprasState extends State<VerificarCompras> {
   }
 }
 
+/* ------------------------------------------------------ caja chica */
+/// El vendedor abre la caja chica con un monto inicial y la cierra contando el efectivo.
+/// Administración paga desde ella compras pequeñas; aquí se ve cuánto queda.
+class CajaChica extends StatefulWidget {
+  const CajaChica({super.key});
+  @override
+  State<CajaChica> createState() => _CajaChicaState();
+}
+
+class _CajaChicaState extends State<CajaChica> {
+  Map<String, dynamic>? _datos;
+  String? _error;
+  final _monto = TextEditingController();
+  final _contado = TextEditingController();
+  final _obs = TextEditingController();
+
+  Future<void> _cargar() async {
+    try {
+      final d = await Api.instancia.cajaChica();
+      if (mounted) setState(() { _datos = d; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _mensaje(e));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _accion(Future<String> Function() fn) async {
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final t = await fn();
+      aviso.showSnackBar(SnackBar(content: Text(t)));
+      _cargar();
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    }
+  }
+
+  double _n(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.')) ?? -1;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = _datos?['abierta'] as Map<String, dynamic>?;
+    final saldo = ((a?['saldo'] as num?) ?? 0).toDouble();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Caja chica')),
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: ListView(padding: const EdgeInsets.all(16), children: [
+          if (_error != null) Text(_error!)
+          else if (_datos == null) const Center(child: CircularProgressIndicator())
+          else if (a == null) ...[
+            const Text('No hay caja chica abierta. Sin ella, Administración solo paga desde caja grande.'),
+            const SizedBox(height: 12),
+            TextField(controller: _monto, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(labelText: 'Monto inicial (S/)')),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: _n(_monto) > 0 ? () => _accion(() async {
+                final r = await Api.instancia.abrirCajaChica(_n(_monto));
+                _monto.clear();
+                return 'Caja ${r['codigo']} abierta';
+              }) : null,
+              child: const Text('Abrir caja'),
+            ),
+          ] else ...[
+            Text('Disponible ${dinero(saldo)}', style: Theme.of(context).textTheme.headlineSmall),
+            Text('${a['codigo']} · inicial ${dinero(((a['montoInicial'] as num?) ?? 0).toDouble())} · pagado ${dinero(((a['pagado'] as num?) ?? 0).toDouble())}'),
+            const SizedBox(height: 12),
+            for (final p in ((a['pagos'] as List?) ?? const []).cast<Map<String, dynamic>>())
+              ListTile(dense: true, contentPadding: EdgeInsets.zero,
+                  title: Text('${p['proveedor']} · ${p['compra']}'), subtitle: Text('${p['estado']}'.toLowerCase()),
+                  trailing: Text(dinero(((p['monto'] as num?) ?? 0).toDouble()))),
+            const Divider(height: 28),
+            Text('Cerrar caja', style: Theme.of(context).textTheme.titleMedium),
+            TextField(controller: _contado, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(labelText: 'Efectivo contado (S/)',
+                    helperText: _n(_contado) >= 0 ? 'Diferencia ${dinero(_n(_contado) - saldo)}' : 'Esperado ${dinero(saldo)}')),
+            TextField(controller: _obs, maxLength: 200, decoration: const InputDecoration(labelText: 'Observación')),
+            FilledButton(
+              onPressed: _n(_contado) >= 0 ? () => _accion(() async {
+                final r = await Api.instancia.cerrarCajaChica('${a['codigo']}', _n(_contado), _obs.text.trim());
+                _contado.clear();
+                _obs.clear();
+                final dif = ((r['diferencia'] as num?) ?? 0).toDouble();
+                return dif == 0 ? 'Caja cerrada sin diferencias' : 'Caja cerrada con diferencia de ${dinero(dif)}';
+              }) : null,
+              child: const Text('Cerrar caja'),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
 /* ------------------------------------------------------ estado de cuenta */
 /// Matriz de permisos, fila 19: el cliente consulta su deuda, documentos y pagos.
 class EstadoCuenta extends StatefulWidget {

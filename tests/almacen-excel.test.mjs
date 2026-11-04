@@ -4,7 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { flujoCompras, hoyLima, nroUnico, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -83,7 +83,8 @@ test('conteo físico: las diferencias se ajustan solo con aprobación del Gerent
 });
 
 // Los insumos y proveedores de prueba no quedan activos en las listas.
-after(() => sqlScript(`UPDATE core.insumo SET activo = false WHERE nombre = 'Insumo prueba almacén';
+after(() => sqlScript(`${ANULAR_COMPRAS_DE_PRUEBA}
+  UPDATE core.insumo SET activo = false WHERE nombre = 'Insumo prueba almacén';
   UPDATE core.proveedor SET estado = 'INACTIVO' WHERE razon_social LIKE 'Proveedor prueba %' OR razon_social LIKE 'Molino prueba %';`));
 
 test('CP-21: al bajar del mínimo hay una sola alerta hasta que el stock se recupere', async () => {

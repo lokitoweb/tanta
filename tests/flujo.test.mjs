@@ -1,11 +1,11 @@
 // node --test tests/flujo.test.mjs  (API en 127.0.0.1:3001 con la semilla)
 // Flujo del PDF (Fig. 2) y correcciones de la auditoría: pedido del cliente, OP con consumo
 // correcto, crédito con IGV, descuento con tope y ticket de MFA que no sirve como sesión.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { sql } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { sql, sqlScript } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -109,3 +109,5 @@ test('seguridad: el ticket de MFA no sirve como sesión', async () => {
     .setIssuedAt().setExpirationTime('5m').sign(new TextEncoder().encode(secreto));
   assert.equal((await api(ticket, 'GET', '/sistema/config')).s, 401);
 });
+
+after(() => sqlScript(ANULAR_COMPRAS_DE_PRUEBA));

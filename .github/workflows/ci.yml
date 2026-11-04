@@ -90,7 +90,7 @@ jobs:
           PGUSER: tanta
           PGPASSWORD: tanta_ci
           PGDATABASE: tanta
-        run: node --test --test-concurrency=1 tests/api.test.mjs tests/sistema.test.mjs tests/inventario.test.mjs tests/maestros.test.mjs tests/flujo.test.mjs tests/exportar.test.mjs tests/anulacion.test.mjs tests/costos-excel.test.mjs tests/produccion-excel.test.mjs tests/pedidos-excel.test.mjs tests/ventas-excel.test.mjs tests/almacen-excel.test.mjs tests/permisos-excel.test.mjs tests/app-cliente.test.mjs tests/almacenes-excel.test.mjs tests/lotes-excel.test.mjs tests/compras-insumos.test.mjs
+        run: node --test --test-concurrency=1 tests/api.test.mjs tests/sistema.test.mjs tests/inventario.test.mjs tests/maestros.test.mjs tests/flujo.test.mjs tests/exportar.test.mjs tests/anulacion.test.mjs tests/costos-excel.test.mjs tests/produccion-excel.test.mjs tests/pedidos-excel.test.mjs tests/ventas-excel.test.mjs tests/almacen-excel.test.mjs tests/permisos-excel.test.mjs tests/app-cliente.test.mjs tests/almacenes-excel.test.mjs tests/lotes-excel.test.mjs tests/compras-insumos.test.mjs tests/pagos-compra.test.mjs
 
       - name: Concurrencia del correlativo (0 colisiones)
         run: node tests/concurrencia-ventas.mjs 12

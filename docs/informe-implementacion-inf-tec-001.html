@@ -57,11 +57,11 @@
 <body>
 <main>
   <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
-  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: diez fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: once fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
 
   <div class="kpis">
-    <div class="kpi"><b>10</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>12</b><span>migraciones nuevas (024 a 035)</span></div>
+    <div class="kpi"><b>11</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>14</b><span>migraciones nuevas (024 a 037)</span></div>
     <div class="kpi"><b>83</b><span>pruebas automáticas en verde</span></div>
     <div class="kpi"><b>30 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
@@ -195,7 +195,21 @@
       <li>Avisos: compra por verificar → Almacén; observada → Administración; corrección autorizada → Compras.</li>
       <li>Web: pantalla de Compras por estado con registro, verificación (Almacén no ve precios), autorización, corrección y anulación. App: registro para Compras y "Verificar compras" para Almacén.</li>
     </ul>
-    <p class="meta">Criterios de aceptación del informe verificados con prueba automática: 1, 2, 3, 4, 5, 6, 7 y 10. Los criterios 8 y 9 (pagos y caja chica) corresponden a la Fase 11.</p>
+    <p class="meta">Criterios de aceptación del informe verificados con prueba automática: 1, 2, 3, 4, 5, 6, 7 y 10. Los criterios 8 y 9 se verifican en la Fase 11.</p>
+  </section>
+
+  <section class="fase">
+    <header><h3>Fase 11 · Deudas por pagar y cajas</h3><span class="meta">Informe de compra de insumos v1.1 · 3.2, 5.5, 5.6, RN-09 a RN-13</span></header>
+    <ul>
+      <li>Una compra verificada es una deuda: saldo = total − pagos vigentes; estado del pago Pendiente, Parcial o Pagado.</li>
+      <li>Administración registra cada pago eligiendo <b>caja chica o caja grande</b> y el medio (efectivo, Yape, Plin, transferencia u otro). Una deuda se paga en partes y desde cajas distintas (RN-10). Nunca más que el saldo (RN-13).</li>
+      <li>Pagos digitales y transferencias exigen número de operación (RN-12). El proveedor guarda banco y CCI (20 dígitos), dirección y su vendedor.</li>
+      <li><b>Caja chica</b>: la abre el vendedor con un monto inicial (web y app); una sola abierta a la vez. Paga solo en efectivo y nunca más que su saldo disponible; sin caja abierta no se paga desde ella (RN-11). Al cerrarla se registra lo contado y la diferencia.</li>
+      <li>Al anular una compra sus pagos pasan a Anulado y el efectivo vuelve a la caja chica (RN-09). Un pago mal registrado se anula con motivo, sin borrarse (RN-15).</li>
+      <li>Avisos a Administración: deuda nueva al verificarse la compra y recordatorio diario de deudas por vencer o vencidas (parámetro <code>dias_alerta_pago</code>, 3 días).</li>
+      <li>Se paga solo lo que Almacén verificó: una compra sin verificar todavía puede cambiar de monto.</li>
+    </ul>
+    <p class="meta">Criterios de aceptación 8 (pago mixto S/ 200 de caja chica + S/ 1,000 por transferencia = pagado) y 9 (caja chica sin saldo suficiente) con prueba automática y probados en pantalla con Vendedor y Administrador.</p>
   </section>
 
   <h2>Matriz de permisos aplicada</h2>
@@ -266,7 +280,6 @@
 
   <h2>Pendiente o fuera de alcance</h2>
   <ul>
-    <li><b>Deudas por pagar y cajas</b> (informe de compras, criterios 8 y 9): pagos parciales y mixtos desde caja chica y caja grande. Fase 11.</li>
     <li><b>Respaldo y restauración</b> (fila 23 y CP-38): corresponde a la infraestructura de despliegue.</li>
   </ul>
 

@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { flujoCompras, hoyLima, nroUnico, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -194,5 +194,6 @@ test('sección 7 y alertas: cada rol hace lo suyo; Almacén recibe la compra por
   assert.equal((await api(await login('cmedina'), 'GET', '/compras')).s, 403, 'el vendedor no ve compras');
 });
 
-after(() => sqlScript(`UPDATE core.insumo SET activo = false WHERE nombre LIKE '%${sufijo}%' OR nombre = 'Insumo prueba anulación';
+after(() => sqlScript(`${ANULAR_COMPRAS_DE_PRUEBA}
+  UPDATE core.insumo SET activo = false WHERE nombre LIKE '%${sufijo}%' OR nombre = 'Insumo prueba anulación';
   UPDATE core.proveedor SET estado = 'INACTIVO' WHERE razon_social LIKE 'Proveedor prueba %';`));

@@ -35,18 +35,22 @@ export async function rutasAlmacen(app: FastifyInstance) {
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido').default(''),
     email: z.union([z.literal(''), z.string().trim().email().max(160)]).default(''),
     estado: z.enum(['ACTIVO', 'INACTIVO']).default('ACTIVO'),
+    direccion: z.string().trim().max(200).default(''),
+    vendedor: z.string().trim().max(100).default(''),
+    banco: z.string().trim().max(60).default(''),
+    cci: z.union([z.literal(''), z.string().trim().regex(/^\d{20}$/, 'El CCI tiene 20 dígitos')]).default(''),
   });
 
   app.get('/proveedores', { preHandler: autenticar }, async (req, reply) => {
     if (!['proveedores.gestionar', 'compras.registrar', 'maestros.ver'].some((x) => req.usuario!.permisos.has(x)))
       return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso proveedores.gestionar.'));
     const filas = await q<Record<string, string>>(`
-      SELECT p.id, coalesce(p.ruc, '') ruc, p.razon_social, p.contacto, p.telefono, p.email, p.estado,
+      SELECT p.id, coalesce(p.ruc, '') ruc, p.razon_social, p.contacto, p.telefono, p.email, p.estado, p.direccion, p.vendedor, p.banco, coalesce(p.cci, '') cci,
              (SELECT string_agg(i.nombre, ', ' ORDER BY i.nombre) FROM core.insumo i WHERE i.proveedor_id = p.id) insumos,
              (SELECT count(*) FROM core.compra c WHERE c.proveedor_id = p.id) compras
       FROM core.proveedor p ORDER BY p.estado, p.razon_social`);
     return filas.map((f) => ({ id: f.id, ruc: f.ruc, razonSocial: f.razon_social, contacto: f.contacto, telefono: f.telefono, email: f.email,
-      estado: f.estado, insumos: f.insumos ?? '', compras: num(f.compras) }));
+      estado: f.estado, direccion: f.direccion, vendedor: f.vendedor, banco: f.banco, cci: f.cci, insumos: f.insumos ?? '', compras: num(f.compras) }));
   });
 
   app.post('/proveedores', { preHandler: autenticar }, async (req, reply) => {
@@ -55,8 +59,8 @@ export async function rutasAlmacen(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Proveedor inválido.'));
     const d = p.data;
     return responder(reply, 'PROVEEDOR_INVALIDO', async () => {
-      const r = await uno<{ id: string }>(`INSERT INTO core.proveedor (ruc, razon_social, contacto, telefono, email, estado)
-        VALUES (NULLIF($1,''),$2,$3,$4,$5,$6) RETURNING id`, [d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado]);
+      const r = await uno<{ id: string }>(`INSERT INTO core.proveedor (ruc, razon_social, contacto, telefono, email, estado, direccion, vendedor, banco, cci)
+        VALUES (NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,'')) RETURNING id`, [d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado, d.direccion, d.vendedor, d.banco, d.cci]);
       await auditar({ ...actor(req), accion: 'PROVEEDOR_CREADO', entidad: 'proveedor', entidadId: r!.id, detalle: { ruc: d.ruc, razonSocial: d.razonSocial } });
       return reply.code(201).send({ id: r!.id, ...d });
     });
@@ -69,8 +73,8 @@ export async function rutasAlmacen(app: FastifyInstance) {
     if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error?.issues[0]?.message ?? 'Proveedor inválido.'));
     const d = p.data;
     return responder(reply, 'PROVEEDOR_INVALIDO', async () => {
-      const r = await q(`UPDATE core.proveedor SET ruc = NULLIF($2,''), razon_social = $3, contacto = $4, telefono = $5, email = $6, estado = $7
-        WHERE id = $1 RETURNING id`, [id, d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado]);
+      const r = await q(`UPDATE core.proveedor SET ruc = NULLIF($2,''), razon_social = $3, contacto = $4, telefono = $5, email = $6, estado = $7,
+        direccion = $8, vendedor = $9, banco = $10, cci = NULLIF($11,'') WHERE id = $1 RETURNING id`, [id, d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado, d.direccion, d.vendedor, d.banco, d.cci]);
       if (!r.length) throw fallo(404, 'El proveedor no existe.');
       await auditar({ ...actor(req), accion: 'PROVEEDOR_EDITADO', entidad: 'proveedor', entidadId: id, detalle: { razonSocial: d.razonSocial, estado: d.estado } });
       return { id, ...d };

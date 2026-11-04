@@ -381,6 +381,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('produccion.planificar')) accion('Nueva OP', Icons.add_task_outlined, NuevaOrden(datos: datos)),
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
       if (api.puede('compras.registrar')) accion('Registrar compra', Icons.local_shipping_outlined, NuevaCompra(datos: datos)),
+      if (api.puede('caja.abrir')) accion('Caja chica', Icons.point_of_sale_outlined, const CajaChica()),
       if (api.puede('compras.verificar')) accion('Verificar compras', Icons.fact_check_outlined, const VerificarCompras()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, MisPedidos(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>())),

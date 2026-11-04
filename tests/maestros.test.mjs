@@ -1,10 +1,10 @@
 // node --test tests/maestros.test.mjs  (API en 127.0.0.1:3001 con la semilla)
 // El motor de costeo responde a los maestros: CIF, recetas y compras cambian el costo real.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { sql } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { sql, sqlScript } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -76,3 +76,5 @@ test('Compra de insumo: el nuevo CPP cambia el costo del producto', async () => 
   assert.ok(Math.abs(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${insumoId}'`)) - 4) < 0.0001, 'CPP = (10 × 2 + 10 × 6) ÷ 20 = 4');
   assert.ok((await ficha(ger, productoId)) > antes, 'comprar más caro sube el costo');
 });
+
+after(() => sqlScript(ANULAR_COMPRAS_DE_PRUEBA));

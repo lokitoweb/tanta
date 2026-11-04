@@ -16,6 +16,7 @@ import { rutasCobranza } from './routes/cobranza.js';
 import { rutasAlmacen, rutasAlmacenes, rutasLotes, despacharAlertasStock, despacharAlertasVencimiento } from './routes/almacen.js';
 import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
 import { rutasCompras } from './routes/compras.js';
+import { rutasPagos, despacharAvisosPago } from './routes/pagos.js';
 import { rutasFlujo } from './routes/flujo.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
@@ -140,6 +141,7 @@ export async function construir() {
     await api.register(rutasLotes);
     await api.register(rutasNotificaciones);
     await api.register(rutasCompras);
+    await api.register(rutasPagos);
     await api.register(rutasFlujo);
   }, { prefix: '/api/v1' });
 
@@ -154,6 +156,7 @@ try {
   setInterval(() => {
     despacharAlertasStock().catch((e) => app.log.error(e, 'alertas de stock'));
     despacharAlertasVencimiento().catch((e) => app.log.error(e, 'alertas de vencimiento'));
+    despacharAvisosPago().catch((e) => app.log.error(e, 'avisos de pago'));
   }, 15_000).unref();
   // PED-05 / CP-36: los avisos de cada estado del pedido salen en segundos (meta del Excel: menos de 30 s).
   setInterval(() => { despacharAvisosPedido().catch((e) => app.log.error(e, 'avisos de pedido')); }, 5_000).unref();

@@ -35,3 +35,7 @@ export function flujoCompras(api, login) {
   };
   return { proveedor, registrar, verificar, comprar, comprarInventario };
 }
+
+/** Al terminar una prueba: anula las compras de los proveedores de prueba (no deben quedar como deudas). */
+export const ANULAR_COMPRAS_DE_PRUEBA = `UPDATE core.compra SET estado = 'ANULADA', anulado_en = now(), motivo_anulacion = 'Prueba automática'
+  WHERE estado <> 'ANULADA' AND proveedor_id IN (SELECT id FROM core.proveedor WHERE razon_social LIKE 'Proveedor prueba %' OR razon_social LIKE 'Molino prueba %');`;

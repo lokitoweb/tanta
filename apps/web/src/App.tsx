@@ -7,6 +7,8 @@ import { Reportes } from '@/modules/gerencia/Reportes';
 import { Almacenes, Categorias, Clientes, CostosIndirectos, Insumos, Productos, Proveedores } from '@/modules/maestros/Maestros';
 import { Compras } from '@/modules/almacen/Compras';
 import { Conteos } from '@/modules/almacen/Conteos';
+import { Deudas } from '@/modules/almacen/Deudas';
+import { CajaChica } from '@/modules/ventas/CajaChica';
 import { Auditoria } from '@/modules/sistema/Auditoria';
 import { Recetas } from '@/modules/maestros/Recetas';
 import { Produccion } from '@/modules/produccion/Produccion';
@@ -44,6 +46,8 @@ export function App() {
         <Route path="/almacen/requisiciones" element={<Gate permiso="requisiciones.atender" siNo={<SinAcceso />}><Requisiciones /></Gate>} />
         <Route path="/almacen/kardex" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Kardex /></Gate>} />
         <Route path="/almacen/compras" element={<Gate permiso="compras.ver" siNo={<SinAcceso />}><Compras /></Gate>} />
+        <Route path="/compras/deudas" element={<Gate permiso="deudas.ver" siNo={<SinAcceso />}><Deudas /></Gate>} />
+        <Route path="/caja" element={<Gate permiso="caja.abrir" siNo={<SinAcceso />}><CajaChica /></Gate>} />
         <Route path="/almacen/conteos" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Conteos /></Gate>} />
         <Route path="/maestros/almacenes" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Almacenes /></Gate>} />
         <Route path="/maestros/proveedores" element={<Gate permiso="proveedores.gestionar" siNo={<SinAcceso />}><Proveedores /></Gate>} />

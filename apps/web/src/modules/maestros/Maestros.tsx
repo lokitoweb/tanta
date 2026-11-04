@@ -176,7 +176,7 @@ export function Proveedores() {
   return (
     <Crud titulo="Proveedores" nombreExport="proveedores" descripcion="RUC, contacto e insumos que abastece. Un proveedor con compras solo se inactiva."
       cargar={() => api<Reg[]>('/proveedores')}
-      nuevo={{ ruc: '', razonSocial: '', contacto: '', telefono: '', email: '', estado: 'ACTIVO' }}
+      nuevo={{ ruc: '', razonSocial: '', contacto: '', telefono: '', email: '', direccion: '', vendedor: '', banco: '', cci: '', estado: 'ACTIVO' }}
       crear={guardar('POST', '/proveedores')} editar={(id, d) => api(`/proveedores/${id}`, { method: 'PATCH', body: d })}
       columnas={[
         { key: 'ruc', label: 'RUC' }, { key: 'razonSocial', label: 'Razón social' }, { key: 'contacto', label: 'Contacto' },
@@ -188,6 +188,10 @@ export function Proveedores() {
         { key: 'ruc', label: 'RUC', max: 11, ayuda: '11 dígitos; empieza en 10, 15, 17 o 20' },
         { key: 'contacto', label: 'Contacto', max: 120 },
         { key: 'telefono', label: 'Teléfono', tipo: 'tel', max: 30 }, { key: 'email', label: 'Correo', tipo: 'email' },
+        { key: 'direccion', label: 'Dirección', ancho: true, max: 200 },
+        { key: 'vendedor', label: 'Vendedor que nos atiende', max: 100 },
+        { key: 'banco', label: 'Banco', max: 60, ayuda: 'Para pagos por transferencia' },
+        { key: 'cci', label: 'CCI', max: 20, ayuda: 'Código de cuenta interbancaria: 20 dígitos' },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
       ]} />
   );
