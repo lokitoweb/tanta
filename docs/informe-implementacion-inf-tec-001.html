@@ -57,12 +57,12 @@
 <body>
 <main>
   <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
-  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: siete fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: ocho fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
 
   <div class="kpis">
-    <div class="kpi"><b>7</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>8</b><span>migraciones nuevas (024 a 031)</span></div>
-    <div class="kpi"><b>76</b><span>pruebas automáticas en verde</span></div>
+    <div class="kpi"><b>8</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>9</b><span>migraciones nuevas (024 a 032)</span></div>
+    <div class="kpi"><b>80</b><span>pruebas automáticas en verde</span></div>
     <div class="kpi"><b>30 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
   </div>
@@ -159,6 +159,17 @@
     <p class="meta">Casos verificados: CP-10 y el aviso de CP-36 en menos de 30 s.</p>
   </section>
 
+  <section class="fase">
+    <header><h3>Fase 8 · Almacenes, compras en la app y fichas completas</h3><span class="meta">MAE-10 · W12 · A22 · MAE-01 · MAE-08</span></header>
+    <ul>
+      <li>Maestro de almacenes: almacén de insumos y de productos terminados, con responsable, ubicación y estado. Uno principal por tipo.</li>
+      <li>Cada movimiento de inventario queda asociado a un almacén: lo asigna la base al registrarlo, así ninguna operación lo olvida. Los movimientos anteriores se asignaron al almacén de su tipo. El kárdex muestra el almacén.</li>
+      <li>Registro de compras desde la app (A22): proveedor, documento y varias líneas, igual que en la web.</li>
+      <li>Ficha del insumo con su proveedor habitual elegido del maestro; el proveedor muestra los insumos que abastece.</li>
+      <li>Ficha del cliente con su vendedor asignado.</li>
+    </ul>
+  </section>
+
   <h2>Matriz de permisos aplicada</h2>
   <p>C crear · L consultar · M modificar · A anular · P aprobar. El servidor valida cada permiso; la web y la app solo muestran lo que el rol puede usar.</p>
   <div class="tabla"><table>
@@ -228,9 +239,6 @@
   <h2>Pendiente o fuera de alcance</h2>
   <ul>
     <li><b>Lotes y fechas de vencimiento de insumos</b> (AIN-11): el Excel lo marca como ampliación.</li>
-    <li><b>Varios almacenes</b>: la panadería opera con uno; llevar stock por almacén es un cambio mayor.</li>
-    <li><b>Compras desde la app</b>: se registran en la web.</li>
-    <li><b>Elegir proveedor y vendedor asignado</b> en las fichas de insumo y cliente desde la web: la API ya los acepta.</li>
     <li><b>Respaldo y restauración</b> (fila 23 y CP-38): corresponde a la infraestructura de despliegue.</li>
   </ul>
 

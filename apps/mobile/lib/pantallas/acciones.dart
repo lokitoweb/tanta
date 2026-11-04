@@ -373,6 +373,117 @@ class _RequisicionesState extends State<Requisiciones> {
   }
 }
 
+/* ------------------------------------------------------ compra de insumos */
+/// A22: recepción de mercadería con proveedor, documento y varias líneas; actualiza stock y costo promedio.
+class NuevaCompra extends StatefulWidget {
+  const NuevaCompra({super.key, required this.datos});
+  final Map<String, dynamic> datos;
+  @override
+  State<NuevaCompra> createState() => _NuevaCompraState();
+}
+
+class _LineaCompra {
+  String? insumoId;
+  final cantidad = TextEditingController();
+  final precio = TextEditingController();
+  double get c => double.tryParse(cantidad.text.replaceAll(',', '.')) ?? 0;
+  double get p => double.tryParse(precio.text.replaceAll(',', '.')) ?? 0;
+}
+
+class _NuevaCompraState extends State<NuevaCompra> {
+  List<Map<String, dynamic>> _proveedores = const [];
+  String? _proveedor;
+  String _docTipo = 'FACTURA';
+  final _docNumero = TextEditingController();
+  final _lineas = [_LineaCompra()];
+  bool _enviando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.instancia.proveedores().then((l) {
+      final activos = l.cast<Map<String, dynamic>>().where((p) => p['estado'] == 'ACTIVO').toList();
+      if (mounted) setState(() { _proveedores = activos; _proveedor = activos.isEmpty ? null : '${activos.first['id']}'; });
+    }).catchError((_) {});
+  }
+
+  double get _total => _lineas.fold(0, (s, l) => s + l.c * l.p);
+  bool get _valido => _proveedor != null && RegExp(r'^[A-Za-z0-9-]{3,20}$').hasMatch(_docNumero.text.trim())
+      && _lineas.every((l) => l.insumoId != null && l.c > 0 && l.p > 0)
+      && _lineas.map((l) => l.insumoId).toSet().length == _lineas.length;
+
+  Future<void> _guardar() async {
+    setState(() => _enviando = true);
+    final aviso = ScaffoldMessenger.of(context);
+    final nav = Navigator.of(context);
+    try {
+      final r = await Api.instancia.registrarCompra(proveedorId: _proveedor!, docTipo: _docTipo, docNumero: _docNumero.text.trim().toUpperCase(),
+          items: [for (final l in _lineas) {'insumoId': l.insumoId, 'cantidad': l.c, 'precio': l.p}]);
+      aviso.showSnackBar(SnackBar(content: Text('Compra ${r['codigo']} registrada por ${dinero(((r['total'] as num?) ?? 0).toDouble())}')));
+      nav.pop(true);
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final insumos = _lista(widget.datos, 'insumos');
+    return Scaffold(
+      appBar: AppBar(title: const Text('Registrar compra')),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 120), children: [
+        DropdownButtonFormField<String>(
+          initialValue: _proveedor, isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Proveedor'),
+          items: [for (final p in _proveedores) DropdownMenuItem(value: '${p['id']}', child: Text('${p['razonSocial']}', overflow: TextOverflow.ellipsis))],
+          onChanged: (v) => setState(() => _proveedor = v),
+        ),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: DropdownButtonFormField<String>(
+            initialValue: _docTipo,
+            decoration: const InputDecoration(labelText: 'Documento'),
+            items: const [DropdownMenuItem(value: 'FACTURA', child: Text('Factura')), DropdownMenuItem(value: 'BOLETA', child: Text('Boleta')), DropdownMenuItem(value: 'GUIA', child: Text('Guía'))],
+            onChanged: (v) => setState(() => _docTipo = v!),
+          )),
+          const SizedBox(width: 12),
+          Expanded(child: TextField(controller: _docNumero, onChanged: (_) => setState(() {}), textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Número', hintText: 'F001-123'))),
+        ]),
+        const SizedBox(height: 16),
+        for (var i = 0; i < _lineas.length; i++) Card(child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(children: [
+            Row(children: [
+              Expanded(child: DropdownButtonFormField<String>(
+                initialValue: _lineas[i].insumoId, isExpanded: true,
+                decoration: InputDecoration(labelText: 'Insumo ${i + 1}'),
+                items: [for (final x in insumos) DropdownMenuItem(value: '${x['id']}', child: Text('${x['nombre']} (${x['unidad']})', overflow: TextOverflow.ellipsis))],
+                onChanged: (v) => setState(() => _lineas[i].insumoId = v),
+              )),
+              if (_lineas.length > 1) IconButton(tooltip: 'Quitar línea', icon: const Icon(Icons.delete_outline), onPressed: () => setState(() => _lineas.removeAt(i))),
+            ]),
+            Row(children: [
+              Expanded(child: TextField(controller: _lineas[i].cantidad, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad'))),
+              const SizedBox(width: 12),
+              Expanded(child: TextField(controller: _lineas[i].precio, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio unit. (S/)'))),
+            ]),
+          ]),
+        )),
+        TextButton.icon(icon: const Icon(Icons.add), label: const Text('Agregar insumo'), onPressed: () => setState(() => _lineas.add(_LineaCompra()))),
+        if (_lineas.map((l) => l.insumoId).whereType<String>().toSet().length < _lineas.where((l) => l.insumoId != null).length)
+          const Text('Hay un insumo repetido', style: TextStyle(color: Colors.red)),
+      ]),
+      bottomNavigationBar: SafeArea(child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: FilledButton(onPressed: !_valido || _enviando ? null : _guardar, child: Text(_enviando ? 'Guardando…' : 'Guardar ${dinero(_total)}')),
+      )),
+    );
+  }
+}
+
 /* ------------------------------------------------------ estado de cuenta */
 /// Matriz de permisos, fila 19: el cliente consulta su deuda, documentos y pagos.
 class EstadoCuenta extends StatefulWidget {

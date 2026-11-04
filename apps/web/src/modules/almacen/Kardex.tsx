@@ -6,7 +6,7 @@ import { useApp } from '@/core/app-state';
 import { money, num, num2 } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio, Buscador } from '@/ui/primitives';
 
-interface Mov { fecha: string; tipo: string; documento: string; cantidad: number; costoUnitario?: number; valor?: number; saldoCantidad: number; saldoValor?: number; cpp?: number }
+interface Mov { fecha: string; tipo: string; documento: string; almacen?: string; cantidad: number; costoUnitario?: number; valor?: number; saldoCantidad: number; saldoValor?: number; cpp?: number }
 
 const TIPOS: Record<string, { label: string; tono: 'ok' | 'danger' | 'warn' | 'info' | 'neutral' }> = {
   APERTURA: { label: 'Apertura', tono: 'neutral' }, COMPRA: { label: 'Compra', tono: 'ok' }, CONSUMO_OP: { label: 'Consumo OP', tono: 'info' },
@@ -80,7 +80,7 @@ export function Kardex() {
                 <div className="tabla__barra"><Buscador valor={filtroMov} onChange={setFiltroMov} placeholder="Buscar por documento, OP, venta o motivo…" /><span className="t-muted">{recientes.length} asientos</span></div>
                 <div className="table-wrap">
                   <table className="table table--kardex">
-                    <thead><tr><th>Fecha</th><th>Movimiento</th><th>Documento / motivo</th><th className="t-right">Cantidad</th>
+                    <thead><tr><th>Fecha</th><th>Movimiento</th><th>Documento / motivo</th><th>Almacén</th><th className="t-right">Cantidad</th>
                       {valoriza && <><th className="t-right">Costo unit.</th><th className="t-right">Valor</th></>}
                       <th className="t-right">Saldo</th>{valoriza && <th className="t-right">Saldo valorizado</th>}</tr></thead>
                     <tbody>
@@ -91,6 +91,7 @@ export function Kardex() {
                             <td className="t-muted">{m.fecha.slice(0, 16).replace('T', ' ')}</td>
                             <td><Insignia tono={t.tono}>{t.label}</Insignia></td>
                             <td><span className="mono">{m.documento}</span></td>
+                            <td className="t-muted">{m.almacen || '—'}</td>
                             <td className={`t-right ${m.cantidad < 0 ? 't-neg' : 't-pos'}`}>{m.cantidad > 0 ? '+' : ''}{num2(m.cantidad)}</td>
                             {valoriza && <><td className="t-right">{money(m.costoUnitario ?? 0)}</td><td className={`t-right ${(m.valor ?? 0) < 0 ? 't-neg' : ''}`}>{money(m.valor ?? 0)}</td></>}
                             <td className="t-right"><strong>{num2(m.saldoCantidad)}</strong></td>

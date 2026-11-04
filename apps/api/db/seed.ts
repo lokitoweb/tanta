@@ -98,6 +98,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 3],
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
   ['n-proveedores', 'Maestros', 'Proveedores', '/maestros/proveedores', 'truck', 'proveedores.gestionar', 4, 3],
+  ['n-almacenes', 'Maestros', 'Almacenes', '/maestros/almacenes', 'box', 'maestros.editar', 5, 3],
   ['n-categorias', 'Maestros', 'Categorías', '/maestros/categorias', 'clipboard', 'maestros.editar', 3, 3],
   ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 3],
   ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 3],
@@ -270,6 +271,12 @@ async function main() {
       await c.query('INSERT INTO core.categoria (id,nombre,margen_objetivo,orden) VALUES ($1,$2,$3,$4)',
         [id, nombre, d(objetivo), CATEGORIAS.findIndex((x) => x[0] === id)]);
     }
+
+    // --------------------------------------------------------- almacenes
+    // MAE-10: insumos y productos terminados; responsable, el usuario de Almacén.
+    await c.query(`INSERT INTO core.almacen (nombre, tipo, principal, responsable_id)
+      SELECT n, t, true, (SELECT id FROM core.usuario WHERE usuario = 'jramos') FROM (VALUES ('Almacén de insumos', 'INSUMOS'), ('Almacén de productos terminados', 'PRODUCTOS')) v(n, t)
+      ON CONFLICT DO NOTHING`);
 
     // ----------------------------------------------------------- insumos
     const idInsumo = new Map<string, string>();

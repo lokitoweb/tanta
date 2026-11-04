@@ -233,6 +233,11 @@ class Api {
   /// Conteo físico: el Almacén registra lo contado; el Gerente aprueba y recién se ajusta el stock.
   /// COB-06: el cliente recibe solo su propio estado de cuenta (el servidor ignora otro clienteId).
   Future<Map<String, dynamic>> estadoCuenta() async => await _get('/estado-cuenta') as Map<String, dynamic>;
+  /// A22: compras de insumos con proveedor y documento.
+  Future<List<dynamic>> proveedores() async => await _get('/proveedores') as List<dynamic>;
+  Future<Map<String, dynamic>> registrarCompra({required String proveedorId, required String docTipo, required String docNumero,
+          required List<Map<String, dynamic>> items}) async =>
+      await _post('/compras', {'proveedorId': proveedorId, 'docTipo': docTipo, 'docNumero': docNumero, 'items': items}, idempotente: true) as Map<String, dynamic>;
   Future<List<dynamic>> conteos() async => await _get('/conteos') as List<dynamic>;
   Future<Map<String, dynamic>> registrarConteo(List<Map<String, dynamic>> items, String observacion) async =>
       await _post('/conteos', {'items': items, 'observacion': observacion}) as Map<String, dynamic>;

@@ -13,7 +13,7 @@ import { rutasSistema } from './routes/sistema.js';
 import { rutasMaestros } from './routes/maestros.js';
 import { rutasReportes } from './routes/reportes.js';
 import { rutasCobranza } from './routes/cobranza.js';
-import { rutasAlmacen, despacharAlertasStock } from './routes/almacen.js';
+import { rutasAlmacen, rutasAlmacenes, despacharAlertasStock } from './routes/almacen.js';
 import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
 import { rutasFlujo } from './routes/flujo.js';
 
@@ -135,6 +135,7 @@ export async function construir() {
     await api.register(rutasReportes);
     await api.register(rutasCobranza);
     await api.register(rutasAlmacen);
+    await api.register(rutasAlmacenes);
     await api.register(rutasNotificaciones);
     await api.register(rutasFlujo);
   }, { prefix: '/api/v1' });

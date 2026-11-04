@@ -4,7 +4,7 @@ import { Gate } from '@/core/app-state';
 import { Panel } from '@/modules/panel/Panel';
 import { Dashboard } from '@/modules/gerencia/Dashboard';
 import { Reportes } from '@/modules/gerencia/Reportes';
-import { Categorias, Clientes, CostosIndirectos, Insumos, Productos, Proveedores } from '@/modules/maestros/Maestros';
+import { Almacenes, Categorias, Clientes, CostosIndirectos, Insumos, Productos, Proveedores } from '@/modules/maestros/Maestros';
 import { Compras } from '@/modules/almacen/Compras';
 import { Conteos } from '@/modules/almacen/Conteos';
 import { Auditoria } from '@/modules/sistema/Auditoria';
@@ -45,6 +45,7 @@ export function App() {
         <Route path="/almacen/kardex" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Kardex /></Gate>} />
         <Route path="/almacen/compras" element={<Gate permiso="compras.registrar" siNo={<SinAcceso />}><Compras /></Gate>} />
         <Route path="/almacen/conteos" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Conteos /></Gate>} />
+        <Route path="/maestros/almacenes" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Almacenes /></Gate>} />
         <Route path="/maestros/proveedores" element={<Gate permiso="proveedores.gestionar" siNo={<SinAcceso />}><Proveedores /></Gate>} />
 
         <Route path="/ventas/pedidos" element={<Gate permiso="pedidos.ver" siNo={<SinAcceso />}><Pedidos /></Gate>} />

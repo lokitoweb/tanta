@@ -872,8 +872,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const filas = await q<Record<string, string>>(
       `SELECT * FROM (
          SELECT m.id, m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad, m.costo_unitario,
-                m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp
-         FROM core.movimiento_inventario m
+                m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp, a.nombre AS almacen
+         FROM core.movimiento_inventario m LEFT JOIN core.almacen a ON a.id = m.almacen_id
          -- Por id y no por código: así usa los índices de insumo_id / producto_id.
          WHERE m.insumo_id = (SELECT id FROM core.insumo WHERE codigo = $1)
             OR m.producto_id = (SELECT id FROM core.producto WHERE codigo = $1)
@@ -883,7 +883,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     );
     const valoriza = req.usuario!.permisos.has('costos.ver') || req.usuario!.permisos.has('inventario.mover');
     return reply.send(filas.map((f) => ({
-      fecha: f.fecha, tipo: f.tipo, documento: f.documento, cantidad: num(f.cantidad), saldoCantidad: num(f.saldo_cantidad),
+      fecha: f.fecha, tipo: f.tipo, documento: f.documento, almacen: f.almacen ?? '', cantidad: num(f.cantidad), saldoCantidad: num(f.saldo_cantidad),
       ...(valoriza ? { costoUnitario: num(f.costo_unitario), valor: num(f.valor), saldoValor: num(f.saldo_valor), cpp: num(f.cpp) } : {}),
     })));
   });

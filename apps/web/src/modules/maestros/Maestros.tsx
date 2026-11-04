@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { money, num } from '@/core/format';
@@ -7,14 +7,22 @@ import { Kpi } from '@/ui/primitives';
 import type { ColRep } from '@/ui/TablaReporte';
 
 type Reg = Record<string, unknown> & { id?: string };
+type Opcion = { valor: string; texto: string };
+/** Opciones de un select cargadas de la API; vacío mientras carga o si no hay permiso. */
+function useOpciones(ruta: string, texto: (r: Reg) => string, valor: (r: Reg) => string = (r) => String(r.id)) {
+  const [o, setO] = useState<Opcion[]>([]);
+  useEffect(() => { api<Reg[]>(ruta).then((l) => setO(l.map((r) => ({ valor: valor(r), texto: texto(r) })))).catch(() => setO([])); }, [ruta]);
+  return o;
+}
 const guardar = (metodo: 'POST' | 'PATCH', ruta: string) => (d: Reg) => api(ruta, { method: metodo, body: d });
 
 /* ---------------------------------------------------------------- Clientes */
 export function Clientes() {
+  const vendedores = useOpciones('/vendedores', (r) => String(r.nombre));
   return (
     <Crud titulo="Clientes" nombreExport="clientes" descripcion="Datos, crédito y lista de precios. El límite de crédito se valida en cada venta al crédito."
       cargar={() => api<Reg[]>('/clientes')}
-      nuevo={{ nombre: '', docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', listaPrecio: 'MINORISTA', condicionPago: 'CONTADO', diasCredito: 0, limiteCredito: 0, estado: 'ACTIVO' }}
+      nuevo={{ nombre: '', docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', listaPrecio: 'MINORISTA', condicionPago: 'CONTADO', diasCredito: 0, limiteCredito: 0, estado: 'ACTIVO', vendedorId: '' }}
       crear={guardar('POST', '/clientes')} editar={(id, d) => api(`/clientes/${id}`, { method: 'PATCH', body: d })}
       columnas={[
         { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Cliente' }, { key: 'docNumero', label: 'Documento' },
@@ -30,6 +38,7 @@ export function Clientes() {
         { key: 'listaPrecio', label: 'Lista de precios', tipo: 'select', opciones: ['MINORISTA', 'MAYORISTA', 'CORPORATIVO'].map((v) => ({ valor: v, texto: v[0] + v.slice(1).toLowerCase() })) },
         { key: 'condicionPago', label: 'Condición de pago', tipo: 'select', opciones: [{ valor: 'CONTADO', texto: 'Contado' }, { valor: 'CREDITO', texto: 'Crédito (puede comprar a plazo)' }] },
         { key: 'diasCredito', label: 'Días de crédito', tipo: 'numero' }, { key: 'limiteCredito', label: 'Límite de crédito (S/)', tipo: 'numero' },
+        { key: 'vendedorId', label: 'Vendedor asignado', tipo: 'select', opciones: [{ valor: '', texto: 'Sin asignar' }, ...vendedores] },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
       ]} />
   );
@@ -128,6 +137,7 @@ export function Productos() {
 /* ------------------------------------------------------------------ Insumos */
 export function Insumos() {
   const { dataset, puede, refrescarDatos } = useApp();
+  const proveedores = useOpciones('/proveedores', (r) => String(r.razonSocial), (r) => String(r.razonSocial));
   return (
     <Crud titulo="Insumos" nombreExport="insumos" deps={dataset.insumos}
       descripcion="Costo por unidad base = precio ÷ cantidad por presentación hasta la primera compra; desde ahí manda el costo promedio ponderado del kárdex."
@@ -150,7 +160,7 @@ export function Insumos() {
         { key: 'cantPresentacion', label: 'Cantidad por presentación (en unidad base)', tipo: 'numero' },
         { key: 'equivKg', label: 'Equivalente en kg de 1 unidad base', tipo: 'numero', ayuda: 'Aceite: 0.92 · agua: 1 · huevo: 0.05' },
         { key: 'minimo', label: 'Stock mínimo', tipo: 'numero' },
-        { key: 'proveedor', label: 'Proveedor', ancho: true, max: 120 },
+        { key: 'proveedor', label: 'Proveedor habitual', ancho: true, tipo: 'select', opciones: [{ valor: '', texto: 'Sin proveedor' }, ...proveedores], ayuda: 'Se elige del maestro de proveedores' },
         { key: 'activo', label: 'Activo', tipo: 'bool' },
       ]} />
   );
@@ -175,6 +185,30 @@ export function Proveedores() {
         { key: 'ruc', label: 'RUC', max: 11, ayuda: '11 dígitos; empieza en 10, 15, 17 o 20' },
         { key: 'contacto', label: 'Contacto', max: 120 },
         { key: 'telefono', label: 'Teléfono', tipo: 'tel', max: 30 }, { key: 'email', label: 'Correo', tipo: 'email' },
+        { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
+      ]} />
+  );
+}
+
+/* --------------------------------------------------------------- Almacenes */
+// MAE-10 / W12: almacén de insumos y de productos terminados, con responsable. El principal recibe los movimientos.
+export function Almacenes() {
+  const responsables = useOpciones('/almacenes/responsables', (r) => String(r.nombre));
+  return (
+    <Crud titulo="Almacenes" nombreExport="almacenes" descripcion="Cada movimiento de inventario queda en el almacén principal de su tipo. Solo hay un principal por tipo."
+      cargar={() => api<Reg[]>('/almacenes')}
+      nuevo={{ nombre: '', tipo: 'INSUMOS', responsableId: '', ubicacion: '', principal: false, estado: 'ACTIVO' }}
+      crear={guardar('POST', '/almacenes')} editar={(id, d) => api(`/almacenes/${id}`, { method: 'PATCH', body: d })}
+      columnas={[
+        { key: 'nombre', label: 'Almacén' }, { key: 'tipo', label: 'Tipo' }, { key: 'responsable', label: 'Responsable' },
+        { key: 'ubicacion', label: 'Ubicación' }, { key: 'movimientos', label: 'Movimientos', tipo: 'num' }, { key: 'estado', label: 'Estado' },
+      ]}
+      campos={[
+        { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 80 },
+        { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [{ valor: 'INSUMOS', texto: 'Insumos' }, { valor: 'PRODUCTOS', texto: 'Productos terminados' }] },
+        { key: 'responsableId', label: 'Responsable', tipo: 'select', opciones: [{ valor: '', texto: 'Sin responsable' }, ...responsables] },
+        { key: 'ubicacion', label: 'Ubicación', ancho: true, max: 160 },
+        { key: 'principal', label: 'Principal de su tipo (recibe los movimientos)', tipo: 'bool' },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
       ]} />
   );

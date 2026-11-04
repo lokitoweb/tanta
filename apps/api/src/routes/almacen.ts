@@ -271,3 +271,73 @@ export async function despacharAlertasStock(): Promise<number> {
   }
   return alertas.length;
 }
+
+/** MAE-10 / W12: almacenes con responsable; el principal de cada tipo recibe los movimientos. */
+export async function rutasAlmacenes(app: FastifyInstance) {
+  const Almacen = z.object({
+    nombre: z.string().trim().min(3).max(80), tipo: z.enum(['INSUMOS', 'PRODUCTOS']),
+    responsableId: z.union([z.literal(''), z.string().uuid()]).default(''), ubicacion: z.string().trim().max(160).default(''),
+    principal: z.boolean().default(false), estado: z.enum(['ACTIVO', 'INACTIVO']).default('ACTIVO'),
+  }).refine((d) => !d.principal || d.estado === 'ACTIVO', { message: 'El almacén principal debe estar activo.', path: ['estado'] });
+
+  app.get('/almacenes', { preHandler: autenticar }, async (req, reply) => {
+    if (!['inventario.ver', 'maestros.ver', 'maestros.editar'].some((x) => req.usuario!.permisos.has(x)))
+      return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso inventario.ver.'));
+    const filas = await q<Record<string, string>>(`
+      SELECT a.id, a.nombre, a.tipo, coalesce(a.responsable_id::text, '') responsable_id, coalesce(u.nombre, '') responsable, a.ubicacion, a.principal, a.estado,
+             (SELECT count(*) FROM core.movimiento_inventario m WHERE m.almacen_id = a.id) movimientos
+      FROM core.almacen a LEFT JOIN core.usuario u ON u.id = a.responsable_id ORDER BY a.tipo, NOT a.principal, a.nombre`);
+    return filas.map((f) => ({ id: f.id, nombre: f.nombre, tipo: f.tipo, responsableId: f.responsable_id, responsable: f.responsable, ubicacion: f.ubicacion,
+      principal: Boolean(f.principal), estado: f.estado, movimientos: num(f.movimientos) }));
+  });
+
+  // Personas que pueden responder por un almacén: usuarios activos del personal (no clientes).
+  app.get('/almacenes/responsables', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    return q(`SELECT id, nombre FROM core.usuario WHERE estado = 'ACTIVO' AND cliente_id IS NULL ORDER BY nombre`);
+  });
+
+  const guardar = async (id: string | null, d: z.infer<typeof Almacen>) => tx(async (c) => {
+    // Solo un principal por tipo: marcar uno nuevo desmarca al anterior.
+    if (d.principal) await c.query('UPDATE core.almacen SET principal = false WHERE tipo = $1 AND principal AND id IS DISTINCT FROM $2', [d.tipo, id]);
+    else if (id && (await c.query('SELECT 1 FROM core.almacen WHERE id = $1 AND principal', [id])).rowCount)
+      throw fallo(409, 'Marca otro almacén como principal antes de quitarle ese rol a este.');
+    const r = id
+      ? await c.query(`UPDATE core.almacen SET nombre = $2, tipo = $3, responsable_id = NULLIF($4,'')::uuid, ubicacion = $5, principal = $6, estado = $7 WHERE id = $1 RETURNING id`,
+        [id, d.nombre, d.tipo, d.responsableId, d.ubicacion, d.principal, d.estado])
+      : await c.query(`INSERT INTO core.almacen (nombre, tipo, responsable_id, ubicacion, principal, estado) VALUES ($1,$2,NULLIF($3,'')::uuid,$4,$5,$6) RETURNING id`,
+        [d.nombre, d.tipo, d.responsableId, d.ubicacion, d.principal, d.estado]);
+    if (!r.rowCount) throw fallo(404, 'El almacén no existe.');
+    return r.rows[0].id as string;
+  });
+
+  app.post('/almacenes', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const p = Almacen.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Almacén inválido.'));
+    return responder(reply, 'ALMACEN_INVALIDO', async () => {
+      const id = await guardar(null, p.data);
+      await auditar({ ...actor(req), accion: 'ALMACEN_CREADO', entidad: 'almacen', entidadId: id, detalle: p.data });
+      return reply.code(201).send({ id, ...p.data });
+    });
+  });
+
+  app.patch('/almacenes/:id', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const { id } = req.params as { id: string };
+    const p = Almacen.safeParse(req.body);
+    if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error?.issues[0]?.message ?? 'Almacén inválido.'));
+    return responder(reply, 'ALMACEN_INVALIDO', async () => {
+      await guardar(id, p.data);
+      await auditar({ ...actor(req), accion: 'ALMACEN_EDITADO', entidad: 'almacen', entidadId: id, detalle: p.data });
+      return { id, ...p.data };
+    });
+  });
+
+  // MAE-08: vendedores que se pueden asignar a un cliente.
+  app.get('/vendedores', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'clientes.gestionar')) return;
+    return q(`SELECT DISTINCT u.id, u.nombre FROM core.usuario u JOIN core.usuario_rol ur ON ur.usuario_id = u.id
+      JOIN core.rol_permiso rp ON rp.rol_id = ur.rol_id WHERE rp.permiso_id = 'ventas.registrar' AND u.estado = 'ACTIVO' AND u.cliente_id IS NULL ORDER BY u.nombre`);
+  });
+}
