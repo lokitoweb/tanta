@@ -342,7 +342,7 @@ async function main() {
     for (const [codigo, nombre, docTipo, docNumero, dias, limite, lista] of CLIENTES) {
       const r = await c.query(
         `INSERT INTO core.cliente (codigo,nombre,doc_tipo,doc_numero,lista_precio,dias_credito,limite_credito,condicion_pago)
-         VALUES ($1,$2,$3,$4,$5,$6,$7, CASE WHEN $6::int > 0 OR $7::numeric > 0 THEN 'CREDITO' ELSE 'CONTADO' END) RETURNING id`,
+         VALUES ($1,$2,$3,$4,$5,$6::int,$7::numeric, CASE WHEN $6::int > 0 OR $7::numeric > 0 THEN 'CREDITO' ELSE 'CONTADO' END) RETURNING id`,
         [codigo, nombre, docTipo, docNumero, lista, dias, d(limite, 4)],
       );
       idsCliente.push(r.rows[0].id);
