@@ -231,6 +231,8 @@ class Api {
   Future<List<dynamic>> kardex(String codigo) async => await _get('/kardex/$codigo') as List<dynamic>;
 
   /// Conteo físico: el Almacén registra lo contado; el Gerente aprueba y recién se ajusta el stock.
+  /// COB-06: el cliente recibe solo su propio estado de cuenta (el servidor ignora otro clienteId).
+  Future<Map<String, dynamic>> estadoCuenta() async => await _get('/estado-cuenta') as Map<String, dynamic>;
   Future<List<dynamic>> conteos() async => await _get('/conteos') as List<dynamic>;
   Future<Map<String, dynamic>> registrarConteo(List<Map<String, dynamic>> items, String observacion) async =>
       await _post('/conteos', {'items': items, 'observacion': observacion}) as Map<String, dynamic>;

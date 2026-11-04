@@ -10,7 +10,9 @@ import type { Usuario } from '@/core/types';
 
 
 export function Usuarios() {
-  const { dataset, sesion, refrescarDatos } = useApp();
+  const { dataset, sesion, refrescarDatos, puede } = useApp();
+  // Matriz de permisos: el Gerente consulta; solo quien gestiona crea, cambia rol o bloquea.
+  const gestiona = puede('usuarios.gestionar');
   const [usuarios, setUsuarios] = useState<Usuario[]>(dataset.usuarios ?? []);
   const [nuevo, setNuevo] = useState(false);
   const [form, setForm] = useState({ nombre: '', usuario: '', clave: '', rol: 'VENDEDOR', clienteId: '' });
@@ -19,6 +21,7 @@ export function Usuarios() {
   const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
   const [cambio, setCambio] = useState<{ u: Usuario; rol: string; clienteId: string } | null>(null);
   useEffect(() => {
+    if (!gestiona) return;
     api<Array<{ id: string; nombre: string }>>('/roles-asignables').then(setRoles).catch(() => {});
     api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => setClientes(r.clientes)).catch(() => {});
   }, []);
@@ -84,7 +87,7 @@ export function Usuarios() {
     },
     {
       key: 'acciones', header: '', align: 'right',
-      render: (u) => (
+      render: (u) => gestiona && (
         <span className="acciones-fila">
         <Boton size="sm" variant="ghost" disabled={u.id === sesion.usuario.id} onClick={() => setCambio({ u, rol: u.rolId ?? 'VENDEDOR', clienteId: '' })}>Cambiar rol</Boton>
         <Boton
@@ -106,7 +109,7 @@ export function Usuarios() {
       <Encabezado
         titulo="Usuarios y roles"
         descripcion="El rol define qué ve cada persona · el costo y el margen solo los ve Gerencia y Administración"
-        acciones={<Boton variant="primary" icono="plus" onClick={() => { setError(null); setNuevo(true); }}>Nuevo usuario</Boton>}
+        acciones={gestiona && <Boton variant="primary" icono="plus" onClick={() => { setError(null); setNuevo(true); }}>Nuevo usuario</Boton>}
       />
 
       {error && <div className="aviso aviso--danger"><span className="aviso__icono">!</span><div><strong>Error</strong><p>{error}</p></div></div>}

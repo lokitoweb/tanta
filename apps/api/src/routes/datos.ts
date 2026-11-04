@@ -187,7 +187,7 @@ export async function rutasDatos(app: FastifyInstance) {
         GROUP BY r.id -- clave primaria: incluye todas las columnas de la receta
         ORDER BY r.producto`)),
 
-      u.permisos.has('usuarios.gestionar')
+      u.permisos.has('usuarios.ver') || u.permisos.has('usuarios.gestionar')
         ? q<Record<string, string>>(`
             SELECT us.id, us.nombre, us.usuario, us.estado, us.ultimo_acceso::text AS ultimo_acceso,
                    (SELECT r.nombre FROM core.usuario_rol ur JOIN core.rol r ON r.id = ur.rol_id
@@ -396,7 +396,7 @@ export async function rutasDatos(app: FastifyInstance) {
       delete k.porCobrar;
       delete k.vencido;
     }
-    if (!puede('usuarios.gestionar')) p.usuarios = [];
+    if (!puede('usuarios.ver') && !puede('usuarios.gestionar')) p.usuarios = [];
     // Antigüedad de saldos = días vencidos desde el vencimiento (RN-35; mismo criterio que G-11 y V-01).
     // Ventas del negocio (totales, tendencia, ranking): solo para quien ve dashboard o reportes.
     if (!puede('dashboard.ver') && !puede('reportes.ver')) {

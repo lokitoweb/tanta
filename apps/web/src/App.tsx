@@ -51,7 +51,7 @@ export function App() {
         <Route path="/ventas/cobranza" element={<Gate permiso="cobranza.ver" siNo={<SinAcceso />}><Cobranza /></Gate>} />
         <Route path="/ventas/aprobaciones" element={<Gate permiso="descuentos.aprobar" siNo={<SinAcceso />}><Aprobaciones /></Gate>} />
         <Route path="/catalogo" element={<Gate permiso="catalogo.ver" siNo={<SinAcceso />}><Catalogo /></Gate>} />
-        <Route path="/seguridad/usuarios" element={<Gate permiso="usuarios.gestionar" siNo={<SinAcceso />}><Usuarios /></Gate>} />
+        <Route path="/seguridad/usuarios" element={<Gate permiso="usuarios.ver" siNo={<SinAcceso />}><Usuarios /></Gate>} />
         <Route path="/seguridad/parametros" element={<Gate permiso="parametros.gestionar" siNo={<SinAcceso />}><Parametros /></Gate>} />
         <Route path="/gerencia/periodos" element={<Gate permiso="periodos.cerrar" siNo={<SinAcceso />}><Periodos /></Gate>} />
 

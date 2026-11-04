@@ -21,23 +21,25 @@ const insumo = (stock, cpp) => sql(`WITH i AS (INSERT INTO core.insumo (codigo, 
 const stock = (id) => Number(sql(`SELECT stock FROM core.insumo WHERE id = '${id}'`));
 
 test('MAE-09: proveedor con RUC único; con compras solo se inactiva', async () => {
-  const alm = await login('jramos');
+  const alm = await login('jramos'), adm = await login('lbermudez');
   const r = ruc();
-  const p = await api(alm, 'POST', '/proveedores', { ruc: r, razonSocial: `Proveedor prueba ${r}` });
+  assert.equal((await api(alm, 'POST', '/proveedores', { ruc: r, razonSocial: 'Almacén solo consulta' })).s, 403, 'matriz fila 6: Almacén consulta');
+  assert.equal((await api(alm, 'GET', '/proveedores')).s, 200);
+  const p = await api(adm, 'POST', '/proveedores', { ruc: r, razonSocial: `Proveedor prueba ${r}` });
   assert.equal(p.s, 201, JSON.stringify(p.b));
-  assert.equal((await api(alm, 'POST', '/proveedores', { ruc: r, razonSocial: `Otro ${r}` })).s, 409, 'RUC duplicado');
-  assert.equal((await api(alm, 'POST', '/proveedores', { ruc: '12345678901', razonSocial: 'RUC inválido' })).s, 422);
+  assert.equal((await api(adm, 'POST', '/proveedores', { ruc: r, razonSocial: `Otro ${r}` })).s, 409, 'RUC duplicado');
+  assert.equal((await api(adm, 'POST', '/proveedores', { ruc: '12345678901', razonSocial: 'RUC inválido' })).s, 422);
   assert.equal((await api(await login('cmedina'), 'POST', '/proveedores', { razonSocial: 'Sin permiso' })).s, 403);
   const ins = insumo(0, 1);
   assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: 'F001-1', items: [{ insumoId: ins, cantidad: 1, precio: 1 }] })).s, 201);
-  assert.equal((await api(alm, 'DELETE', `/proveedores/${p.b.id}`)).s, 409, 'con compras no se elimina');
-  assert.equal((await api(alm, 'PATCH', `/proveedores/${p.b.id}`, { ruc: r, razonSocial: `Proveedor prueba ${r}`, estado: 'INACTIVO' })).s, 200);
+  assert.equal((await api(adm, 'DELETE', `/proveedores/${p.b.id}`)).s, 409, 'con compras no se elimina');
+  assert.equal((await api(adm, 'PATCH', `/proveedores/${p.b.id}`, { ruc: r, razonSocial: `Proveedor prueba ${r}`, estado: 'INACTIVO' })).s, 200);
   assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: 'F001-2', items: [{ insumoId: ins, cantidad: 1, precio: 1 }] })).s, 409, 'inactivo no compra');
 });
 
 test('compra con varias líneas: stock y costo promedio ponderado; el documento no se repite', async () => {
   const alm = await login('jramos');
-  const p = await api(alm, 'POST', '/proveedores', { ruc: ruc(), razonSocial: `Molino prueba ${randomUUID().slice(0, 6)}` });
+  const p = await api(await login('lbermudez'), 'POST', '/proveedores', { ruc: ruc(), razonSocial: `Molino prueba ${randomUUID().slice(0, 6)}` });
   const a = insumo(10, 2), b = insumo(0, 0);
   const doc = `F001-${Date.now() % 1e6}`;
   const c = await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: doc, items: [{ insumoId: a, cantidad: 10, precio: 4 }, { insumoId: b, cantidad: 5, precio: 3 }] });

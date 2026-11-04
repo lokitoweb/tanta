@@ -372,6 +372,69 @@ class _RequisicionesState extends State<Requisiciones> {
   }
 }
 
+/* ------------------------------------------------------ estado de cuenta */
+/// Matriz de permisos, fila 19: el cliente consulta su deuda, documentos y pagos.
+class EstadoCuenta extends StatefulWidget {
+  const EstadoCuenta({super.key});
+  @override
+  State<EstadoCuenta> createState() => _EstadoCuentaState();
+}
+
+class _EstadoCuentaState extends State<EstadoCuenta> {
+  Map<String, dynamic>? _ec;
+  String? _error;
+
+  Future<void> _cargar() async {
+    try {
+      final r = await Api.instancia.estadoCuenta();
+      if (mounted) setState(() { _ec = r; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _mensaje(e));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ec = _ec;
+    final docs = ((ec?['documentos'] as List?) ?? const []).cast<Map<String, dynamic>>().where((d) => (d['saldo'] as num) > 0).toList();
+    final pagos = ((ec?['pagos'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Mi estado de cuenta')),
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: _error != null
+            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            : ec == null
+                ? const Center(child: CircularProgressIndicator())
+                : ListView(padding: const EdgeInsets.all(16), children: [
+                    Text('Saldo ${dinero((ec['saldo'] as num).toDouble())}', style: Theme.of(context).textTheme.headlineSmall),
+                    Text('Vencido ${dinero((ec['vencido'] as num).toDouble())}'),
+                    const SizedBox(height: 16),
+                    Text('Documentos por pagar', style: Theme.of(context).textTheme.titleMedium),
+                    if (docs.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No tienes deuda pendiente')),
+                    for (final d in docs) ListTile(contentPadding: EdgeInsets.zero,
+                        title: Text('${d['documento']}'),
+                        subtitle: Text('Vence ${d['vence']}${(d['diasVencido'] as num) > 0 ? ' · ${d['diasVencido']} días vencido' : ''}'),
+                        trailing: Text(dinero((d['saldo'] as num).toDouble()))),
+                    const SizedBox(height: 16),
+                    Text('Pagos', style: Theme.of(context).textTheme.titleMedium),
+                    if (pagos.isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Sin pagos registrados')),
+                    for (final p in pagos) ListTile(contentPadding: EdgeInsets.zero,
+                        title: Text('${p['recibo']} · ${'${p['medio']}'.toLowerCase()}'),
+                        subtitle: Text('${p['fecha']}'),
+                        trailing: Text(dinero((p['monto'] as num).toDouble()))),
+                  ]),
+      ),
+    );
+  }
+}
+
 /* ------------------------------------------------------ conteo físico */
 /// M05: conteo contra el sistema; las diferencias se ajustan solo con la aprobación del Gerente.
 class Conteos extends StatefulWidget {

@@ -364,6 +364,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, const MisPedidos()),
+      if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mi estado de cuenta', Icons.account_balance_wallet_outlined, const EstadoCuenta()),
       if (api.puede('pedidos.ver')) chip('Pedidos', Icons.receipt_long_outlined),
       if (api.puede('cobranza.ver')) chip('Cobranza', Icons.account_balance_wallet_outlined),
       if (api.puede('produccion.ver')) chip('Producción', Icons.local_fire_department_outlined),

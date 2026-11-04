@@ -37,7 +37,7 @@ export async function rutasAlmacen(app: FastifyInstance) {
   });
 
   app.get('/proveedores', { preHandler: autenticar }, async (req, reply) => {
-    if (!req.usuario!.permisos.has('proveedores.gestionar') && !req.usuario!.permisos.has('compras.registrar'))
+    if (!['proveedores.gestionar', 'compras.registrar', 'maestros.ver'].some((x) => req.usuario!.permisos.has(x)))
       return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso proveedores.gestionar.'));
     const filas = await q<Record<string, string>>(`
       SELECT p.id, coalesce(p.ruc, '') ruc, p.razon_social, p.contacto, p.telefono, p.email, p.estado,
