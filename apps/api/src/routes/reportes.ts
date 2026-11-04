@@ -164,7 +164,7 @@ const REPORTES: Record<string, Reporte> = {
         SELECT i.nombre insumo, i.cpp actual,
                coalesce((SELECT m.cpp FROM core.movimiento_inventario m WHERE m.insumo_id = i.id AND m.creado_en < $1::date AND m.cpp IS NOT NULL ORDER BY m.id DESC LIMIT 1),
                         (SELECT m.cpp FROM core.movimiento_inventario m WHERE m.insumo_id = i.id AND m.cpp IS NOT NULL ORDER BY m.id LIMIT 1), i.cpp) inicio,
-               coalesce((SELECT sum(d.cantidad / r.rendimiento * coalesce(vd.u, 0)) FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id
+               coalesce((SELECT sum(d.cantidad * core.factor_inventario(d.insumo_id) / r.rendimiento * coalesce(vd.u, 0)) FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id
                          LEFT JOIN (SELECT producto_id, sum(cantidad) u FROM core.venta_detalle x JOIN core.venta v ON v.id = x.venta_id
                                     WHERE v.creado_en >= now() - interval '30 days' GROUP BY producto_id) vd ON vd.producto_id = r.producto_id
                          WHERE d.insumo_id = i.id), 0) consumo_mes

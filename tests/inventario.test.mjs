@@ -15,15 +15,13 @@ test('flujo de inventario', async () => {
   const alm = await login('jramos');
   const i0 = await insumo(alm);
 
-  const compra = await mover(alm, { tipo: 'COMPRA', insumoId: i0.id, cantidad: 10, costoUnitario: i0.cpp * 2 || 5, motivo: 'Prueba compra' });
-  assert.equal(compra.s, 200);
-  const esperado = (i0.stock * i0.cpp + 10 * (i0.cpp * 2 || 5)) / (i0.stock + 10);
-  assert.ok(Math.abs(compra.b.cpp - esperado) < 0.001, `CPP ${compra.b.cpp} vs ${esperado}`);
+  // RN-06 (compra de insumos): no hay ingreso directo; el CPP se prueba en compras-insumos y almacen-excel.
+  assert.equal((await mover(alm, { tipo: 'COMPRA', insumoId: i0.id, cantidad: 10, costoUnitario: 5, motivo: 'Prueba compra' })).s, 422);
 
   const exceso = await mover(alm, { tipo: 'MERMA', insumoId: i0.id, cantidad: 1e6, motivo: 'Demasiado' });
   assert.equal(exceso.s, 409);
 
-  const conteo = await mover(alm, { tipo: 'CONTEO', insumoId: i0.id, cantidadContada: compra.b.saldo - 1, motivo: 'Conteo de prueba' });
+  const conteo = await mover(alm, { tipo: 'CONTEO', insumoId: i0.id, cantidadContada: Math.max(i0.stock - 1, 0), motivo: 'Conteo de prueba' });
   assert.equal(conteo.s, 403, 'el ajuste por conteo necesita la aprobación del Gerente');
 
   const k = randomUUID();

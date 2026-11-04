@@ -137,17 +137,19 @@ export function Productos() {
 /* ------------------------------------------------------------------ Insumos */
 export function Insumos() {
   const { dataset, puede, refrescarDatos } = useApp();
+  // Insumos: Administración y Compras (informe de compra de insumos, sección 7).
+  const editaInsumos = puede('maestros.editar') || puede('insumos.gestionar');
   const proveedores = useOpciones('/proveedores', (r) => String(r.razonSocial), (r) => String(r.razonSocial));
   return (
     <Crud titulo="Insumos" nombreExport="insumos" deps={dataset.insumos}
       descripcion="Costo por unidad base = precio ÷ cantidad por presentación hasta la primera compra; desde ahí manda el costo promedio ponderado del kárdex."
       cargar={async () => dataset.insumos.map((i) => ({ ...i, activo: (i as unknown as Reg).activo ?? true } as unknown as Reg))}
-      nuevo={{ nombre: '', unidad: 'KG', minimo: 0, proveedor: '', activo: true, tipo: 'OTRO', presentacion: '', precioCompra: '', cantPresentacion: '', equivKg: 1 }}
-      crear={puede('maestros.editar') ? async (d) => { await api('/insumos', { method: 'POST', body: d }); await refrescarDatos(); } : undefined}
-      editar={puede('maestros.editar') ? async (id, d) => { await api(`/insumos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
+      nuevo={{ nombre: '', unidad: 'KG', unidadInventario: 'KG', minimo: 0, proveedor: '', activo: true, tipo: 'OTRO', presentacion: '', precioCompra: '', cantPresentacion: '', equivKg: '' }}
+      crear={editaInsumos ? async (d) => { await api('/insumos', { method: 'POST', body: d }); await refrescarDatos(); } : undefined}
+      editar={editaInsumos ? async (id, d) => { await api(`/insumos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
       columnas={[
         { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'tipo', label: 'Tipo' }, { key: 'unidad', label: 'Unidad' },
-        { key: 'stock', label: 'Stock', tipo: 'num' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
+        { key: 'unidadInventario', label: 'Stock en' }, { key: 'stock', label: 'Stock', tipo: 'num' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
         ...(puede('costos.ver') ? [{ key: 'cpp', label: 'CPP', tipo: 'dinero' } as ColRep] : []),
         { key: 'proveedor', label: 'Proveedor' },
       ]}
@@ -155,10 +157,11 @@ export function Insumos() {
         { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 120 },
         { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [['HARINA', 'Harina (suma 100 % panadero)'], ['GRASA', 'Grasa'], ['LACTEO', 'Lácteo'], ['AZUCAR', 'Azúcar'], ['LEVADURA', 'Levadura'], ['HUEVO', 'Huevo'], ['RELLENO', 'Relleno'], ['ADITIVO', 'Aditivo'], ['LIQUIDO', 'Líquido'], ['OTRO', 'Otro']].map(([v, t]) => ({ valor: v, texto: t })) },
         { key: 'unidad', label: 'Unidad base', tipo: 'select', opciones: [['KG', 'Kilogramo (kg)'], ['L', 'Litro (L)'], ['UNIDAD', 'Unidad'], ['BALON', 'Balón']].map(([v, t]) => ({ valor: v, texto: t })), ayuda: 'En la receta se puede escribir en gr o ml: se convierte sola' },
-        { key: 'presentacion', label: 'Presentación de compra', max: 60, ayuda: 'Ej.: saco de 50 kg' },
+        { key: 'unidadInventario', label: 'Unidad de inventario (en la que se lleva el stock)', tipo: 'select', opciones: [['KG', 'Kilogramo (kg)'], ['GR', 'Gramo (g)'], ['L', 'Litro (L)'], ['ML', 'Mililitro (ml)'], ['UNIDAD', 'Unidad'], ['BALON', 'Balón']].map(([v, t]) => ({ valor: v, texto: t })), ayuda: 'Aceite: se compra en L y se lleva en kg. No se cambia si el insumo ya tiene stock.' },
+        { key: 'presentacion', label: 'Presentación de compra', max: 60, ayuda: 'Ej.: botella de 900 ml, saco de 50 kg' },
         { key: 'precioCompra', label: 'Precio de compra (S/ sin IGV)', tipo: 'numero' },
-        { key: 'cantPresentacion', label: 'Cantidad por presentación (en unidad base)', tipo: 'numero' },
-        { key: 'equivKg', label: 'Equivalente en kg de 1 unidad base', tipo: 'numero', ayuda: 'Aceite: 0.92 · agua: 1 · huevo: 0.05' },
+        { key: 'cantPresentacion', label: 'Contenido de la presentación (en unidad base)', tipo: 'numero', ayuda: 'Botella de 900 ml con unidad base L: 0.9' },
+        { key: 'equivKg', label: 'Densidad: kg por 1 unidad base', tipo: 'numero', ayuda: 'Obligatoria si la unidad base es L o unidad y el stock va en kg. Aceite: 0.917 · huevo: 0.05' },
         { key: 'minimo', label: 'Stock mínimo', tipo: 'numero' },
         { key: 'proveedor', label: 'Proveedor habitual', ancho: true, tipo: 'select', opciones: [{ valor: '', texto: 'Sin proveedor' }, ...proveedores], ayuda: 'Se elige del maestro de proveedores' },
         { key: 'activo', label: 'Activo', tipo: 'bool' },

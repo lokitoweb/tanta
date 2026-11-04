@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
@@ -85,48 +85,81 @@ export async function rutasMaestros(app: FastifyInstance) {
   /* --------------------------------------------------------------- insumos */
   // Hoja 'insumos' (MAE-01): tipo, presentación de compra y equivalente en kg.
   const Insumo = z.object({
-    nombre: texto(2, 120), unidad: z.enum(['KG', 'L', 'UNIDAD', 'BALON']), minimo: dinero, proveedor: z.string().trim().max(120), activo: z.boolean().default(true),
+    nombre: texto(2, 120), unidad: z.enum(['KG', 'L', 'UNIDAD', 'BALON']), minimo: dinero,
+    // Unidad en la que se lleva el stock; por defecto, la unidad base.
+    unidadInventario: z.enum(['KG', 'GR', 'L', 'ML', 'UNIDAD', 'BALON']).optional(), proveedor: z.string().trim().max(120), activo: z.boolean().default(true),
     tipo: z.enum(['HARINA', 'GRASA', 'LACTEO', 'AZUCAR', 'LEVADURA', 'HUEVO', 'RELLENO', 'ADITIVO', 'LIQUIDO', 'OTRO']).default('OTRO'),
     presentacion: z.string().trim().max(60).default(''),
     precioCompra: z.number().min(0).max(1_000_000).nullable().default(null),
     cantPresentacion: z.number().positive().max(1_000_000).nullable().default(null),
-    equivKg: z.number().positive().max(1000).default(1),
+    // Densidad (kg por unidad base): obligatoria si la unidad de inventario es de otra familia (RN-03).
+    equivKg: z.number().positive().max(1000).nullable().default(null),
   }).refine((d) => d.precioCompra === null || d.cantPresentacion !== null, { message: 'Indica la cantidad por presentación', path: ['cantPresentacion'] });
   // RN-01: costo por unidad base = precio ÷ cantidad por presentación. Solo fija el costo mientras
   // no haya compras: después manda el costo promedio ponderado del kárdex (RN-02).
   const costoReferencia = (d: { precioCompra: number | null; cantPresentacion: number | null }) =>
     d.precioCompra !== null && d.cantPresentacion ? d.precioCompra / d.cantPresentacion : null;
+  // Insumos: Administración (maestros.editar) y Compras (insumos.gestionar), sección 7 del informe de compras.
+  const editaInsumos = (req: FastifyRequest, reply: FastifyReply) => {
+    if (req.usuario!.permisos.has('maestros.editar') || req.usuario!.permisos.has('insumos.gestionar')) return true;
+    void reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso insumos.gestionar.'));
+    return false;
+  };
+  // RN-03 con el servicio único de conversión de la base: misma familia → factor por unidades; volumen o conteo
+  // a masa → la densidad, que entonces es obligatoria. El costo de referencia pasa a unidad de inventario (F3).
+  const unidades = async (d: { unidad: string; unidadInventario?: string; equivKg: number | null }):
+    Promise<{ error: string } | { unidadInventario: string; densidad: number; factor: number }> => {
+    const unidadInventario = d.unidadInventario ?? d.unidad;
+    const fam = await q<{ codigo: string; familia: string }>('SELECT codigo, familia FROM core.unidad_medida WHERE codigo = ANY($1)', [[d.unidad, unidadInventario]]);
+    const misma = fam.find((x) => x.codigo === d.unidad)?.familia === fam.find((x) => x.codigo === unidadInventario)?.familia;
+    if (!misma && d.equivKg === null) return { error: `Para llevar el stock en ${unidadInventario} comprando en ${d.unidad} indica la densidad (${unidadInventario === 'KG' ? 'kg' : unidadInventario} por ${d.unidad}).` };
+    const densidad = d.equivKg ?? 1;
+    const factor = num((await uno<{ f: string | null }>('SELECT core.factor_unidades($1, $2, $3) f', [d.unidad, unidadInventario, densidad]))?.f ?? '0');
+    if (!(factor > 0)) return { error: `No hay conversión de ${d.unidad} a ${unidadInventario}.` };
+    return { unidadInventario, densidad, factor };
+  };
 
   app.post('/insumos', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'maestros.editar')) return;
+    if (!editaInsumos(req, reply)) return;
     const p = Insumo.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
+    const u = await unidades(p.data);
+    if ('error' in u) return reply.code(422).send(error(422, 'SIN_DENSIDAD', u.error));
     // El costo inicial entra con la primera compra (Almacén → Registrar movimiento), que fija el CPP.
     const f = await uno<{ id: string; codigo: string }>(
-      `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg)
+      `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, unidad_inventario)
        VALUES ('INS-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.insumo WHERE codigo ~ '^INS-[0-9]+$')::text, 3, '0'),
-               $1, $2, $3, $4, coalesce($9::numeric, 0), 0, $5, $6, $7, $8, $10) RETURNING id, codigo`,
-      [p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, costoReferencia(p.data), p.data.equivKg]);
+               $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11) RETURNING id, codigo`,
+      [p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, costoReferencia(p.data),
+        u.densidad, u.unidadInventario, u.factor]);
     await auditar({ ...actor(req), accion: 'INSUMO_CREADO', entidad: 'insumo', entidadId: f!.id, detalle: p.data, ip: req.ip });
     return reply.code(201).send({ ...f, ...p.data });
   });
 
   app.patch('/insumos/:id', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'maestros.editar')) return;
+    if (!editaInsumos(req, reply)) return;
     const { id } = req.params as { id: string };
     const p = Insumo.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
+    const u = await unidades(p.data);
+    if ('error' in u) return reply.code(422).send(error(422, 'SIN_DENSIDAD', u.error));
+    // La unidad del stock no cambia con stock o movimientos: el kárdex quedaría en dos unidades.
+    const actual = await uno<{ unidad: string; unidad_inventario: string; con_mov: boolean }>(`SELECT unidad, unidad_inventario,
+      stock <> 0 OR EXISTS (SELECT 1 FROM core.movimiento_inventario m WHERE m.insumo_id = i.id) con_mov FROM core.insumo i WHERE id = $1`, [id]);
+    if (actual?.con_mov && (actual.unidad !== p.data.unidad || actual.unidad_inventario !== u.unidadInventario)) {
+      return reply.code(409).send(error(409, 'UNIDAD_CON_MOVIMIENTOS', 'El insumo ya tiene stock o movimientos: su unidad base y su unidad de inventario no se cambian. Crea un insumo nuevo.'));
+    }
     if (!p.data.activo && await uno("SELECT 1 FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.insumo_id = $1 AND r.estado = 'VIGENTE'", [id])) {
       return reply.code(409).send(error(409, 'INSUMO_EN_USO', 'El insumo está en una receta vigente: quítalo de la receta antes de desactivarlo.'));
     }
     const r = await tx(async (c) => {
       const f = await c.query(`UPDATE core.insumo SET nombre=$2, unidad=$3, minimo=$4, proveedor=$5, activo=$6,
-                         tipo=$7, presentacion=$8, precio_compra=$9, cant_presentacion=$10, equiv_kg=$11,
+                         tipo=$7, presentacion=$8, precio_compra=$9, cant_presentacion=$10, equiv_kg=$11, unidad_inventario=$13,
                          cpp = CASE WHEN $12::numeric IS NOT NULL AND NOT EXISTS (SELECT 1 FROM core.movimiento_inventario m WHERE m.insumo_id = $1 AND m.tipo = 'COMPRA')
-                                    THEN $12::numeric ELSE cpp END,
+                                    THEN $12::numeric / $14::numeric ELSE cpp END,
                          estado = CASE WHEN stock < $4 THEN 'BAJO_MINIMO' ELSE 'OK' END, actualizado_en = now()
                        WHERE id=$1 RETURNING id`, [id, p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.activo,
-                         p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, p.data.equivKg, costoReferencia(p.data)]);
+                         p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, u.densidad, costoReferencia(p.data), u.unidadInventario, u.factor]);
       await c.query('SELECT core.recalcular_costos()');
       return f.rows;
     });

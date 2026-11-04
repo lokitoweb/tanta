@@ -7,7 +7,10 @@ export function sql(consulta) {
   try {
     return execFileSync('docker', ['exec', 'tanta-pg', 'psql', '-U', 'tanta', '-d', 'tanta', ...args],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  } catch {
+  } catch (e) {
+    // Igual que sqlScript: solo sin contenedor se usa psql directo; un error del SQL se muestra tal cual.
+    const sinContenedor = e.code === 'ENOENT' || /No such container|cannot connect|not recognized/i.test(String(e.stderr ?? ''));
+    if (!sinContenedor) throw new Error(String(e.stderr ?? e.message));
     return execFileSync('psql', args, { encoding: 'utf8' }).trim();
   }
 }

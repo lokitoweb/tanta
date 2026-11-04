@@ -26,14 +26,17 @@ const permisos = (rol) => new Set(sql(`SELECT string_agg(permiso_id, ',') FROM c
 
 // [rol, debe tener, no debe tener] — cada permiso con la fila de la matriz que lo exige.
 const MATRIZ = [
-  ['ADMINISTRADOR', ['usuarios.gestionar', 'maestros.editar', 'parametros.gestionar', 'proveedores.gestionar', 'compras.registrar', 'ventas.anular', 'auditoria.ver', 'dashboard.ver'],
-    ['ventas.registrar', 'descuentos.aprobar', 'conteo.aprobar', 'inventario.mover']],
+  ['ADMINISTRADOR', ['usuarios.gestionar', 'maestros.editar', 'parametros.gestionar', 'proveedores.gestionar', 'compras.registrar', 'compras.autorizar', 'compras.anular', 'ventas.anular', 'auditoria.ver', 'dashboard.ver'],
+    ['ventas.registrar', 'descuentos.aprobar', 'conteo.aprobar', 'inventario.mover', 'compras.verificar']],
   ['GERENTE', ['usuarios.ver', 'clientes.ver', 'maestros.ver', 'costos.ver', 'dashboard.ver', 'auditoria.ver', 'descuentos.aprobar', 'conteo.aprobar', 'ventas.anular', 'cobranza.ver'],
     ['usuarios.gestionar', 'maestros.editar', 'clientes.gestionar', 'ventas.registrar', 'inventario.mover', 'compras.registrar']],
   ['PRODUCCION', ['produccion.planificar', 'produccion.ejecutar', 'maestros.ver', 'recetas.ver', 'inventario.ver', 'pedidos.ver'],
     ['costos.ver', 'maestros.editar', 'inventario.mover', 'ventas.registrar', 'cobranza.ver']],
-  ['ALMACEN', ['requisiciones.atender', 'compras.registrar', 'inventario.mover', 'inventario.ver', 'maestros.ver', 'pedidos.ver'],
-    ['proveedores.gestionar', 'conteo.aprobar', 'costos.ver', 'ventas.registrar', 'pedidos.gestionar']],
+  // Compra de insumos (informe v1.1, sección 7): Almacén verifica lo recibido; registra Compras.
+  ['ALMACEN', ['requisiciones.atender', 'compras.verificar', 'compras.ver', 'inventario.mover', 'inventario.ver', 'maestros.ver', 'pedidos.ver'],
+    ['compras.registrar', 'compras.anular', 'proveedores.gestionar', 'conteo.aprobar', 'costos.ver', 'ventas.registrar', 'pedidos.gestionar']],
+  ['COMPRAS', ['compras.registrar', 'compras.ver', 'insumos.gestionar', 'proveedores.gestionar', 'inventario.ver'],
+    ['compras.verificar', 'compras.autorizar', 'compras.anular', 'costos.ver', 'inventario.mover', 'ventas.registrar']],
   ['VENDEDOR', ['pedidos.gestionar', 'pedidos.crear', 'ventas.registrar', 'cobranza.registrar', 'clientes.gestionar', 'inventario.ver'],
     ['costos.ver', 'descuentos.aprobar', 'ventas.anular', 'inventario.mover', 'dashboard.ver']],
   ['CLIENTE', ['catalogo.ver', 'pedidos.crear'],

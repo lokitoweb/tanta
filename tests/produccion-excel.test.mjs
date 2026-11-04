@@ -5,6 +5,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -34,9 +35,10 @@ before(async () => {
     { insumoId: harina, cantidad: 10 }, { insumoId: mapa[`TA-${sufijo}`], cantidad: 5800, unidad: 'ML' }, { insumoId: levadura, cantidad: 584, unidad: 'GR' }] });
   assert.equal(receta.s, 200, JSON.stringify(receta.b));
   // CP-15: con 30 kg de harina en stock, una orden de 40 kg queda en FALTA.
-  assert.equal((await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId: harina, cantidad: 30, costoUnitario: 2.80, motivo: 'Stock de prueba' })).s, 200);
-  assert.equal((await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId: levadura, cantidad: 10, costoUnitario: 7.859, motivo: 'Stock de prueba' })).s, 200);
-  assert.equal((await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId: mapa[`TA-${sufijo}`], cantidad: 100, costoUnitario: 0.001, motivo: 'Stock de prueba' })).s, 200);
+  const { comprarInventario } = flujoCompras(api, login);
+  await comprarInventario(harina, 30, 2.80);
+  await comprarInventario(levadura, 10, 7.859);
+  await comprarInventario(mapa[`TA-${sufijo}`], 100, 0.001);
 });
 
 test('CP-12/13/14/15: lotes completos y proporcional, consumo de harina y alerta FALTA', async () => {
@@ -60,7 +62,7 @@ test('CP-16: presupuesto de 4,000 panes con 3 % de merma = 4,124 a preparar (red
 });
 
 test('CP-17/18/35: requisición, salida al entregar, cierre con merma y varianza', async () => {
-  assert.equal((await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId: harina, cantidad: 470, costoUnitario: 2.80, motivo: 'Stock de prueba' })).s, 200);
+  await flujoCompras(api, login).comprarInventario(harina, 470, 2.80);
   const stock = () => Number(sql(`SELECT stock FROM core.insumo WHERE id = '${harina}'`));
   const op = await api(pro, 'POST', '/ordenes-produccion', { productoId, cantidad: 1000, entrega: new Date().toISOString().slice(0, 10), criterio: 'LOTES_COMPLETOS' });
   assert.equal(op.s, 201, JSON.stringify(op.b));

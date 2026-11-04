@@ -235,9 +235,14 @@ class Api {
   Future<Map<String, dynamic>> estadoCuenta() async => await _get('/estado-cuenta') as Map<String, dynamic>;
   /// A22: compras de insumos con proveedor y documento.
   Future<List<dynamic>> proveedores() async => await _get('/proveedores') as List<dynamic>;
-  Future<Map<String, dynamic>> registrarCompra({required String proveedorId, required String docTipo, required String docNumero,
-          required List<Map<String, dynamic>> items}) async =>
-      await _post('/compras', {'proveedorId': proveedorId, 'docTipo': docTipo, 'docNumero': docNumero, 'items': items}, idempotente: true) as Map<String, dynamic>;
+  /// Compra de insumos: Compras registra en presentaciones; el stock entra cuando Almacén la verifica.
+  Future<Map<String, dynamic>> registrarCompra({required String proveedorId, required String docTipo, required String serie, required String nro,
+          required String fechaCompra, required List<Map<String, dynamic>> items}) async =>
+      await _post('/compras', {'proveedorId': proveedorId, 'docTipo': docTipo, 'serie': serie, 'nro': nro, 'fechaCompra': fechaCompra, 'items': items},
+          idempotente: true) as Map<String, dynamic>;
+  Future<List<dynamic>> comprasPorVerificar() async => await _get('/compras?estado=REGISTRADA') as List<dynamic>;
+  Future<Map<String, dynamic>> verificarCompra(String codigo, List<Map<String, dynamic>> lineas) async =>
+      await _post('/compras/$codigo/verificar', {'lineas': lineas}) as Map<String, dynamic>;
   Future<List<dynamic>> conteos() async => await _get('/conteos') as List<dynamic>;
   Future<Map<String, dynamic>> registrarConteo(List<Map<String, dynamic>> items, String observacion) async =>
       await _post('/conteos', {'items': items, 'observacion': observacion}) as Map<String, dynamic>;

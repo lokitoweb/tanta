@@ -17,6 +17,8 @@ export interface Producto {
 export interface Insumo {
   id: string; codigo?: string; nombre: string; unidad: string; cpp: number; stock: number;
   minimo: number; proveedor: string; estado: string; valorizado: number;
+  /** Compra de insumos: presentación, contenido en unidad base, unidad de inventario y factor (F2). */
+  presentacion?: string; contenido?: number | null; unidadInventario?: string; factor?: number;
 }
 export interface Categoria {
   id: string; nombre: string; ventas: number; costo: number; utilidad: number;

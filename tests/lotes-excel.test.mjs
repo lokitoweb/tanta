@@ -4,6 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -21,6 +22,7 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
   body: body ? JSON.stringify(body) : undefined,
 }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }));
 
+const { registrar, verificar } = flujoCompras(api, login);
 const fecha = (dias) => new Date(Date.now() - 5 * 3_600_000 + dias * 86_400_000).toISOString().slice(0, 10);
 const sufijo = randomUUID().slice(0, 6).toUpperCase();
 const insumo = () => sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo)
@@ -31,10 +33,15 @@ const saldos = (id) => sql(`SELECT string_agg(lote || '=' || saldo::numeric(10,2
 test('AIN-11: cada línea de compra entra como lote; la salida consume primero el que vence antes', async () => {
   const alm = await login('jramos');
   const id = insumo(), prov = await proveedor();
-  const compra = (doc, lote, vence, cantidad) => api(alm, 'POST', '/compras', { proveedorId: prov, docTipo: 'GUIA', docNumero: doc, items: [{ insumoId: id, cantidad, precio: 1, lote, venceEn: vence }] });
-  assert.equal((await compra(`G-${sufijo}-1`, `L${sufijo}A`, fecha(40), 10)).s, 201, 'lote que vence después');
-  assert.equal((await compra(`G-${sufijo}-2`, `L${sufijo}B`, fecha(10), 10)).s, 201, 'lote que vence antes');
-  assert.equal((await compra(`G-${sufijo}-3`, `L${sufijo}V`, fecha(-1), 5)).s, 422, 'un lote vencido no se recibe');
+  // El lote nace al verificar la compra en Almacén (RN-06).
+  const compra = async (lote, vence, cantidad) => {
+    const r = await registrar(prov, [{ insumoId: id, cantidad, precioUnitario: 1, lote, venceEn: vence }]);
+    if (r.s === 201) assert.equal((await verificar(r.b)).b.estado, 'VERIFICADA');
+    return r;
+  };
+  assert.equal((await compra(`L${sufijo}A`, fecha(40), 10)).s, 201, 'lote que vence después');
+  assert.equal((await compra(`L${sufijo}B`, fecha(10), 10)).s, 201, 'lote que vence antes');
+  assert.equal((await compra(`L${sufijo}V`, fecha(-1), 5)).s, 422, 'un lote vencido no se recibe');
 
   // Baja de 12: FEFO toma los 10 del lote B (vence antes) y 2 del lote A.
   assert.equal((await api(alm, 'POST', '/inventario/movimientos', { tipo: 'MERMA', insumoId: id, cantidad: 12, motivo: 'Prueba FEFO' })).s, 200);
@@ -51,7 +58,8 @@ test('AIN-11: cada línea de compra entra como lote; la salida consume primero e
 test('una compra sin número de lote crea uno propio y una entrada sin lote también se rastrea', async () => {
   const alm = await login('jramos');
   const id = insumo(), prov = await proveedor();
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: prov, docTipo: 'GUIA', docNumero: `G-${sufijo}-9`, items: [{ insumoId: id, cantidad: 3, precio: 2 }] })).s, 201);
+  const r = await registrar(prov, [{ insumoId: id, cantidad: 3, precioUnitario: 2 }]);
+  assert.equal((await verificar(r.b)).b.estado, 'VERIFICADA');
   assert.match(sql(`SELECT lote FROM core.lote_insumo WHERE insumo_id = '${id}'`), /^S\/L-\d+$/);
   assert.equal(sql(`SELECT vence_en IS NULL FROM core.lote_insumo WHERE insumo_id = '${id}'`), 't');
 });
@@ -61,7 +69,8 @@ test('alerta de vencimiento: una sola vez por lote, a quien tiene alertas.stock'
   const id = insumo(), prov = await proveedor();
   const dias = Number(sql("SELECT valor FROM core.parametro WHERE clave = 'dias_alerta_vencimiento'"));
   const lote = `L${sufijo}X`;
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: prov, docTipo: 'GUIA', docNumero: `G-${sufijo}-X`, items: [{ insumoId: id, cantidad: 4, precio: 1, lote, venceEn: fecha(Math.max(dias - 1, 0)) }] })).s, 201);
+  const r = await registrar(prov, [{ insumoId: id, cantidad: 4, precioUnitario: 1, lote, venceEn: fecha(Math.max(dias - 1, 0)) }]);
+  assert.equal((await verificar(r.b)).b.estado, 'VERIFICADA');
   let aviso = null;
   for (let i = 0; i < 30 && !aviso; i++) {
     await new Promise((r) => setTimeout(r, 1000));

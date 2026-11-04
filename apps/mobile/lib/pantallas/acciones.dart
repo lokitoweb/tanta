@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import 'catalogo.dart';
+import '../core/tokens.dart';
 import '../core/comprobante.dart';
 
 /// Acciones de registro del PDF §3.2–3.3 que se hacen desde el teléfono o la tablet:
@@ -396,6 +397,7 @@ class _NuevaCompraState extends State<NuevaCompra> {
   List<Map<String, dynamic>> _proveedores = const [];
   String? _proveedor;
   String _docTipo = 'FACTURA';
+  final _serie = TextEditingController();
   final _docNumero = TextEditingController();
   final _lineas = [_LineaCompra()];
   bool _enviando = false;
@@ -410,7 +412,24 @@ class _NuevaCompraState extends State<NuevaCompra> {
   }
 
   double get _total => _lineas.fold(0, (s, l) => s + l.c * l.p);
-  bool get _valido => _proveedor != null && RegExp(r'^[A-Za-z0-9-]{3,20}$').hasMatch(_docNumero.text.trim())
+
+  /// Presentación de compra del insumo (botella, saco).
+  String? _presentacion(List<Map<String, dynamic>> insumos, String? id) {
+    final x = insumos.where((i) => i['id'] == id).firstOrNull;
+    if (x == null) return null;
+    final p = '${x['presentacion'] ?? ''}';
+    return p.isNotEmpty ? p : 'de ${x['contenido'] ?? 1} ${'${x['unidad']}'.toLowerCase()}';
+  }
+
+  /// Vista previa con el mismo cálculo del servidor: F1 base y F2 inventario.
+  String? _conversion(List<Map<String, dynamic>> insumos, _LineaCompra l) {
+    final x = insumos.where((i) => i['id'] == l.insumoId).firstOrNull;
+    if (x == null || l.c <= 0) return null;
+    final contenido = ((x['contenido'] as num?) ?? 1).toDouble(), factor = ((x['factor'] as num?) ?? 1).toDouble();
+    String f(double v) => (v * 10000).roundToDouble() / 10000 == v.roundToDouble() ? v.round().toString() : ((v * 10000).roundToDouble() / 10000).toString();
+    return '= ${f(l.c * contenido)} ${'${x['unidad']}'.toLowerCase()} = ${f(l.c * contenido * factor)} ${'${x['unidadInventario'] ?? x['unidad']}'.toLowerCase()} al inventario';
+  }
+  bool get _valido => _proveedor != null && RegExp(r'^[A-Za-z0-9]{1,4}$').hasMatch(_serie.text.trim()) && RegExp(r'^[A-Za-z0-9]{1,10}$').hasMatch(_docNumero.text.trim())
       && _lineas.every((l) => l.insumoId != null && l.c > 0 && l.p > 0)
       && _lineas.map((l) => l.insumoId).toSet().length == _lineas.length;
 
@@ -419,10 +438,11 @@ class _NuevaCompraState extends State<NuevaCompra> {
     final aviso = ScaffoldMessenger.of(context);
     final nav = Navigator.of(context);
     try {
-      final r = await Api.instancia.registrarCompra(proveedorId: _proveedor!, docTipo: _docTipo, docNumero: _docNumero.text.trim().toUpperCase(),
-          items: [for (final l in _lineas) {'insumoId': l.insumoId, 'cantidad': l.c, 'precio': l.p, 'lote': l.lote.text.trim().toUpperCase(),
+      final r = await Api.instancia.registrarCompra(proveedorId: _proveedor!, docTipo: _docTipo, serie: _serie.text.trim().toUpperCase(),
+          nro: _docNumero.text.trim().toUpperCase(), fechaCompra: DateTime.now().toIso8601String().substring(0, 10),
+          items: [for (final l in _lineas) {'insumoId': l.insumoId, 'cantidad': l.c, 'precioUnitario': l.p, 'lote': l.lote.text.trim().toUpperCase(),
             'venceEn': l.vence == null ? '' : l.vence!.toIso8601String().substring(0, 10)}]);
-      aviso.showSnackBar(SnackBar(content: Text('Compra ${r['codigo']} registrada por ${dinero(((r['total'] as num?) ?? 0).toDouble())}')));
+      aviso.showSnackBar(SnackBar(content: Text('Compra ${r['codigo']} registrada por ${dinero(((r['total'] as num?) ?? 0).toDouble())}: Almacén la verificará')));
       nav.pop(true);
     } catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
@@ -448,12 +468,18 @@ class _NuevaCompraState extends State<NuevaCompra> {
           Expanded(child: DropdownButtonFormField<String>(
             initialValue: _docTipo,
             decoration: const InputDecoration(labelText: 'Documento'),
-            items: const [DropdownMenuItem(value: 'FACTURA', child: Text('Factura')), DropdownMenuItem(value: 'BOLETA', child: Text('Boleta')), DropdownMenuItem(value: 'GUIA', child: Text('Guía'))],
+            items: const [DropdownMenuItem(value: 'FACTURA', child: Text('Factura')), DropdownMenuItem(value: 'BOLETA', child: Text('Boleta')),
+              DropdownMenuItem(value: 'NOTA_VENTA', child: Text('Nota de venta')), DropdownMenuItem(value: 'GUIA', child: Text('Guía')), DropdownMenuItem(value: 'OTRO', child: Text('Otro'))],
             onChanged: (v) => setState(() => _docTipo = v!),
           )),
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: TextField(controller: _serie, maxLength: 4, onChanged: (_) => setState(() {}), textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Serie', hintText: 'F001', counterText: ''))),
           const SizedBox(width: 12),
-          Expanded(child: TextField(controller: _docNumero, onChanged: (_) => setState(() {}), textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(labelText: 'Número', hintText: 'F001-123'))),
+          Expanded(flex: 2, child: TextField(controller: _docNumero, maxLength: 10, onChanged: (_) => setState(() {}), textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(labelText: 'Número', hintText: '123', counterText: ''))),
         ]),
         const SizedBox(height: 16),
         for (var i = 0; i < _lineas.length; i++) Card(child: Padding(
@@ -469,10 +495,13 @@ class _NuevaCompraState extends State<NuevaCompra> {
               if (_lineas.length > 1) IconButton(tooltip: 'Quitar línea', icon: const Icon(Icons.delete_outline), onPressed: () => setState(() => _lineas.removeAt(i))),
             ]),
             Row(children: [
-              Expanded(child: TextField(controller: _lineas[i].cantidad, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad'))),
+              Expanded(child: TextField(controller: _lineas[i].cantidad, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Cantidad', helperText: _presentacion(insumos, _lineas[i].insumoId)))),
               const SizedBox(width: 12),
-              Expanded(child: TextField(controller: _lineas[i].precio, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio unit. (S/)'))),
+              Expanded(child: TextField(controller: _lineas[i].precio, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio por presentación (S/)'))),
             ]),
+            if (_conversion(insumos, _lineas[i]) case final t?) Padding(padding: const EdgeInsets.only(top: 6),
+                child: Text(t, style: const TextStyle(fontSize: 12, color: TantaColors.textMuted))),
             // AIN-11: lote y vencimiento (opcionales); las salidas consumen primero lo que vence antes.
             Row(children: [
               Expanded(child: TextField(controller: _lineas[i].lote, maxLength: 40, textCapitalization: TextCapitalization.characters,
@@ -498,6 +527,101 @@ class _NuevaCompraState extends State<NuevaCompra> {
         padding: const EdgeInsets.all(16),
         child: FilledButton(onPressed: !_valido || _enviando ? null : _guardar, child: Text(_enviando ? 'Guardando…' : 'Guardar ${dinero(_total)}')),
       )),
+    );
+  }
+}
+
+/* ------------------------------------------------------ verificar compras */
+/// Almacén cuenta lo recibido. Todo igual → verificada y el stock ingresa; con diferencias → observada y se avisa a Administración.
+class VerificarCompras extends StatefulWidget {
+  const VerificarCompras({super.key});
+  @override
+  State<VerificarCompras> createState() => _VerificarComprasState();
+}
+
+class _VerificarComprasState extends State<VerificarCompras> {
+  List<dynamic>? _compras;
+  String? _error;
+
+  Future<void> _cargar() async {
+    try {
+      final l = await Api.instancia.comprasPorVerificar();
+      if (mounted) setState(() { _compras = l; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _mensaje(e));
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _verificar(Map<String, dynamic> c) async {
+    final items = ((c['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final cant = {for (final i in items) i['item'] as int: TextEditingController(text: '${i['cantidad']}')};
+    final obs = {for (final i in items) i['item'] as int: TextEditingController()};
+    final ok = await showDialog<bool>(context: context, builder: (_) => AlertDialog(
+      title: Text('Verificar ${c['codigo']}'),
+      content: SizedBox(width: double.maxFinite, child: ListView(shrinkWrap: true, children: [
+        Text('${c['proveedor']} · ${c['documento']}'),
+        const SizedBox(height: 8),
+        const Text('Cuenta en presentaciones (botellas, sacos). Si algo no coincide, indica el motivo.', style: TextStyle(fontSize: 12)),
+        for (final i in items) ...[
+          const SizedBox(height: 12),
+          TextField(controller: cant[i['item']], keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(labelText: '${i['insumo']}', helperText: 'Documento: ${i['cantidad']} · ${'${i['presentacion'] ?? ''}'.isEmpty ? 'unidades' : i['presentacion']}')),
+          TextField(controller: obs[i['item']], maxLength: 200, decoration: const InputDecoration(labelText: 'Motivo si hay diferencia', counterText: '')),
+        ],
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar verificación')),
+      ],
+    ));
+    if (ok != true || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      final r = await Api.instancia.verificarCompra('${c['codigo']}', [
+        for (final i in items) {'item': i['item'], 'cantidadVerificada': double.tryParse(cant[i['item']]!.text.replaceAll(',', '.')) ?? -1, 'observacion': obs[i['item']]!.text.trim()},
+      ]);
+      aviso.showSnackBar(SnackBar(content: Text(r['estado'] == 'VERIFICADA'
+          ? '${c['codigo']} verificada: el stock ya ingresó'
+          : '${c['codigo']} observada: se avisó a Administración; el stock no ingresa')));
+      _cargar();
+    } catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lista = (_compras ?? const []).cast<Map<String, dynamic>>();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Compras por verificar')),
+      body: RefreshIndicator(
+        onRefresh: _cargar,
+        child: _error != null
+            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            : _compras == null
+                ? const Center(child: CircularProgressIndicator())
+                : lista.isEmpty
+                    ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('No hay compras por verificar'))])
+                    : ListView.separated(
+                        itemCount: lista.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final c = lista[i];
+                          return ListTile(
+                            title: Text('${c['codigo']} · ${c['proveedor']}'),
+                            subtitle: Text('${c['documento']} · ${(c['items'] as List).length} insumo(s)'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => _verificar(c),
+                          );
+                        },
+                      ),
+      ),
     );
   }
 }

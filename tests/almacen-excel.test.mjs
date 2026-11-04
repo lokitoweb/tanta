@@ -4,6 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -14,6 +15,7 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
 }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }));
 
 // RUC válido y único por corrida.
+const { registrar, verificar } = flujoCompras(api, login);
 const ruc = () => '20' + String(Math.floor(Math.random() * 1e9)).padStart(9, '0');
 // Insumo propio por prueba: stock y CPP conocidos, sin depender de los datos de ejemplo.
 const insumo = (stock, cpp) => sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo)
@@ -31,27 +33,28 @@ test('MAE-09: proveedor con RUC único; con compras solo se inactiva', async () 
   assert.equal((await api(adm, 'POST', '/proveedores', { ruc: '12345678901', razonSocial: 'RUC inválido' })).s, 422);
   assert.equal((await api(await login('cmedina'), 'POST', '/proveedores', { razonSocial: 'Sin permiso' })).s, 403);
   const ins = insumo(0, 1);
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: 'F001-1', items: [{ insumoId: ins, cantidad: 1, precio: 1 }] })).s, 201);
+  assert.equal((await registrar(p.b.id, [{ insumoId: ins, cantidad: 1, precioUnitario: 1 }])).s, 201);
   assert.equal((await api(adm, 'DELETE', `/proveedores/${p.b.id}`)).s, 409, 'con compras no se elimina');
   assert.equal((await api(adm, 'PATCH', `/proveedores/${p.b.id}`, { ruc: r, razonSocial: `Proveedor prueba ${r}`, estado: 'INACTIVO' })).s, 200);
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: 'F001-2', items: [{ insumoId: ins, cantidad: 1, precio: 1 }] })).s, 409, 'inactivo no compra');
+  assert.equal((await registrar(p.b.id, [{ insumoId: ins, cantidad: 1, precioUnitario: 1 }])).s, 409, 'inactivo no compra');
 });
 
-test('compra con varias líneas: stock y costo promedio ponderado; el documento no se repite', async () => {
-  const alm = await login('jramos');
+test('compra con varias líneas: al verificar, stock y costo promedio ponderado; el documento no se repite', async () => {
   const p = await api(await login('lbermudez'), 'POST', '/proveedores', { ruc: ruc(), razonSocial: `Molino prueba ${randomUUID().slice(0, 6)}` });
   const a = insumo(10, 2), b = insumo(0, 0);
-  const doc = `F001-${Date.now() % 1e6}`;
-  const c = await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: doc, items: [{ insumoId: a, cantidad: 10, precio: 4 }, { insumoId: b, cantidad: 5, precio: 3 }] });
+  const doc = { docTipo: 'FACTURA', serie: 'F001', nro: nroUnico() };
+  const c = await registrar(p.b.id, [{ insumoId: a, cantidad: 10, precioUnitario: 4 }, { insumoId: b, cantidad: 5, precioUnitario: 3 }], doc);
   assert.equal(c.s, 201, JSON.stringify(c.b));
   assert.equal(c.b.total, 55);
+  assert.equal(stock(a), 10, 'registrada no ingresa stock');
+  assert.equal((await verificar(c.b)).b.estado, 'VERIFICADA');
   assert.equal(stock(a), 20);
   assert.equal(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${a}'`)), 3, '(10·2 + 10·4) / 20 = 3');
   assert.equal(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${b}'`)), 3);
   assert.equal(sql(`SELECT count(*) FROM core.movimiento_inventario WHERE insumo_id IN ('${a}','${b}') AND tipo = 'COMPRA'`), '2', 'una entrada al kárdex por línea');
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: doc, items: [{ insumoId: a, cantidad: 1, precio: 1 }] })).s, 409, 'documento repetido');
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'FACTURA', docNumero: 'F9', items: [{ insumoId: a, cantidad: 0, precio: 1 }] })).s, 422, 'cantidad mayor a cero');
-  assert.equal((await api(await login('rquispe'), 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'BOLETA', docNumero: 'B001-1', items: [{ insumoId: a, cantidad: 1, precio: 1 }] })).s, 403);
+  assert.equal((await registrar(p.b.id, [{ insumoId: a, cantidad: 1, precioUnitario: 1 }], doc)).s, 409, 'documento repetido');
+  assert.equal((await registrar(p.b.id, [{ insumoId: a, cantidad: 0, precioUnitario: 1 }])).s, 422, 'cantidad mayor a cero');
+  assert.equal((await api(await login('rquispe'), 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'BOLETA', serie: 'B001', nro: nroUnico(), fechaCompra: hoyLima(), items: [{ insumoId: a, cantidad: 1, precioUnitario: 1 }] })).s, 403);
 });
 
 test('conteo físico: las diferencias se ajustan solo con aprobación del Gerente', async () => {
@@ -97,7 +100,8 @@ test('CP-21: al bajar del mínimo hay una sola alerta hasta que el stock se recu
   assert.equal((await baja(1)).s, 200);
   assert.equal(alertas(), 1, 'sigue bajo el mínimo: no se repite');
   const p = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` });
-  assert.equal((await api(alm, 'POST', '/compras', { proveedorId: p.b.id, docTipo: 'GUIA', docNumero: `G-${Date.now() % 1e6}`, items: [{ insumoId: id, cantidad: 10, precio: 1 }] })).s, 201);
+  const compra = await registrar(p.b.id, [{ insumoId: id, cantidad: 10, precioUnitario: 1 }]);
+  assert.equal((await verificar(compra.b)).b.estado, 'VERIFICADA');
   assert.equal(sql(`SELECT estado FROM core.insumo WHERE id = '${id}'`), 'OK', 'la compra lo recupera');
   assert.equal((await baja(9)).s, 200);
   assert.equal(alertas(), 2, 'volvió a bajar: nueva alerta');

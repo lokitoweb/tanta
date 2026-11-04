@@ -113,6 +113,7 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     Widget? pantalla;
     if (ruta.startsWith('/pedidos/') && api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) pantalla = MisPedidos(productos: _productos);
     if (ruta.startsWith('/almacen/requisiciones')) pantalla = const Requisiciones();
+    if (ruta.startsWith('/almacen/compras') && api.puede('compras.verificar')) pantalla = const VerificarCompras();
     if (ruta.startsWith('/almacen/conteos')) pantalla = Conteos(datos: widget.datos);
     if (pantalla != null) { Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla!)); return; }
     if (ruta.startsWith('/ventas/pedidos')) _irA('Pedidos');
@@ -380,6 +381,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('produccion.planificar')) accion('Nueva OP', Icons.add_task_outlined, NuevaOrden(datos: datos)),
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
       if (api.puede('compras.registrar')) accion('Registrar compra', Icons.local_shipping_outlined, NuevaCompra(datos: datos)),
+      if (api.puede('compras.verificar')) accion('Verificar compras', Icons.fact_check_outlined, const VerificarCompras()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, MisPedidos(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>())),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mi estado de cuenta', Icons.account_balance_wallet_outlined, const EstadoCuenta()),

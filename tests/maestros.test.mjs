@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -70,8 +71,8 @@ test('Compra de insumo: el nuevo CPP cambia el costo del producto', async () => 
   const [insumoId, productoId] = ids;
   sql('SELECT core.recalcular_costos()');
   const antes = await ficha(ger, productoId);
-  const compra = await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId, cantidad: 10, costoUnitario: 6, motivo: 'Prueba alza de precio' });
-  assert.equal(compra.s, 200);
-  assert.ok(Math.abs(compra.b.cpp - 4) < 0.0001, 'CPP = (10 × 2 + 10 × 6) ÷ 20 = 4');
+  sql('SELECT core.cuadrar_lotes()');
+  await flujoCompras(api, login).comprarInventario(insumoId, 10, 6);
+  assert.ok(Math.abs(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${insumoId}'`)) - 4) < 0.0001, 'CPP = (10 × 2 + 10 × 6) ÷ 20 = 4');
   assert.ok((await ficha(ger, productoId)) > antes, 'comprar más caro sube el costo');
 });

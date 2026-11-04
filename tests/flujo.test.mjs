@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql } from './_sql.mjs';
+import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const login = async (u) => (await (await fetch(B + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: u, clave: 'tanta' }) })).json()).accessToken;
@@ -47,7 +48,9 @@ test('OP: requerimiento, requisición entregada por Almacén y cierre sin doble 
 
   // Stock suficiente para la prueba
   const alm = await login('jramos');
-  for (const l of receta.lineas) await api(alm, 'POST', '/inventario/movimientos', { tipo: 'COMPRA', insumoId: l.insumoId, cantidad: 100, costoUnitario: 1, motivo: 'Stock para prueba OP' });
+  // Stock por el flujo real de compra (Compras registra, Almacén verifica), en unidad de inventario.
+  const { comprarInventario } = flujoCompras(api, login);
+  for (const l of receta.lineas) await comprarInventario(l.insumoId, 100, Number(sql(`SELECT greatest(cpp, 0.01) FROM core.insumo WHERE id = '${l.insumoId}'`)));
 
   const op = await api(prod, 'POST', '/ordenes-produccion', { productoId: receta.productoId, cantidad: 24, entrega: manana });
   assert.equal(op.s, 201);

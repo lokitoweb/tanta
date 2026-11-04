@@ -16,7 +16,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   /// Solo en desarrollo: la build publicada se compila sin DEMO_LOGIN (sin credenciales ni atajos).
   static const _esDemo = bool.fromEnvironment('DEMO_LOGIN');
   static const _demo = [('Gerente', 'osquilcate'), ('Administrador', 'lbermudez'), ('Producción', 'rquispe'),
-    ('Almacén', 'jramos'), ('Vendedor', 'cmedina'), ('Cliente', 'mfernandez')];
+    ('Almacén', 'jramos'), ('Compras', 'psalas'), ('Vendedor', 'cmedina'), ('Cliente', 'mfernandez')];
 
   final _usuario = TextEditingController(text: _esDemo ? 'osquilcate' : '');
   final _clave = TextEditingController(text: _esDemo ? 'tanta' : '');

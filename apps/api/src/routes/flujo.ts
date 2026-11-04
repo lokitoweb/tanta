@@ -28,15 +28,15 @@ export async function calcularOrden(productoId: string, cantidad: number, criter
   const equivalentes = cantidad / porLote;
   const lotes = criterio === 'LOTES_COMPLETOS' ? Math.ceil(equivalentes - 1e-9) : equivalentes;
   const lineas = await q<Record<string, string>>(`
-    SELECT i.id, i.nombre, i.unidad, i.stock, i.cpp, d.cantidad
+    SELECT i.id, i.nombre, i.unidad_inventario unidad, i.stock, i.cpp, d.cantidad * core.factor_inventario(i.id) cantidad
     FROM core.receta_detalle d JOIN core.insumo i ON i.id = d.insumo_id WHERE d.receta_id = $1 ORDER BY d.orden`, [r.id]);
   // RN-20: consumo = cantidad de receta × lotes · RN-21: saldo = stock − consumo; negativo = FALTA.
   const insumos = lineas.map((l) => {
     const necesario = num(l.cantidad) * lotes, stock = num(l.stock), saldo = stock - necesario;
     return {
-      insumoId: l.id, insumo: l.nombre, unidad: l.unidad, necesario: Math.round(necesario * 1000) / 1000,
-      costo: Math.round(necesario * num(l.cpp) * 100) / 100, stock, saldo: Math.round(saldo * 1000) / 1000,
-      falta: Math.max(0, Math.round(-saldo * 1000) / 1000), estado: saldo < -1e-9 ? 'FALTA' : 'OK',
+      insumoId: l.id, insumo: l.nombre, unidad: l.unidad, necesario: Math.round(necesario * 10000) / 10000,
+      costo: Math.round(necesario * num(l.cpp) * 100) / 100, stock, saldo: Math.round(saldo * 10000) / 10000,
+      falta: Math.max(0, Math.round(-saldo * 10000) / 10000), estado: saldo < -1e-9 ? 'FALTA' : 'OK',
     };
   });
   return {
@@ -241,7 +241,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     const panes = Math.ceil(p.data.cantidad / (1 - merma) - 1e-9);
     const lotes = panes / num(r.unidades_teoricas);
     const masa = lotes * num(r.masa_lote_kg);
-    const lineas = await q<Record<string, string>>(`SELECT i.id, i.nombre, i.unidad, i.cpp, i.stock, d.cantidad, d.pct_panadero
+    const lineas = await q<Record<string, string>>(`SELECT i.id, i.nombre, i.unidad_inventario unidad, i.cpp, i.stock, d.cantidad * core.factor_inventario(i.id) cantidad, d.pct_panadero
       FROM core.receta_detalle d JOIN core.insumo i ON i.id = d.insumo_id WHERE d.receta_id = $1 ORDER BY d.orden`, [r.id]);
     const insumos = lineas.map((l) => {
       const consumo = num(l.cantidad) * lotes;

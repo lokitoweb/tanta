@@ -1376,3 +1376,8 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .campana__item.is-nueva { border-left: 3px solid var(--tanta-ink-800); }
 .campana__item span { font-size: 0.8125rem; }
 .campana__item small { font-size: 0.6875rem; color: var(--tanta-text-muted); }
+
+/* Compra de insumos: línea con su conversión F1/F2/F3 y conteo de Almacén */
+.linea-compra { border: 1px solid var(--tanta-border-subtle); border-radius: 10px; padding: 12px; margin-top: 12px; display: grid; gap: 8px; }
+.linea-compra__conv { margin: 0; font-size: 0.8125rem; color: var(--tanta-text-secondary); }
+.conteo-linea { display: grid; gap: 6px; min-width: 120px; }

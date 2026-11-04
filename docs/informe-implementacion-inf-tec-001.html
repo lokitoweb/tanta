@@ -57,11 +57,11 @@
 <body>
 <main>
   <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
-  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: nueve fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: diez fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
 
   <div class="kpis">
-    <div class="kpi"><b>9</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>10</b><span>migraciones nuevas (024 a 033)</span></div>
+    <div class="kpi"><b>10</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>12</b><span>migraciones nuevas (024 a 035)</span></div>
     <div class="kpi"><b>83</b><span>pruebas automáticas en verde</span></div>
     <div class="kpi"><b>30 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
@@ -181,6 +181,23 @@
     </ul>
   </section>
 
+  <section class="fase">
+    <header><h3>Fase 10 · Compra de insumos con verificación de Almacén</h3><span class="meta">Informe de Análisis de Compra de Insumos v1.1 (04-11-2026)</span></header>
+    <ul>
+      <li>Rol nuevo <b>Compras</b>: registra compras y mantiene insumos y proveedores. Almacén ya no registra: <b>verifica</b> lo recibido. Administración autoriza correcciones y anula (sección 7 del informe).</li>
+      <li>Estados: <b>Registrada → Verificada u Observada → En corrección → Registrada</b>; Anulada. El stock entra <b>solo al verificar</b> (RN-06); se cerró el ingreso directo por compra.</li>
+      <li>Conversión en tres niveles con un único servicio en la base: presentación → unidad base (F1) → unidad de inventario (F2), costo por unidad de inventario (F3) y salida de producción (F4). 6 botellas de 900 ml a S/ 8.50 = 5.4 L = 4.9518 kg a S/ 10.2993 por kg; una receta de 200 ml descuenta 0.1834 kg.</li>
+      <li>Se reutilizó lo existente: el "contenido de la presentación" y la "densidad" ya estaban en la ficha del insumo. Lo único nuevo es la <b>unidad de inventario</b>; para los insumos anteriores es igual a su unidad base, así que no cambió ningún stock ni costo.</li>
+      <li>Insumo de volumen o unidad con stock en kg sin densidad: no se guarda (RN-03). La unidad del stock no se cambia si el insumo ya tiene movimientos.</li>
+      <li>Documento: proveedor + tipo + serie + número, único entre las no anuladas, ignorando espacios y mayúsculas (RN-05). Fecha no futura. Con factura se registra base e IGV. Vencimiento del pago opcional.</li>
+      <li>Las cantidades convertidas se guardan en cada línea (RN-04): si luego cambia la densidad, las compras registradas no cambian.</li>
+      <li>Anulación solo por Administración, con motivo: si estaba verificada, genera <b>REVERSA_COMPRA</b> del lote de esa compra y devuelve el costo promedio. Si parte del insumo ya se usó, se bloquea e informa cuánto (punto 7).</li>
+      <li>Avisos: compra por verificar → Almacén; observada → Administración; corrección autorizada → Compras.</li>
+      <li>Web: pantalla de Compras por estado con registro, verificación (Almacén no ve precios), autorización, corrección y anulación. App: registro para Compras y "Verificar compras" para Almacén.</li>
+    </ul>
+    <p class="meta">Criterios de aceptación del informe verificados con prueba automática: 1, 2, 3, 4, 5, 6, 7 y 10. Los criterios 8 y 9 (pagos y caja chica) corresponden a la Fase 11.</p>
+  </section>
+
   <h2>Matriz de permisos aplicada</h2>
   <p>C crear · L consultar · M modificar · A anular · P aprobar. El servidor valida cada permiso; la web y la app solo muestran lo que el rol puede usar.</p>
   <div class="tabla"><table>
@@ -194,7 +211,7 @@
       <tr><td>Pedidos</td><td>L</td><td>CL propios · A antes de producir</td><td>L</td><td>L (despacho)</td><td>CLMA</td><td>L</td></tr>
       <tr><td>Órdenes de producción</td><td>L</td><td>—</td><td>CLMA</td><td>L</td><td>—</td><td>L</td></tr>
       <tr><td>Requisición de insumos</td><td>—</td><td>—</td><td>C</td><td>LM (atiende)</td><td>—</td><td>—</td></tr>
-      <tr><td>Compras</td><td>CL</td><td>—</td><td>—</td><td>CL</td><td>—</td><td>L</td></tr>
+      <tr><td>Compras (informe v1.1)</td><td>CL · autoriza corrección · anula</td><td>—</td><td>—</td><td>Verifica u observa</td><td>—</td><td>L</td></tr>
       <tr><td>Bajas de inventario</td><td>L</td><td>—</td><td>—</td><td>C</td><td>—</td><td>L</td></tr>
       <tr><td>Kárdex e inventarios</td><td>L</td><td>—</td><td>L</td><td>L</td><td>L (sin costos)</td><td>L</td></tr>
       <tr><td>Toma de inventario</td><td>—</td><td>—</td><td>—</td><td>CLM</td><td>—</td><td>P</td></tr>
@@ -249,6 +266,7 @@
 
   <h2>Pendiente o fuera de alcance</h2>
   <ul>
+    <li><b>Deudas por pagar y cajas</b> (informe de compras, criterios 8 y 9): pagos parciales y mixtos desde caja chica y caja grande. Fase 11.</li>
     <li><b>Respaldo y restauración</b> (fila 23 y CP-38): corresponde a la infraestructura de despliegue.</li>
   </ul>
 

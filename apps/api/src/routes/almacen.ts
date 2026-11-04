@@ -12,12 +12,12 @@ import { avisar, notificar } from './notificaciones.js';
  * y conteo físico cuyas diferencias solo se ajustan con la aprobación del Gerente.
  */
 
-const fallo = (status: number, mensaje: string) => Object.assign(new Error(mensaje), { status });
-const actor = (req: { usuario?: { id: string; nombre: string; rol: string } | null; ip: string }) =>
+export const fallo = (status: number, mensaje: string) => Object.assign(new Error(mensaje), { status });
+export const actor = (req: { usuario?: { id: string; nombre: string; rol: string } | null; ip: string }) =>
   ({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, ip: req.ip });
 
 /** Ejecuta fn y traduce los errores previstos (con status) a la respuesta de la API. */
-async function responder<T>(reply: { code: (n: number) => { send: (b: unknown) => unknown } }, codigo: string, fn: () => Promise<T>) {
+export async function responder<T>(reply: { code: (n: number) => { send: (b: unknown) => unknown } }, codigo: string, fn: () => Promise<T>) {
   try { return await fn(); } catch (e) {
     const err = e as Error & { status?: number; code?: string };
     if (err.code === '23505') return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un registro con esos datos.'));
@@ -89,82 +89,6 @@ export async function rutasAlmacen(app: FastifyInstance) {
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El proveedor no existe.'));
     await auditar({ ...actor(req), accion: 'PROVEEDOR_ELIMINADO', entidad: 'proveedor', entidadId: id, detalle: {} });
     return reply.code(204).send();
-  });
-
-  /* ---------------------------------------------------------------- compras */
-  const Compra = z.object({
-    proveedorId: z.string().uuid(),
-    docTipo: z.enum(['FACTURA', 'BOLETA', 'GUIA']),
-    docNumero: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{3,20}$/, 'Número de documento inválido'),
-    items: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000), precio: z.number().positive().max(100_000),
-      lote: z.string().trim().toUpperCase().max(40).default(''), venceEn: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).default('') }))
-      .min(1).max(100).refine((l) => new Set(l.map((i) => i.insumoId)).size === l.length, 'Un insumo aparece dos veces'),
-  });
-
-  app.get('/compras', { preHandler: autenticar }, async (req, reply) => {
-    if (!req.usuario!.permisos.has('compras.registrar') && !req.usuario!.permisos.has('costos.ver'))
-      return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso compras.registrar.'));
-    const filas = await q<Record<string, unknown>>(`
-      SELECT c.codigo, (c.creado_en AT TIME ZONE 'America/Lima')::text fecha, p.razon_social proveedor, c.doc_tipo, c.doc_numero, c.total, u.nombre registrado_por,
-             json_agg(json_build_object('insumo', i.nombre, 'unidad', i.unidad, 'cantidad', d.cantidad, 'precio', d.precio, 'cppAnterior', d.cpp_anterior, 'cppNuevo', d.cpp_nuevo) ORDER BY i.nombre) items
-      FROM core.compra c JOIN core.proveedor p ON p.id = c.proveedor_id JOIN core.compra_detalle d ON d.compra_id = c.id JOIN core.insumo i ON i.id = d.insumo_id
-      LEFT JOIN core.usuario u ON u.id = c.registrado_por
-      GROUP BY c.id, p.razon_social, u.nombre ORDER BY c.creado_en DESC LIMIT 200`);
-    return filas.map((f) => ({ codigo: f.codigo, fecha: String(f.fecha).slice(0, 16), proveedor: f.proveedor, documento: `${f.doc_tipo} ${f.doc_numero}`, total: num(f.total as string),
-      registradoPor: f.registrado_por, items: (f.items as Array<Record<string, string>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), cppAnterior: num(i.cppAnterior), cppNuevo: num(i.cppNuevo) })) }));
-  });
-
-  app.post('/compras', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'compras.registrar')) return;
-    const p = Compra.safeParse(req.body);
-    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Compra inválida.'));
-    const d = p.data;
-    const hoy = new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
-    if (d.items.some((i) => i.venceEn && i.venceEn < hoy)) return reply.code(422).send(error(422, 'LOTE_VENCIDO', 'Un lote ya está vencido: no se recibe.'));
-    const clave = req.headers['idempotency-key'] as string | undefined;
-    if (clave) {
-      const previa = await uno<{ codigo: string; total: string }>('SELECT codigo, total FROM core.compra WHERE idempotency_key = $1', [clave]);
-      if (previa) return reply.code(201).send({ codigo: previa.codigo, total: num(previa.total), lineas: [] });
-    }
-    return responder(reply, 'COMPRA_INVALIDA', async () => {
-      const r = await tx(async (c) => {
-        const prov = (await c.query<{ razon_social: string; estado: string }>('SELECT razon_social, estado FROM core.proveedor WHERE id = $1', [d.proveedorId])).rows[0];
-        if (!prov) throw fallo(404, 'El proveedor no existe.');
-        if (prov.estado !== 'ACTIVO') throw fallo(409, 'El proveedor está inactivo.');
-        if ((await c.query('SELECT 1 FROM core.compra WHERE proveedor_id = $1 AND doc_tipo = $2 AND doc_numero = $3', [d.proveedorId, d.docTipo, d.docNumero])).rowCount)
-          throw fallo(409, `El documento ${d.docTipo} ${d.docNumero} de este proveedor ya fue registrado.`);
-        const total = Number(d.items.reduce((s, i) => s + i.cantidad * i.precio, 0).toFixed(2));
-        const codigo = `COM-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.compra WHERE codigo ~ '^COM-[0-9]+$'`)).rows[0].n)).padStart(5, '0')}`;
-        const compra = (await c.query<{ id: string }>(`INSERT INTO core.compra (codigo, proveedor_id, doc_tipo, doc_numero, total, registrado_por, idempotency_key)
-          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [codigo, d.proveedorId, d.docTipo, d.docNumero, total.toFixed(2), req.usuario!.id, clave ?? null])).rows[0];
-        const documento = `${d.docTipo} ${d.docNumero} · ${prov.razon_social}`.slice(0, 200);
-        const lineas = [];
-        // Orden fijo de bloqueo: dos compras simultáneas no se bloquean entre sí.
-        for (const it of [...d.items].sort((a, b) => a.insumoId.localeCompare(b.insumoId))) {
-          const ins = (await c.query<{ nombre: string; stock: string; cpp: string }>('SELECT nombre, stock, cpp FROM core.insumo WHERE id = $1 FOR UPDATE', [it.insumoId])).rows[0];
-          if (!ins) throw fallo(404, 'Un insumo de la compra no existe.');
-          const saldo = Math.max(num(ins.stock), 0), cpp = num(ins.cpp);
-          // Costo promedio ponderado: (saldo·cpp + compra·precio) / (saldo + compra).
-          const nuevoCpp = (saldo * cpp + it.cantidad * it.precio) / (saldo + it.cantidad);
-          const nuevoSaldo = num(ins.stock) + it.cantidad;
-          await c.query(`INSERT INTO core.movimiento_inventario
-              (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por,lote,vence_en)
-            VALUES ('COMPRA','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULLIF($11,'')::date)`,
-            [it.insumoId, documento, it.cantidad.toFixed(6), it.precio.toFixed(6), (it.cantidad * it.precio).toFixed(4), nuevoSaldo.toFixed(6),
-              (nuevoSaldo * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), req.usuario!.id, it.lote, it.venceEn]);
-          await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3', [nuevoSaldo.toFixed(6), nuevoCpp.toFixed(6), it.insumoId]);
-          await c.query('INSERT INTO core.compra_detalle (compra_id, insumo_id, cantidad, precio, cpp_anterior, cpp_nuevo) VALUES ($1,$2,$3,$4,$5,$6)',
-            [compra.id, it.insumoId, it.cantidad.toFixed(6), it.precio.toFixed(6), cpp.toFixed(6), nuevoCpp.toFixed(6)]);
-          lineas.push({ insumo: ins.nombre, cantidad: it.cantidad, precio: it.precio, cppAnterior: Number(cpp.toFixed(4)), cppNuevo: Number(nuevoCpp.toFixed(4)), saldo: Number(nuevoSaldo.toFixed(3)) });
-        }
-        await c.query('SELECT core.recalcular_costos()');
-        return { codigo, total, lineas };
-      });
-      invalidar('cat:');
-      void emitirEvento('compra.registrada', r);
-      await auditar({ ...actor(req), accion: 'COMPRA_REGISTRADA', entidad: 'compra', entidadId: r.codigo, detalle: { proveedorId: d.proveedorId, documento: `${d.docTipo} ${d.docNumero}`, total: r.total } });
-      return reply.code(201).send(r);
-    });
   });
 
   /* ------------------------------------------------------------ conteo físico */

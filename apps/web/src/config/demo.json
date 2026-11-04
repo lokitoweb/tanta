@@ -6,6 +6,7 @@
     { "rol": "Administrador", "usuario": "lbermudez", "nombre": "Lucía Bermúdez" },
     { "rol": "Producción", "usuario": "rquispe", "nombre": "Rosa Quispe" },
     { "rol": "Almacén", "usuario": "jramos", "nombre": "Julio Ramos" },
+    { "rol": "Compras", "usuario": "psalas", "nombre": "Patricia Salas" },
     { "rol": "Vendedor", "usuario": "cmedina", "nombre": "Carlos Medina" },
     { "rol": "Cliente", "usuario": "mfernandez", "nombre": "María Fernández" },
     { "rol": "Soporte", "usuario": "soporte", "nombre": "Soporte eSolutionsNet" }

@@ -167,7 +167,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
             throw Object.assign(new Error(`Buenas + merma (${cantidadProducida + unidadesMerma}) superan lo preparado (${Math.round(lotes * Number(receta?.unidades_teoricas ?? 0))} unidades).`), { status: 422 });
           }
           const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
-            `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento AS cantidad
+            `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento * core.factor_inventario(d.insumo_id) AS cantidad
              FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
             [op.receta_id],
           );
@@ -784,8 +784,6 @@ export async function rutasOperaciones(app: FastifyInstance) {
   /* --------------------------------------------------- inventario: insumos */
   // PDF 3.3: compra (actualiza el CPP), bajas con motivo y toma de inventario físico.
   const MovInsumo = z.discriminatedUnion('tipo', [
-    z.object({ tipo: z.literal('COMPRA'), insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000),
-      costoUnitario: z.number().positive().max(100_000), motivo: z.string().trim().min(3).max(200) }),
     z.object({ tipo: z.literal('MERMA'), insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000),
       motivoTipo: z.enum(['CONSUMO', 'MERMA', 'VENCIMIENTO', 'AJUSTE']).default('MERMA'),
       motivo: z.string().trim().min(3).max(200) }),
@@ -795,6 +793,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
   app.post('/inventario/movimientos', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'inventario.mover')) return;
+    // RN-06 (compra de insumos): el stock por compra solo ingresa al verificar la compra en Almacén.
+    if ((req.body as { tipo?: unknown } | null)?.tipo === 'COMPRA') {
+      return reply.code(422).send(error(422, 'USA_COMPRAS', 'Las compras se registran en Compras y el stock ingresa cuando Almacén las verifica.'));
+    }
     const parseo = MovInsumo.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Revisa cantidad, costo y motivo (mínimo 3 caracteres).'));
     const m = parseo.data;
@@ -815,15 +817,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const saldo = Number(ins.stock);
           const cpp = Number(ins.cpp);
 
-          let tipo: 'COMPRA' | 'MERMA' | 'AJUSTE';
+          let tipo: 'MERMA' | 'AJUSTE';
           let delta: number;
-          let costo = cpp;
-          let nuevoCpp = cpp;
-          if (m.tipo === 'COMPRA') {
-            tipo = 'COMPRA'; delta = m.cantidad; costo = m.costoUnitario;
-            // Costo promedio ponderado: (saldo·cpp + compra·costo) / (saldo + compra).
-            nuevoCpp = (Math.max(saldo, 0) * cpp + m.cantidad * m.costoUnitario) / (Math.max(saldo, 0) + m.cantidad);
-          } else if (m.tipo === 'MERMA') {
+          const costo = cpp;
+          const nuevoCpp = cpp;
+          if (m.tipo === 'MERMA') {
             tipo = 'MERMA'; delta = -m.cantidad;
           } else {
             tipo = 'AJUSTE'; delta = m.cantidadContada - saldo;
@@ -844,7 +842,6 @@ export async function rutasOperaciones(app: FastifyInstance) {
           );
           await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3',
             [nuevoSaldo.toFixed(6), nuevoCpp.toFixed(6), m.insumoId]);
-          if (tipo === 'COMPRA') await c.query('SELECT core.recalcular_costos()');
           return { insumo: ins.nombre, tipo, diferencia: Number(delta.toFixed(3)), saldo: Number(nuevoSaldo.toFixed(3)), cpp: Number(nuevoCpp.toFixed(4)) };
         }),
       );
