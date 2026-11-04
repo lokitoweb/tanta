@@ -23,7 +23,10 @@ class _NuevaVentaState extends State<NuevaVenta> {
   String _forma = 'EFECTIVO';
   String? _cliente;
   final _descuento = TextEditingController(text: '0');
+  final _referencia = TextEditingController();
   bool _enviando = false;
+  // COB-02: con tarjeta, Yape, Plin o transferencia se registra el número de operación.
+  bool get _conReferencia => _forma != 'EFECTIVO' && _forma != 'CREDITO';
 
   double get _total {
     final d = (double.tryParse(_descuento.text.replaceAll(',', '.')) ?? 0) / 100;
@@ -42,16 +45,18 @@ class _NuevaVentaState extends State<NuevaVenta> {
         formaPago: _forma,
         clienteId: _cliente,
         descuentoPct: (double.tryParse(_descuento.text.replaceAll(',', '.')) ?? 0) / 100,
+        referenciaPago: _conReferencia ? _referencia.text.trim() : '',
       );
+      final comprobante = r['comprobante'] as Map<String, dynamic>?;
       final cliente = _lista(widget.datos, 'clientes').where((c) => c['id'] == _cliente).firstOrNull?['nombre'] ?? 'Público general';
       await compartirComprobante(
-        titulo: 'Venta', numero: '${r['codigo']}', cliente: '$cliente', vendedor: Api.instancia.nombre, total: dinero(_total),
+        titulo: 'Nota de venta', numero: '${comprobante?['numero'] ?? r['codigo']}', cliente: '$cliente', vendedor: Api.instancia.nombre, total: dinero(_total),
         lineas: [
           for (final e in _cant.entries.where((e) => e.value > 0))
             ('${e.value} × ${productos.firstWhere((p) => p['id'] == e.key)['nombre']}', ''),
         ],
       );
-      aviso.showSnackBar(SnackBar(content: Text('Venta ${r['codigo']} registrada')));
+      aviso.showSnackBar(SnackBar(content: Text('Nota de venta ${comprobante?['numero'] ?? r['codigo']} registrada')));
       nav.pop(true);
     } catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
@@ -85,10 +90,15 @@ class _NuevaVentaState extends State<NuevaVenta> {
         DropdownButtonFormField<String>(
           initialValue: _forma,
           decoration: const InputDecoration(labelText: 'Forma de pago'),
-          items: const ['EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'CREDITO']
+          items: const ['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA', 'TRANSFERENCIA', 'CREDITO']
               .map((f) => DropdownMenuItem(value: f, child: Text(f == 'CREDITO' ? 'Crédito' : f[0] + f.substring(1).toLowerCase()))).toList(),
           onChanged: (v) => setState(() => _forma = v!),
         ),
+        if (_conReferencia) ...[
+          const SizedBox(height: 12),
+          TextField(controller: _referencia, maxLength: 60, onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(labelText: 'N.° de operación')),
+        ],
         const SizedBox(height: 12),
         DropdownButtonFormField<String?>(
           initialValue: _cliente,
@@ -107,7 +117,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: FilledButton(
-            onPressed: !hay || _enviando || (_forma == 'CREDITO' && _cliente == null) ? null : _registrar,
+            onPressed: !hay || _enviando || (_forma == 'CREDITO' && _cliente == null) || (_conReferencia && _referencia.text.trim().length < 3) ? null : _registrar,
             child: Text(_enviando ? 'Registrando…' : 'Cobrar ${dinero(_total)}'),
           ),
         ),

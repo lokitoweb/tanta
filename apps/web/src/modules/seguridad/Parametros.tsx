@@ -167,6 +167,37 @@ export function Parametros() {
           </div>
         </Tarjeta>
       </div>
+      <Series />
     </>
+  );
+}
+
+/** MAE-14: series de nota de venta y recibo. Una serie nueva reemplaza a la activa; los números nunca se reutilizan. */
+function Series() {
+  const [series, setSeries] = useState<Array<{ tipo: string; serie: string; correlativoActual: number; activo: boolean }>>([]);
+  const [nueva, setNueva] = useState({ tipo: 'NOTA_VENTA', serie: '' });
+  const [mensaje, setMensaje] = useState('');
+  const cargar = () => api<typeof series>('/series').then(setSeries).catch((e) => setMensaje(e.message));
+  useEffect(() => { void cargar(); }, []);
+  const crear = async () => {
+    try { await api('/series', { method: 'POST', body: nueva }); setMensaje(`Serie ${nueva.serie.toUpperCase()} activa.`); setNueva({ ...nueva, serie: '' }); await cargar(); }
+    catch (e) { setMensaje(e instanceof Error ? e.message : 'No se pudo crear.'); }
+  };
+  return (
+    <Tarjeta>
+      <TarjetaTitulo titulo="Series de comprobantes" subtitulo="Nota de venta y recibo de cobranza · correlativo único" />
+      <div className="table-wrap"><table className="table table--compacta">
+        <thead><tr><th>Tipo</th><th>Serie</th><th className="t-right">Último número</th><th>Estado</th></tr></thead>
+        <tbody>{series.map((s) => <tr key={s.tipo + s.serie}><td>{s.tipo === 'RECIBO' ? 'Recibo' : 'Nota de venta'}</td><td>{s.serie}</td><td className="t-right">{s.correlativoActual}</td>
+          <td><Insignia tono={s.activo ? 'ok' : 'neutral'} punto>{s.activo ? 'Activa' : 'Histórica'}</Insignia></td></tr>)}</tbody>
+      </table></div>
+      <div className="form form--2col">
+        <label className="field"><span className="field__label">Tipo</span>
+          <select className="field__input" value={nueva.tipo} onChange={(e) => setNueva({ ...nueva, tipo: e.target.value })}><option value="NOTA_VENTA">Nota de venta</option><option value="RECIBO">Recibo</option></select></label>
+        <label className="field"><span className="field__label">Nueva serie (4 caracteres)</span>
+          <input className="field__input" maxLength={4} value={nueva.serie} onChange={(e) => setNueva({ ...nueva, serie: e.target.value.toUpperCase() })} /></label>
+      </div>
+      <div className="form__acciones">{mensaje && <span className="t-muted">{mensaje}</span>}<Boton variant="primary" disabled={!/^[A-Z0-9]{4}$/.test(nueva.serie)} onClick={() => void crear()}>Activar serie</Boton></div>
+    </Tarjeta>
   );
 }

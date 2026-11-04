@@ -158,14 +158,15 @@ export async function rutasDatos(app: FastifyInstance) {
 
       agg('8', () => q<Record<string, string>>(`
         SELECT CASE
-                 WHEN current_date - creado_en::date <= 7  THEN '0 a 7 días'
-                 WHEN current_date - creado_en::date <= 15 THEN '8 a 15 días'
-                 WHEN current_date - creado_en::date <= 30 THEN '16 a 30 días'
-                 ELSE 'Más de 30 días'
+                 WHEN current_date - vence_en <= 0  THEN 'Por vencer'
+                 WHEN current_date - vence_en <= 7  THEN '1 a 7 días vencido'
+                 WHEN current_date - vence_en <= 15 THEN '8 a 15 días vencido'
+                 WHEN current_date - vence_en <= 30 THEN '16 a 30 días vencido'
+                 ELSE 'Más de 30 días vencido'
                END AS rango,
                sum(saldo) AS monto, count(*) AS documentos,
-               min(CASE WHEN current_date - creado_en::date <= 7 THEN 1 WHEN current_date - creado_en::date <= 15 THEN 2
-                        WHEN current_date - creado_en::date <= 30 THEN 3 ELSE 4 END) AS orden
+               min(CASE WHEN current_date - vence_en <= 0 THEN 0 WHEN current_date - vence_en <= 7 THEN 1 WHEN current_date - vence_en <= 15 THEN 2
+                        WHEN current_date - vence_en <= 30 THEN 3 ELSE 4 END) AS orden
         FROM core.cuenta_por_cobrar
         WHERE estado IN ('PENDIENTE','PARCIAL') AND saldo > 0
         GROUP BY 1 ORDER BY orden`)),
@@ -396,7 +397,7 @@ export async function rutasDatos(app: FastifyInstance) {
       delete k.vencido;
     }
     if (!puede('usuarios.gestionar')) p.usuarios = [];
-    // Antigüedad de saldos = días desde la emisión (mismo criterio que G-11 y V-01).
+    // Antigüedad de saldos = días vencidos desde el vencimiento (RN-35; mismo criterio que G-11 y V-01).
     // Ventas del negocio (totales, tendencia, ranking): solo para quien ve dashboard o reportes.
     if (!puede('dashboard.ver') && !puede('reportes.ver')) {
       const k = p.kpis as Record<string, unknown>;

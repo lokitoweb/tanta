@@ -231,9 +231,9 @@ class Api {
   Future<List<dynamic>> kardex(String codigo) async => await _get('/kardex/$codigo') as List<dynamic>;
 
   /// Con pedidoId, la venta despacha ese pedido (VEN-05): libera su reserva y lo marca despachado.
-  Future<Map<String, dynamic>> registrarVenta({required List<Map<String, dynamic>> items, required String formaPago, String? clienteId, double descuentoPct = 0, String? pedidoId}) async =>
+  Future<Map<String, dynamic>> registrarVenta({required List<Map<String, dynamic>> items, required String formaPago, String? clienteId, double descuentoPct = 0, String? pedidoId, String referenciaPago = ''}) async =>
       await _post('/ventas', {
-        'items': items, 'formaPago': formaPago, 'descuentoPct': descuentoPct,
+        'items': items, 'formaPago': formaPago, 'descuentoPct': descuentoPct, 'referenciaPago': referenciaPago,
         if (clienteId != null) 'clienteId': clienteId,
         if (pedidoId != null) 'pedidoId': pedidoId,
       }, idempotente: true) as Map<String, dynamic>;

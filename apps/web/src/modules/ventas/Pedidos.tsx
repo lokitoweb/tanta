@@ -19,7 +19,8 @@ const ESTADOS: Record<string, { label: string; tono: 'info' | 'warn' | 'ok' | 'd
 };
 // RN-26: siguiente paso natural. Un confirmado con stock puede pasar directo a Listo (reserva el stock).
 const SIGUIENTE: Record<string, string> = { REGISTRADO: 'CONFIRMADO', CONFIRMADO: 'LISTO', EN_PRODUCCION: 'LISTO' };
-const MEDIOS = ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'CREDITO'];
+const MEDIOS = ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA', 'CREDITO'];
+interface Aprobacion { id: string; porcentaje: number; estado: string; vigente: boolean }
 
 /** Pedidos: registro, avance por estados y despacho con venta vinculada (trazabilidad pedido → venta). */
 export function Pedidos() {
@@ -29,11 +30,20 @@ export function Pedidos() {
   const [estado, setEstado] = useState('todos');
   const [nuevo, setNuevo] = useState(false);
   const [sel, setSel] = useState<Pedido | null>(null);
-  const [pago, setPago] = useState({ formaPago: 'EFECTIVO', descuento: '0' });
+  const [pago, setPago] = useState({ formaPago: 'EFECTIVO', descuento: '0', referencia: '' });
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [motivo, setMotivo] = useState<{ destino: 'RECHAZADO' | 'CANCELADO' | 'ENTREGADO'; texto: string } | null>(null);
 
+  // RN-36: aprobaciones de descuento del vendedor (la vigente de mayor % se usa al despachar).
+  const [aprobaciones, setAprobaciones] = useState<Aprobacion[]>([]);
+  useEffect(() => { if (sel && puede('ventas.registrar')) api<Aprobacion[]>('/descuentos/solicitudes').then(setAprobaciones).catch(() => {}); }, [sel]);
+  const aprobacion = aprobaciones.filter((a) => a.vigente && a.porcentaje + 1e-6 >= Number(pago.descuento) / 100).sort((a, b) => a.porcentaje - b.porcentaje)[0];
+  const pedirAprobacion = (p: Pedido) => accion(async () => {
+    await api('/descuentos/solicitudes', { method: 'POST', body: { porcentaje: Number(pago.descuento) / 100, motivo: `Despacho del pedido ${p.codigo}`, clienteId: p.clienteId } });
+    return `Descuento de ${pago.descuento} % enviado al Gerente para aprobación`;
+  });
+  const conReferencia = !['EFECTIVO', 'CREDITO'].includes(pago.formaPago);
   const cargar = () => api<Pedido[]>('/pedidos').then(setPedidos).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
   useEffect(() => { void cargar(); }, []);
 
@@ -55,11 +65,12 @@ export function Pedidos() {
   });
   // Despachar = vender lo pedido (descuenta stock, congela costo, genera CxC si es crédito) y marcar despachado.
   const despachar = (p: Pedido) => accion(async () => {
-    const v = await api<{ codigo: string }>('/ventas', {
+    const v = await api<{ codigo: string; comprobante: { numero: string } }>('/ventas', {
       method: 'POST', conIdempotencia: true,
-      body: { items: p.items.map((i) => ({ productoId: i.productoId, cantidad: i.cantidad })), formaPago: pago.formaPago, clienteId: p.clienteId, pedidoId: p.id, descuentoPct: Number(pago.descuento) / 100 },
+      body: { items: p.items.map((i) => ({ productoId: i.productoId, cantidad: i.cantidad })), formaPago: pago.formaPago, clienteId: p.clienteId, pedidoId: p.id, descuentoPct: Number(pago.descuento) / 100,
+        referenciaPago: pago.referencia.trim(), ...(aprobacion ? { aprobacionDescuentoId: aprobacion.id } : {}) },
     });
-    return `${p.codigo} despachado · venta ${v.codigo}`;
+    return `${p.codigo} despachado · nota de venta ${v.comprobante.numero}`;
   });
 
   const gestiona = puede('pedidos.gestionar');
@@ -94,7 +105,7 @@ export function Pedidos() {
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Pedido</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th className="t-right">Total</th><th className="t-right">Estado</th></tr></thead>
             <tbody>{pagPedidos.visibles.map((p) => (
-              <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: 'EFECTIVO', descuento: '0' }); setSel(p); }}>
+              <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: 'EFECTIVO', descuento: '0', referencia: '' }); setSel(p); }}>
                 <td><strong className="mono">{p.codigo}</strong>{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
                 <td>{p.cliente}</td>
                 <td className="t-muted">{p.items.slice(0, 2).map((i) => `${num(i.cantidad)} ${i.producto}`).join(', ')}{p.items.length > 2 ? ` +${p.items.length - 2}` : ''}</td>
@@ -117,7 +128,7 @@ export function Pedidos() {
           {['CONFIRMADO', 'EN_PRODUCCION', 'LISTO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'CANCELADO', texto: '' })} disabled={ocupado}>Anular pedido</Boton>}
           {SIGUIENTE[sel.estado] && <Boton variant="primary" onClick={() => void avanzar(sel, SIGUIENTE[sel.estado])} disabled={ocupado}>{sel.estado === 'REGISTRADO' ? 'Confirmar' : 'Marcar listo'}</Boton>}
           {sel.estado === 'DESPACHADO' && <Boton variant="primary" onClick={() => setMotivo({ destino: 'ENTREGADO', texto: '' })} disabled={ocupado}>Confirmar entrega</Boton>}
-          {sel.estado === 'LISTO' && puede('ventas.registrar') && sel.items.length > 0 && <Boton variant="primary" onClick={() => void despachar(sel)} disabled={ocupado}>Despachar y vender</Boton>}
+          {sel.estado === 'LISTO' && puede('ventas.registrar') && sel.items.length > 0 && <Boton variant="primary" onClick={() => void despachar(sel)} disabled={ocupado || (conReferencia && pago.referencia.trim().length < 3)}>Despachar y vender</Boton>}
         </> : <Boton onClick={() => setSel(null)}>Cerrar</Boton>}>
         {sel && (
           <>
@@ -145,7 +156,11 @@ export function Pedidos() {
                 <label className="field"><span className="field__label">Forma de pago</span>
                   <select className="field__input" value={pago.formaPago} onChange={(e) => setPago({ ...pago, formaPago: e.target.value })}>{MEDIOS.map((m) => <option key={m} value={m}>{m[0] + m.slice(1).toLowerCase()}</option>)}</select></label>
                 <label className="field"><span className="field__label">Descuento autorizado (%)</span>
-                  <input className="field__input" type="number" min="0" max="90" step="0.5" value={pago.descuento} onChange={(e) => setPago({ ...pago, descuento: e.target.value })} /></label>
+                  <input className="field__input" type="number" min="0" max="90" step="0.5" value={pago.descuento} onChange={(e) => setPago({ ...pago, descuento: e.target.value })} />
+                  {aprobacion ? <span className="field__ayuda">Aprobado por el Gerente hasta {Math.round(aprobacion.porcentaje * 100)} %</span>
+                    : Number(pago.descuento) > 0 && <button type="button" className="enlace" disabled={ocupado} onClick={() => void pedirAprobacion(sel)}>Pedir aprobación si supera el máximo</button>}</label>
+                {conReferencia && <label className="field field--ancho"><span className="field__label">N.° de operación</span>
+                  <input className="field__input" maxLength={60} value={pago.referencia} onChange={(e) => setPago({ ...pago, referencia: e.target.value })} /></label>}
               </div>
             )}
           </>

@@ -284,7 +284,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
       // Un tope por línea evita desbordes numéricos y ventas absurdas por error de tecleo.
       cantidad: z.number().positive().max(10_000),
     })).min(1).max(50),
-    formaPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'CREDITO']).default('EFECTIVO'),
+    formaPago: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA', 'CREDITO']).default('EFECTIVO'),
+    // COB-02: número de operación obligatorio si no es efectivo ni crédito.
+    referenciaPago: z.string().trim().max(60).default(''),
+    // RN-36: un descuento sobre el tope solo con una aprobación vigente del Gerente.
+    aprobacionDescuentoId: z.string().uuid().optional(),
     clienteId: z.string().uuid().optional(),
     // Descuento autorizado (PDF §3.2): tope en Parámetros → descuento_maximo; queda auditado.
     descuentoPct: z.number().min(0).max(0.9).default(0),
@@ -293,14 +297,15 @@ export async function rutasOperaciones(app: FastifyInstance) {
     // Una venta al crédito sin cliente no puede generar cuenta por cobrar.
     (v) => v.formaPago !== 'CREDITO' || !!v.clienteId,
     { message: 'Una venta al crédito requiere clienteId.', path: ['clienteId'] },
-  );
+  ).refine((v) => ['EFECTIVO', 'CREDITO'].includes(v.formaPago) || v.referenciaPago.length >= 3,
+    { message: 'Indica el número de operación del pago.', path: ['referenciaPago'] });
 
   app.post('/ventas', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'ventas.registrar')) return;
     const parseo = NuevaVenta.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Venta inválida.'));
 
-    const { items, formaPago, clienteId, descuentoPct, pedidoId } = parseo.data;
+    const { items, formaPago, clienteId, descuentoPct, pedidoId, referenciaPago, aprobacionDescuentoId } = parseo.data;
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {
@@ -309,7 +314,13 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const param = await c.query<{ clave: string; valor: string }>(`SELECT clave, valor FROM core.parametro WHERE clave IN ('igv','descuento_maximo')`);
           const igv = Number(param.rows.find((x) => x.clave === 'igv')?.valor ?? 0.18);
           const tope = Number(param.rows.find((x) => x.clave === 'descuento_maximo')?.valor ?? 0);
-          if (descuentoPct > tope + 1e-9) throw Object.assign(new Error(`El descuento máximo autorizado es ${Math.round(tope * 100)} %.`), { status: 422 });
+          // RN-36: sobre el tope, el descuento necesita una aprobación vigente del Gerente para este vendedor.
+          if (descuentoPct > tope + 1e-9) {
+            const ap = aprobacionDescuentoId ? (await c.query<{ id: string }>(`SELECT id FROM core.descuento_aprobacion
+              WHERE id = $1 AND estado = 'APROBADA' AND solicitado_por = $2 AND porcentaje + 0.000001 >= $3 AND expira_en > now()
+                AND (cliente_id IS NULL OR cliente_id = $4) FOR UPDATE`, [aprobacionDescuentoId, req.usuario!.id, descuentoPct, clienteId ?? null])).rows[0] : undefined;
+            if (!ap) throw Object.assign(new Error(`El descuento máximo sin autorización es ${Math.round(tope * 100)} %: solicita la aprobación del Gerente.`), { status: 422 });
+          }
           // El código se genera antes: cada movimiento de inventario queda trazado a su venta.
           const codigo = (await c.query<{ n: string }>(
             `SELECT 'VTA-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.venta_correlativo_seq')::text, 6, '0') AS n`,
@@ -399,17 +410,27 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const margen = netas > 0 ? utilidad / netas : 0;
 
           totalConIgv = Number(totalConIgv.toFixed(2));
+          // RN-31/32: nota de venta con serie y correlativo únicos; base e IGV a 2 decimales (base + IGV = total).
+          const serie = (await c.query<{ serie: string; correlativo: number }>(`UPDATE core.serie_comprobante SET correlativo_actual = correlativo_actual + 1
+            WHERE tipo = 'NOTA_VENTA' AND activo RETURNING serie, correlativo_actual AS correlativo`)).rows[0];
+          if (!serie) throw Object.assign(new Error('No hay una serie activa de nota de venta: configúrala en Parámetros.'), { status: 409 });
+          const base = Number((totalConIgv / (1 + igv)).toFixed(2));
+          const igvMonto = Number((totalConIgv - base).toFixed(2));
 
           const v = await c.query<{ id: string }>(
-            `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key,vendedor_id,canal,descuento_pct,total_con_igv,pedido_id)
+            `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key,vendedor_id,canal,descuento_pct,total_con_igv,pedido_id,
+                                     serie,correlativo,base,igv,referencia_pago)
              VALUES ($1,$2,$3,$4,$5,$6,$7,'CONFIRMADA',$8,$9,$10,
                      CASE WHEN $13::uuid IS NOT NULL OR EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = $2) THEN 'APP' ELSE 'TERCEROS' END,
-                     $11,$12,$13) RETURNING id`,
+                     $11,$12,$13,$14,$15,$16,$17,NULLIF($18,'')) RETURNING id`,
             [codigo, clienteId ?? null, formaPago, netas.toFixed(4), costoTotal.toFixed(4),
               utilidad.toFixed(4), margen.toFixed(6), req.usuario!.nombre, clave ?? null, req.usuario!.id,
-              descuentoPct.toFixed(6), totalConIgv.toFixed(4), pedidoId ?? null],
+              descuentoPct.toFixed(6), totalConIgv.toFixed(4), pedidoId ?? null, serie.serie, serie.correlativo, base.toFixed(2), igvMonto.toFixed(2), referenciaPago],
           );
           const ventaId = v.rows[0].id;
+          if (descuentoPct > tope + 1e-9) {
+            await c.query("UPDATE core.descuento_aprobacion SET estado = 'USADA', venta_id = $2 WHERE id = $1", [aprobacionDescuentoId, ventaId]);
+          }
 
           // Un solo INSERT para todas las líneas: 1 ida y vuelta en vez de N.
           if (lineas.length > 0) {
@@ -438,8 +459,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
           // si falla, la venta no existe. Antes el error se tragaba y se perdía la deuda.
           let cxcId: string | null = null;
           if (formaPago === 'CREDITO') {
-            const cliente = await c.query<{ limite_credito: string; deuda: string; dias_credito: number }>(
-              `SELECT c.limite_credito, c.dias_credito,
+            const cliente = await c.query<{ limite_credito: string; deuda: string; dias_credito: number; condicion_pago: string }>(
+              `SELECT c.limite_credito, c.dias_credito, c.condicion_pago,
                       coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x
                                 WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) AS deuda
                FROM core.cliente c WHERE c.id = $1`,
@@ -447,6 +468,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
             );
             if (cliente.rows.length === 0) {
               throw Object.assign(new Error('CLIENTE_NO_EXISTE'), { status: 404 });
+            }
+            // COB-03: solo los clientes con condición "crédito" compran al crédito.
+            if (cliente.rows[0].condicion_pago !== 'CREDITO') {
+              throw Object.assign(new Error('Este cliente compra al contado: cámbialo a crédito en su ficha para venderle a plazo.'), { status: 409 });
             }
             const limite = Number(cliente.rows[0].limite_credito);
             const deuda = Number(cliente.rows[0].deuda);
@@ -462,7 +487,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
             cxcId = cx.rows[0].id;
           }
 
-          return { codigo, ventaId, ventasNetas: netas, costoVentas: costoTotal, utilidad, margen, cxcId, lineas };
+          return { codigo, ventaId, ventasNetas: netas, costoVentas: costoTotal, utilidad, margen, cxcId, lineas,
+            comprobante: { tipo: 'NOTA_VENTA', serie: serie.serie, correlativo: serie.correlativo,
+              numero: `${serie.serie}-${String(serie.correlativo).padStart(8, '0')}`, base, igv: igvMonto, total: totalConIgv } };
         }),
       );
 
@@ -542,9 +569,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
   const NuevaCobranza = z.object({
     cxcId: z.string().uuid(),
     monto: z.number().positive(),
-    medio: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN']),
-    referencia: z.string().max(60).optional(),
-  });
+    medio: z.enum(['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA']),
+    referencia: z.string().trim().max(60).optional(),
+  }).refine((d) => d.medio === 'EFECTIVO' || (d.referencia ?? '').length >= 3, { message: 'Indica el número de operación.', path: ['referencia'] });
 
   app.post('/cobranza', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'cobranza.registrar')) return;

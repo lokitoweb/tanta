@@ -122,10 +122,16 @@ class _PedidosState extends State<Pedidos> {
   Future<void> _despachar(Map<String, dynamic> p) async {
     final forma = await showDialog<String>(context: context, builder: (_) => SimpleDialog(
       title: Text('Despachar ${p['codigo']}'),
-      children: [for (final f in const ['EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'CREDITO'])
+      children: [for (final f in const ['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA', 'TRANSFERENCIA', 'CREDITO'])
         SimpleDialogOption(onPressed: () => Navigator.pop(context, f), child: Text(f == 'CREDITO' ? 'Crédito' : f[0] + f.substring(1).toLowerCase()))],
     ));
     if (forma == null || !mounted) return;
+    var referencia = '';
+    if (forma != 'EFECTIVO' && forma != 'CREDITO') {
+      final r = await _pedirTexto('Pago con ${forma.toLowerCase()}', 'N.° de operación');
+      if (r == null || !mounted) return;
+      referencia = r;
+    }
     final aviso = ScaffoldMessenger.of(context);
     setState(() => _ocupado = p['codigo'] as String);
     try {
@@ -133,10 +139,10 @@ class _PedidosState extends State<Pedidos> {
       final items = ((completo['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
       final v = await Api.instancia.registrarVenta(
         items: [for (final i in items) {'productoId': i['productoId'], 'cantidad': i['cantidad']}],
-        formaPago: forma, clienteId: '${completo['clienteId']}', pedidoId: '${completo['id']}');
+        formaPago: forma, clienteId: '${completo['clienteId']}', pedidoId: '${completo['id']}', referenciaPago: referencia);
       setState(() => p['estado'] = 'DESPACHADO');
       await compartirComprobante(
-        titulo: 'Venta', numero: '${v['codigo']}', cliente: '${p['cliente'] ?? '-'}', vendedor: Api.instancia.nombre,
+        titulo: 'Nota de venta', numero: '${(v['comprobante'] as Map?)?['numero'] ?? v['codigo']}', cliente: '${p['cliente'] ?? '-'}', vendedor: Api.instancia.nombre,
         total: dinero(((p['total'] as num?) ?? 0).toDouble()),
         lineas: [for (final i in items) ('${i['cantidad']} × ${i['producto']}', '')]);
     } on ApiException catch (e) {
@@ -271,6 +277,7 @@ class _CobranzaState extends State<Cobranza> {
   Future<void> _cobrar(Map<String, dynamic> c) async {
     final controlador = TextEditingController(text: (c['saldo'] as num).toStringAsFixed(2));
     final medio = ValueNotifier<String>('EFECTIVO');
+    final referencia = TextEditingController();
 
     final confirmado = await showDialog<bool>(
       context: context,
@@ -295,11 +302,17 @@ class _CobranzaState extends State<Cobranza> {
               builder: (_, v, __) => DropdownButtonFormField<String>(
                 initialValue: v,
                 decoration: const InputDecoration(labelText: 'Medio'),
-                items: const ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN']
+                items: const ['EFECTIVO', 'TRANSFERENCIA', 'YAPE', 'PLIN', 'TARJETA']
                     .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                     .toList(),
                 onChanged: (x) => medio.value = x ?? 'EFECTIVO',
               ),
+            ),
+            ValueListenableBuilder<String>(
+              valueListenable: medio,
+              builder: (_, v, __) => v == 'EFECTIVO'
+                  ? const SizedBox.shrink()
+                  : TextField(controller: referencia, maxLength: 60, decoration: const InputDecoration(labelText: 'N.° de operación')),
             ),
           ],
         ),
@@ -314,6 +327,10 @@ class _CobranzaState extends State<Cobranza> {
 
     final monto = double.tryParse(controlador.text.replaceAll(',', '.'));
     if (monto == null || monto <= 0) return;
+    if (medio.value != 'EFECTIVO' && referencia.text.trim().length < 3) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Indica el número de operación')));
+      return;
+    }
 
     // La clave de idempotencia se crea aquí y viaja con la operación: reintentar
     // cinco veces el mismo cobro no lo duplica en el servidor.
@@ -323,6 +340,7 @@ class _CobranzaState extends State<Cobranza> {
         'cxcId': '${c['id']}',
         'monto': monto,
         'medio': medio.value,
+        'referencia': referencia.text.trim(),
         'cliente': '${c['cliente']}',
       },
       descripcion: 'Cobro ${dinero(monto)} · ${c['cliente']}',

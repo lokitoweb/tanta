@@ -1360,3 +1360,4 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .op__anular:hover { background: color-mix(in srgb, var(--tanta-state-danger) 10%, transparent); color: var(--tanta-state-danger); }
 @media (max-width: 640px) { .calculo-op { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .entrega__input { width: 110px; height: 32px; text-align: right; margin-left: auto; }
+.enlace { background: none; border: 0; padding: 0; margin-top: 4px; color: var(--tanta-ink-800); text-decoration: underline; cursor: pointer; font-size: 0.75rem; text-align: left; }

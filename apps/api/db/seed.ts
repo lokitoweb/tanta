@@ -54,13 +54,14 @@ const PERMISOS: Array<[string, string, string]> = [
   ['produccion.planificar', 'Producción', 'Generar órdenes de producción'],
   ['ventas.anular', 'Ventas', 'Anular ventas: devuelve el stock y cancela la deuda'],
   ['requisiciones.atender', 'Almacén', 'Entregar a Producción los insumos de una requisición'],
+  ['descuentos.aprobar', 'Ventas', 'Aprobar descuentos mayores al máximo permitido'],
 ];
 
 const ROLES: Array<[string, string, string, string, string, string, number, string[]]> = [
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular']],
+    ['panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'descuentos.aprobar']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
     ['panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
@@ -84,6 +85,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-pedidos', 'Comercial', 'Pedidos', '/ventas/pedidos', 'clipboard', 'pedidos.ver', 1, 2],
   ['n-cobranza', 'Comercial', 'Cobranza', '/ventas/cobranza', 'wallet', 'cobranza.ver', 2, 2],
   ['n-catalogo', 'Comercial', 'Catálogo', '/catalogo', 'bread', 'catalogo.ver', 3, 2],
+  ['n-aprobaciones', 'Comercial', 'Aprobaciones', '/ventas/aprobaciones', 'check', 'descuentos.aprobar', 4, 2],
   ['n-productos', 'Maestros', 'Productos', '/maestros/productos', 'bread', 'maestros.ver', 1, 3],
   ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 3],
   ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
@@ -339,8 +341,8 @@ async function main() {
     const idsCliente: string[] = [];
     for (const [codigo, nombre, docTipo, docNumero, dias, limite, lista] of CLIENTES) {
       const r = await c.query(
-        `INSERT INTO core.cliente (codigo,nombre,doc_tipo,doc_numero,lista_precio,dias_credito,limite_credito)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        `INSERT INTO core.cliente (codigo,nombre,doc_tipo,doc_numero,lista_precio,dias_credito,limite_credito,condicion_pago)
+         VALUES ($1,$2,$3,$4,$5,$6,$7, CASE WHEN $6::int > 0 OR $7::numeric > 0 THEN 'CREDITO' ELSE 'CONTADO' END) RETURNING id`,
         [codigo, nombre, docTipo, docNumero, lista, dias, d(limite, 4)],
       );
       idsCliente.push(r.rows[0].id);

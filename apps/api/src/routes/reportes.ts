@@ -226,8 +226,8 @@ const REPORTES: Record<string, Reporte> = {
     columnas: [{ key: 'tramo', label: 'Antigüedad' }, { key: 'documentos', label: 'Documentos', tipo: 'num' }, { key: 'saldo', label: 'Saldo', tipo: 'dinero' }, { key: 'participacion', label: '%', tipo: 'pct' }],
     async calcular() {
       const filas = await q<Record<string, string>>(`
-        SELECT t.tramo, count(x.id) documentos, coalesce(sum(x.saldo),0) saldo, min(t.o) o FROM (VALUES ('0–7 días',1,0,7),('8–15 días',2,8,15),('16–30 días',3,16,30),('Más de 30 días',4,31,100000)) t(tramo,o,a,b)
-        LEFT JOIN core.cuenta_por_cobrar x ON x.estado IN ('PENDIENTE','PARCIAL') AND (current_date - x.creado_en::date) BETWEEN t.a AND t.b
+        SELECT t.tramo, count(x.id) documentos, coalesce(sum(x.saldo),0) saldo, min(t.o) o FROM (VALUES ('Por vencer',0,-100000,0),('1–7 días vencido',1,1,7),('8–15 días vencido',2,8,15),('16–30 días vencido',3,16,30),('Más de 30 días vencido',4,31,100000)) t(tramo,o,a,b)
+        LEFT JOIN core.cuenta_por_cobrar x ON x.estado IN ('PENDIENTE','PARCIAL') AND (current_date - x.vence_en) BETWEEN t.a AND t.b
         GROUP BY t.tramo ORDER BY o`);
       const extra = await uno<Record<string, string>>(`SELECT coalesce(sum(saldo) FILTER (WHERE vence_en < current_date),0) vencido,
         coalesce((SELECT avg(c.creado_en::date - x.creado_en::date) FROM core.cobranza c JOIN core.cuenta_por_cobrar x ON x.id = c.cxc_id WHERE c.creado_en >= now() - interval '90 days'),0) dias
@@ -273,18 +273,19 @@ const REPORTES: Record<string, Reporte> = {
   },
   'V-01': {
     titulo: 'Deudas por cobrar', permiso: 'cobranza.ver',
-    columnas: [{ key: 'cliente', label: 'Cliente' }, { key: 'd0_7', label: '0–7 días', tipo: 'dinero' }, { key: 'd8_15', label: '8–15 días', tipo: 'dinero' }, { key: 'd16_30', label: '16–30 días', tipo: 'dinero' }, { key: 'd30', label: '+30 días', tipo: 'dinero' }, { key: 'total', label: 'Saldo total', tipo: 'dinero' }],
+    columnas: [{ key: 'cliente', label: 'Cliente' }, { key: 'porVencer', label: 'Por vencer', tipo: 'dinero' }, { key: 'd0_7', label: '1–7 días', tipo: 'dinero' }, { key: 'd8_15', label: '8–15 días', tipo: 'dinero' }, { key: 'd16_30', label: '16–30 días', tipo: 'dinero' }, { key: 'd30', label: '+30 días', tipo: 'dinero' }, { key: 'total', label: 'Saldo total', tipo: 'dinero' }],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`
         SELECT c.nombre cliente,
-          sum(x.saldo) FILTER (WHERE current_date - x.creado_en::date <= 7) d0_7,
-          sum(x.saldo) FILTER (WHERE current_date - x.creado_en::date BETWEEN 8 AND 15) d8_15,
-          sum(x.saldo) FILTER (WHERE current_date - x.creado_en::date BETWEEN 16 AND 30) d16_30,
-          sum(x.saldo) FILTER (WHERE current_date - x.creado_en::date > 30) d30, sum(x.saldo) total
+          sum(x.saldo) FILTER (WHERE current_date - x.vence_en <= 0) por_vencer,
+          sum(x.saldo) FILTER (WHERE current_date - x.vence_en BETWEEN 1 AND 7) d0_7,
+          sum(x.saldo) FILTER (WHERE current_date - x.vence_en BETWEEN 8 AND 15) d8_15,
+          sum(x.saldo) FILTER (WHERE current_date - x.vence_en BETWEEN 16 AND 30) d16_30,
+          sum(x.saldo) FILTER (WHERE current_date - x.vence_en > 30) d30, sum(x.saldo) total
         FROM core.cuenta_por_cobrar x JOIN core.cliente c ON c.id = x.cliente_id
         WHERE x.estado IN ('PENDIENTE','PARCIAL') AND ($1::uuid IS NULL OR c.id = $1)
         GROUP BY c.nombre ORDER BY total DESC`, [f.cliente ?? null]);
-      return { filas: filas.map((r) => ({ cliente: r.cliente, d0_7: num(r.d0_7), d8_15: num(r.d8_15), d16_30: num(r.d16_30), d30: num(r.d30), total: num(r.total) })) };
+      return { filas: filas.map((r) => ({ cliente: r.cliente, porVencer: num(r.por_vencer), d0_7: num(r.d0_7), d8_15: num(r.d8_15), d16_30: num(r.d16_30), d30: num(r.d30), total: num(r.total) })) };
     },
   },
   'V-02': {
