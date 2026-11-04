@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 export function sql(consulta) {
   const args = ['-t', '-A', '-c', consulta];
   try {
-    return execFileSync('docker', ['exec', 'tanta-pg', 'psql', '-U', 'tanta', '-d', 'tanta', ...args],
+    return execFileSync('docker', ['exec', 'tanta-pg', 'psql', '-U', 'tanta', '-d', process.env.PGDATABASE ?? 'tanta', ...args],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch (e) {
     // Igual que sqlScript: solo sin contenedor se usa psql directo; un error del SQL se muestra tal cual.
@@ -19,7 +19,7 @@ export function sql(consulta) {
 export function sqlScript(script) {
   const args = ['-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', script];
   try {
-    return execFileSync('docker', ['exec', 'tanta-pg', 'psql', '-U', 'tanta', '-d', 'tanta', ...args],
+    return execFileSync('docker', ['exec', 'tanta-pg', 'psql', '-U', 'tanta', '-d', process.env.PGDATABASE ?? 'tanta', ...args],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   } catch (e) {
     // Sin Docker o sin el contenedor (CI): psql directo. Un error del SQL se propaga con su mensaje.

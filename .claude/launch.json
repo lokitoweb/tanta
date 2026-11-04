@@ -12,6 +12,17 @@
       "port": 3001
     },
     {
+      "name": "api-pruebas",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--env-file-if-exists=../../.env",
+        "--env-file=pruebas.env",
+        "dist/src/server.js"
+      ],
+      "cwd": "apps/api",
+      "port": 3002
+    },
+    {
       "name": "web",
       "runtimeExecutable": "node",
       "runtimeArgs": [

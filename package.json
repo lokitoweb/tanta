@@ -14,6 +14,7 @@
     "db:reset": "pnpm db:seed",
     "db:migrate": "pnpm --filter @tanta/api migrate",
     "db:seed": "pnpm --filter @tanta/api seed",
+    "pruebas": "node tests/correr.mjs",
 
     "api": "pnpm --filter @tanta/api start",
     "web": "pnpm --filter @tanta/web dev",
