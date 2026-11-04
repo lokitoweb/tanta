@@ -284,7 +284,9 @@ export async function rutasCompras(app: FastifyInstance) {
             if (disponible + 1e-6 < cant) {
               throw fallo(409, `No se puede anular: de ${d.insumo} ya se usaron ${(cant - disponible).toFixed(4)} ${d.unidad.toLowerCase()} de los ${cant.toFixed(4)} comprados. Registra un ajuste en su lugar.`);
             }
+            // Compras anteriores a la verificación no tienen su lote enlazado: salen por FEFO como cualquier salida.
             if (lote) await c.query('UPDATE core.lote_insumo SET saldo = saldo - $2 WHERE id = $1', [lote.id, cant.toFixed(6)]);
+            else await c.query('SELECT core.consumir_lotes($1, $2)', [d.insumo_id, cant.toFixed(6)]);
             const stock = num(ins.stock) - cant;
             // El costo promedio vuelve al que habría sin esta compra; sin stock, al de antes de la compra.
             let cpp = stock > 1e-6 ? (num(ins.stock) * num(ins.cpp) - cant * costo) / stock : num(d.cpp_anterior);

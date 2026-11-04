@@ -167,6 +167,17 @@ test('criterio 10 / RN-09: anular una verificada revierte el inventario y el cos
   assert.equal((await api(admin, 'POST', `/compras/${r.b.codigo}/anular`, { motivo: 'Otra vez más' })).s, 409, 'no se anula dos veces');
 });
 
+test('anular una compra anterior a la verificación (sin lote enlazado) mantiene lotes y stock iguales', async () => {
+  const id = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo) VALUES ('T-${sufijo}-LG', 'Insumo prueba anulación', 'KG', 1, 0, 0) RETURNING id) SELECT id FROM i`);
+  const r = await registrar(prov, [{ insumoId: id, cantidad: 5, precioUnitario: 2 }]);
+  await verificar(r.b);
+  // Así quedaron las compras registradas antes de la Fase 10: sin el movimiento (y su lote) enlazado.
+  sqlScript(`UPDATE core.compra_detalle SET movimiento_id = NULL WHERE compra_id = (SELECT id FROM core.compra WHERE codigo = '${r.b.codigo}');`);
+  assert.equal((await api(admin, 'POST', `/compras/${r.b.codigo}/anular`, { motivo: 'Compra antigua mal cargada' })).s, 200);
+  assert.equal(stock(id), 0);
+  assert.equal(Number(sql(`SELECT coalesce(sum(saldo), 0) FROM core.lote_insumo WHERE insumo_id = '${id}'`)), 0, 'los lotes bajan con el stock');
+});
+
 test('punto 7: no se anula una compra cuyo stock ya se usó', async () => {
   const id = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo) VALUES ('T-${sufijo}-US', 'Insumo prueba anulación', 'KG', 1, 0, 0) RETURNING id) SELECT id FROM i`);
   const r = await registrar(prov, [{ insumoId: id, cantidad: 10, precioUnitario: 1 }]);
