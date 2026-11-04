@@ -10,7 +10,7 @@ import { NuevoPedido } from './NuevoPedido';
 
 interface Item { productoId: string; producto: string; cantidad: number; precio: number }
 interface Pedido { id: string; codigo: string; clienteId: string; cliente: string; vendedor: string; estado: string; total: number; fecha_entrega: string; hora_entrega: string; observaciones: string; venta: string | null; items: Item[];
-  tipoEntrega?: string; direccion?: string; motivo?: string | null; entregaObs?: string | null }
+  tipoEntrega?: string; direccion?: string; pagoEntrega?: string; motivo?: string | null; entregaObs?: string | null }
 
 const ESTADOS: Record<string, { label: string; tono: 'info' | 'warn' | 'ok' | 'danger' | 'neutral' }> = {
   REGISTRADO: { label: 'Por confirmar', tono: 'neutral' }, CONFIRMADO: { label: 'Confirmado', tono: 'info' },
@@ -105,7 +105,7 @@ export function Pedidos() {
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Pedido</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th className="t-right">Total</th><th className="t-right">Estado</th></tr></thead>
             <tbody>{pagPedidos.visibles.map((p) => (
-              <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: 'EFECTIVO', descuento: '0', referencia: '' }); setSel(p); }}>
+              <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: p.pagoEntrega ?? 'EFECTIVO', descuento: '0', referencia: '' }); setSel(p); }}>
                 <td><strong className="mono">{p.codigo}</strong>{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
                 <td>{p.cliente}</td>
                 <td className="t-muted">{p.items.slice(0, 2).map((i) => `${num(i.cantidad)} ${i.producto}`).join(', ')}{p.items.length > 2 ? ` +${p.items.length - 2}` : ''}</td>
@@ -136,7 +136,7 @@ export function Pedidos() {
               {sel.items.map((i) => <tr key={i.productoId}><td>{i.producto}</td><td className="t-right">{num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
               <tr><td><strong>Total</strong></td><td /><td className="t-right"><strong>{money(sel.total)}</strong></td></tr>
             </tbody></table>
-            <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Delivery a: ${sel.direccion}` : 'Recojo en tienda'}</p>
+            <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Delivery a: ${sel.direccion}` : 'Recojo en tienda'} · paga contra entrega con {(sel.pagoEntrega ?? 'EFECTIVO').toLowerCase()}</p>
             {sel.observaciones && <p className="dialogo__nota">Observaciones: {sel.observaciones}</p>}
             {sel.motivo && <p className="dialogo__nota">Motivo: {sel.motivo}</p>}
             {sel.entregaObs && <p className="dialogo__nota">Entrega: {sel.entregaObs}</p>}

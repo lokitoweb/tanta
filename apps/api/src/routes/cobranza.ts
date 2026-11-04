@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
-import { emitirEvento, enviarPush } from './sistema.js';
+import { emitirEvento } from './sistema.js';
+import { avisar } from './notificaciones.js';
 
 /**
  * Cobranza y ventas del INF-TEC-001 (M07/M08): recibo aplicado a varios documentos (RN-34),
@@ -143,9 +144,7 @@ export async function rutasCobranza(app: FastifyInstance) {
     const r = await uno<{ id: string }>('INSERT INTO core.descuento_aprobacion (solicitado_por, cliente_id, porcentaje, motivo) VALUES ($1,$2,$3,$4) RETURNING id',
       [req.usuario!.id, p.data.clienteId ?? null, p.data.porcentaje, p.data.motivo]);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'DESCUENTO_SOLICITADO', entidad: 'descuento_aprobacion', entidadId: r!.id, detalle: p.data, ip: req.ip });
-    // Aviso a quienes aprueban.
-    void q<{ id: string }>(`SELECT DISTINCT ur.usuario_id id FROM core.usuario_rol ur JOIN core.rol_permiso rp ON rp.rol_id = ur.rol_id WHERE rp.permiso_id = 'descuentos.aprobar'`)
-      .then((us) => us.forEach((u) => void enviarPush(u.id, 'Descuento por aprobar', `${req.usuario!.nombre} pide ${Math.round(p.data.porcentaje * 100)} %`).catch(() => {}))).catch(() => {});
+    avisar([{ permiso: 'descuentos.aprobar' }], { tipo: 'descuento', titulo: 'Descuento por aprobar', cuerpo: `${req.usuario!.nombre} pide ${Math.round(p.data.porcentaje * 100)} %: ${p.data.motivo}`, ruta: '/ventas/aprobaciones' });
     return reply.code(201).send({ id: r!.id, estado: 'PENDIENTE' });
   });
 
@@ -170,7 +169,7 @@ export async function rutasCobranza(app: FastifyInstance) {
       WHERE id = $1 AND estado = 'PENDIENTE' RETURNING solicitado_por, porcentaje`, [id, p.data.aprobar ? 'APROBADA' : 'RECHAZADA', req.usuario!.id]);
     if (!r) return reply.code(409).send(error(409, 'YA_RESUELTA', 'La solicitud ya fue resuelta.'));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: p.data.aprobar ? 'DESCUENTO_APROBADO' : 'DESCUENTO_RECHAZADO', entidad: 'descuento_aprobacion', entidadId: id, detalle: { porcentaje: num(r.porcentaje) }, ip: req.ip });
-    void enviarPush(r.solicitado_por, 'Descuento', `Tu descuento de ${Math.round(num(r.porcentaje) * 100)} % fue ${p.data.aprobar ? 'aprobado (24 h)' : 'rechazado'}`).catch(() => {});
+    avisar([{ usuarioId: r.solicitado_por }], { tipo: 'descuento', titulo: 'Descuento', cuerpo: `Tu descuento de ${Math.round(num(r.porcentaje) * 100)} % fue ${p.data.aprobar ? 'aprobado (24 h)' : 'rechazado'}`, ruta: '/ventas/pedidos' });
     return { id, estado: p.data.aprobar ? 'APROBADA' : 'RECHAZADA' };
   });
 

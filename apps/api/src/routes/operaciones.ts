@@ -4,7 +4,8 @@ import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
-import { emitirEvento, enviarPush } from './sistema.js';
+import { emitirEvento } from './sistema.js';
+import { avisar } from './notificaciones.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -499,6 +500,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
         detalle: { codigo: venta.codigo, monto: venta.ventasNetas, margen: venta.margen }, ip: req.ip,
       });
       void emitirEvento('venta.creada', venta);
+      avisar([{ permiso: 'alertas.ventas' }], { tipo: 'venta', titulo: `Venta ${venta.comprobante.numero}`, cuerpo: `${req.usuario!.nombre} · S/ ${venta.comprobante.total.toFixed(2)} · ${formaPago.toLowerCase()}`, ruta: '/gerencia/reportes' });
       return reply.code(201).send(venta);
     } catch (e) {
       const err = e as Error & { status?: number };
@@ -725,10 +727,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
       detalle: { de: pedido.estado, a: destino, cliente: pedido.cliente, motivo: motivo || undefined }, ip: req.ip,
     });
     void emitirEvento('pedido.estado', { codigo, de: pedido.estado, a: destino });
-    // PDF 3.2: el cliente recibe push cuando su pedido cambia de estado.
-    void uno<{ id: string }>(
-      'SELECT u.id FROM core.usuario u JOIN core.pedido p ON p.cliente_id = u.cliente_id WHERE p.id = $1 LIMIT 1', [pedido.id],
-    ).then((u) => u && enviarPush(u.id, `Pedido ${codigo}`, `Tu pedido ahora está: ${destino.replace('_', ' ').toLowerCase()}`)).catch(() => {});
+    // Los avisos al cliente y a cada área salen del historial del pedido (notificaciones.ts).
     return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino });
   });
 

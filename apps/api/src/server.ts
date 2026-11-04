@@ -14,6 +14,7 @@ import { rutasMaestros } from './routes/maestros.js';
 import { rutasReportes } from './routes/reportes.js';
 import { rutasCobranza } from './routes/cobranza.js';
 import { rutasAlmacen, despacharAlertasStock } from './routes/almacen.js';
+import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
 import { rutasFlujo } from './routes/flujo.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
@@ -134,6 +135,7 @@ export async function construir() {
     await api.register(rutasReportes);
     await api.register(rutasCobranza);
     await api.register(rutasAlmacen);
+    await api.register(rutasNotificaciones);
     await api.register(rutasFlujo);
   }, { prefix: '/api/v1' });
 
@@ -146,6 +148,8 @@ try {
   await app.listen({ port: PUERTO, host: process.env.HOST ?? '127.0.0.1' });
   // CP-21: las alertas de stock mínimo salen apenas la base las registra (revisión cada 15 s).
   setInterval(() => { despacharAlertasStock().catch((e) => app.log.error(e, 'alertas de stock')); }, 15_000).unref();
+  // PED-05 / CP-36: los avisos de cada estado del pedido salen en segundos (meta del Excel: menos de 30 s).
+  setInterval(() => { despacharAvisosPedido().catch((e) => app.log.error(e, 'avisos de pedido')); }, 5_000).unref();
   app.log.info(`Tanta Core en http://127.0.0.1:${PUERTO}/api/v1`);
 } catch (e) {
   app.log.error(e);

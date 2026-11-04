@@ -4,7 +4,8 @@ import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
-import { emitirEvento, enviarPush } from './sistema.js';
+import { emitirEvento } from './sistema.js';
+import { avisar, notificar } from './notificaciones.js';
 
 /**
  * Almacén del INF-TEC-001 (M05): proveedores (MAE-09), compras con documento y costo promedio ponderado,
@@ -208,8 +209,7 @@ export async function rutasAlmacen(app: FastifyInstance) {
       return { id: k.id, codigo, diferencias };
     });
     await auditar({ ...actor(req), accion: 'CONTEO_REGISTRADO', entidad: 'conteo', entidadId: r.codigo, detalle: { items: p.data.items.length, diferencias: r.diferencias } });
-    void q<{ id: string }>(`SELECT DISTINCT ur.usuario_id id FROM core.usuario_rol ur JOIN core.rol_permiso rp ON rp.rol_id = ur.rol_id WHERE rp.permiso_id = 'conteo.aprobar'`)
-      .then((us) => us.forEach((u) => void enviarPush(u.id, 'Conteo por aprobar', `${r.codigo}: ${r.diferencias} diferencia(s)`).catch(() => {}))).catch(() => {});
+    avisar([{ permiso: 'conteo.aprobar' }], { tipo: 'conteo', titulo: 'Conteo por aprobar', cuerpo: `${r.codigo}: ${r.diferencias} diferencia(s)`, ruta: '/almacen/conteos' });
     return reply.code(201).send({ ...r, estado: 'PENDIENTE' });
     });
   });
@@ -248,7 +248,7 @@ export async function rutasAlmacen(app: FastifyInstance) {
       });
       invalidar('cat:');
       await auditar({ ...actor(req), accion: p.data.aprobar ? 'CONTEO_APROBADO' : 'CONTEO_RECHAZADO', entidad: 'conteo', entidadId: r.codigo, detalle: { ajustes: r.ajustes, motivo: p.data.motivo } });
-      void enviarPush(r.registradoPor, 'Conteo', `${r.codigo} ${p.data.aprobar ? `aprobado: ${r.ajustes} ajuste(s)` : 'rechazado'}`).catch(() => {});
+      avisar([{ usuarioId: r.registradoPor }], { tipo: 'conteo', titulo: 'Conteo', cuerpo: `${r.codigo} ${p.data.aprobar ? `aprobado: ${r.ajustes} ajuste(s)` : 'rechazado'}`, ruta: '/almacen/conteos' });
       return { codigo: r.codigo, estado: p.data.aprobar ? 'APROBADO' : 'RECHAZADO', ajustes: r.ajustes };
     });
   });
@@ -264,13 +264,10 @@ export async function despacharAlertasStock(): Promise<number> {
     WHERE a.id IN (SELECT id FROM core.alerta_stock WHERE enviada_en IS NULL ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED) AND i.id = a.insumo_id
     RETURNING i.nombre insumo, i.unidad, a.stock, a.minimo`)).rows);
   if (!alertas.length) return 0;
-  const destinatarios = await q<{ id: string }>(`SELECT DISTINCT ur.usuario_id id FROM core.usuario_rol ur
-    JOIN core.rol_permiso rp ON rp.rol_id = ur.rol_id JOIN core.usuario u ON u.id = ur.usuario_id
-    WHERE rp.permiso_id = 'alertas.stock' AND u.estado = 'ACTIVO'`);
   for (const a of alertas) {
     const texto = `${a.insumo}: quedan ${num(a.stock).toFixed(2)} ${a.unidad.toLowerCase()} (mínimo ${num(a.minimo).toFixed(2)})`;
     void emitirEvento('stock.bajo_minimo', { insumo: a.insumo, stock: num(a.stock), minimo: num(a.minimo) });
-    for (const u of destinatarios) void enviarPush(u.id, 'Stock bajo el mínimo', texto).catch(() => {});
+    await notificar([{ permiso: 'alertas.stock' }], { tipo: 'stock', titulo: 'Stock bajo el mínimo', cuerpo: texto, ruta: '/almacen' });
   }
   return alertas.length;
 }

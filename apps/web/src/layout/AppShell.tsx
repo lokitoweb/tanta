@@ -4,6 +4,7 @@ import { useApp } from '@/core/app-state';
 import { Avatar, BrandMark } from '@/ui/primitives';
 import { Icon, type NombreIcono } from '@/ui/icons';
 import { fechaCorta } from '@/core/fecha';
+import { Campana } from './Campana';
 
 export function AppShell() {
   const { rol, sesion, navegacionVisible, cerrarSesion, dataset } = useApp();
@@ -100,6 +101,7 @@ export function AppShell() {
               <Icon name="sync" size={14} />
               <span className="chip__txt">En línea</span>
             </span>
+            <Campana />
             <div className="cuenta">
               <button className="cuenta__boton" onClick={() => setMenu((v) => !v)} aria-expanded={menu} aria-haspopup="menu">
                 <Avatar nombre={sesion.usuario.nombre} fotoUrl={sesion.usuario.fotoUrl} />

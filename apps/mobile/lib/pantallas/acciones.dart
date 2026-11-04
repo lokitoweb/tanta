@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import 'catalogo.dart';
 import '../core/comprobante.dart';
 
 /// Acciones de registro del PDF §3.2–3.3 que se hacen desde el teléfono o la tablet:
@@ -564,15 +565,19 @@ class _ConteosState extends State<Conteos> {
 /* ------------------------------------------------------ mis pedidos */
 /// A08/A09: historial del cliente con estado y cancelación antes de producir (PED-07).
 class MisPedidos extends StatefulWidget {
-  const MisPedidos({super.key});
+  const MisPedidos({super.key, this.productos = const []});
+  /// Productos activos del catálogo: Repetir solo carga los que siguen a la venta.
+  final List<Map<String, dynamic>> productos;
   @override
   State<MisPedidos> createState() => _MisPedidosState();
 }
 
+const _etiquetaPedido = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
+  'DESPACHADO': 'En camino', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
+const _pagoEntrega = {'EFECTIVO': 'efectivo', 'YAPE': 'Yape', 'PLIN': 'Plin', 'TARJETA': 'tarjeta', 'CREDITO': 'crédito'};
+
 class _MisPedidosState extends State<MisPedidos> {
   List<dynamic>? _lista;
-  static const _etiqueta = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
-    'DESPACHADO': 'En camino', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
 
   Future<void> _cargar() async {
     try { final l = await Api.instancia.misPedidos(); if (mounted) setState(() => _lista = l); } catch (_) { if (mounted) setState(() => _lista = const []); }
@@ -595,36 +600,98 @@ class _MisPedidosState extends State<MisPedidos> {
     final aviso = ScaffoldMessenger.of(context);
     try {
       await Api.instancia.cancelarPedido('${p['codigo']}', motivo);
+      if (mounted) Navigator.of(context).maybePop();
       _cargar();
     } catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
     }
   }
 
+  /// A09: detalle con línea de tiempo, productos, entrega y acciones.
+  Future<void> _detalle(Map<String, dynamic> p) async {
+    List<dynamic> historial = const [];
+    try { historial = await Api.instancia.historialPedido('${p['codigo']}'); } catch (_) {}
+    if (!mounted) return;
+    final items = ((p['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final cancelable = p['estado'] == 'REGISTRADO' || p['estado'] == 'CONFIRMADO';
+    final pasos = p['estado'] == 'CANCELADO' || p['estado'] == 'RECHAZADO'
+        ? ['REGISTRADO', p['estado'] as String]
+        : ['REGISTRADO', 'CONFIRMADO', 'EN_PRODUCCION', 'LISTO', 'DESPACHADO', 'ENTREGADO'];
+    final cuando = {for (final h in historial.cast<Map>()) '${h['estado']}': DateTime.tryParse('${h['fecha']}')?.toLocal()};
+    final actual = pasos.indexOf('${p['estado']}');
+    await showModalBottomSheet<void>(context: context, isScrollControlled: true, builder: (ctx) => DraggableScrollableSheet(
+      expand: false, initialChildSize: 0.75, builder: (_, scroll) => ListView(controller: scroll, padding: const EdgeInsets.all(20), children: [
+        Text('${p['codigo']}', style: Theme.of(ctx).textTheme.titleLarge),
+        Text('Entrega ${p['fecha_entrega']}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' · ${p['hora_entrega']}'} · ${p['tipoEntrega'] == 'DELIVERY' ? 'delivery a ${p['direccion']}' : 'recojo en tienda'}'),
+        Text('Pago contra entrega: ${_pagoEntrega[p['pagoEntrega']] ?? 'efectivo'}'),
+        const SizedBox(height: 16),
+        for (var k = 0; k < pasos.length; k++)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Column(children: [
+              Icon(k <= actual ? Icons.check_circle : Icons.radio_button_unchecked, size: 20,
+                  color: k <= actual ? (pasos[k] == 'CANCELADO' || pasos[k] == 'RECHAZADO' ? Colors.red.shade700 : Colors.green.shade700) : Colors.grey),
+              if (k < pasos.length - 1) Container(width: 2, height: 22, color: k < actual ? Colors.green.shade700 : Colors.grey.shade300),
+            ]),
+            const SizedBox(width: 10),
+            Expanded(child: Text('${_etiquetaPedido[pasos[k]]}${cuando[pasos[k]] == null ? '' : ' · ${cuando[pasos[k]]!.day}/${cuando[pasos[k]]!.month} ${cuando[pasos[k]]!.hour.toString().padLeft(2, '0')}:${cuando[pasos[k]]!.minute.toString().padLeft(2, '0')}'}',
+                style: TextStyle(fontWeight: k == actual ? FontWeight.w700 : FontWeight.w400))),
+          ]),
+        if ('${p['motivo'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Motivo: ${p['motivo']}')),
+        const Divider(height: 28),
+        for (final i in items) ListTile(dense: true, contentPadding: EdgeInsets.zero,
+            title: Text('${i['producto']}'), subtitle: Text('${i['cantidad']} × ${dinero(((i['precio'] as num?) ?? 0).toDouble())}'),
+            trailing: Text(dinero(((i['precio'] as num?) ?? 0).toDouble() * ((i['cantidad'] as num?) ?? 0).toDouble()))),
+        ListTile(dense: true, contentPadding: EdgeInsets.zero, title: const Text('Total', style: TextStyle(fontWeight: FontWeight.w700)),
+            trailing: Text(dinero(((p['total'] as num?) ?? 0).toDouble()), style: const TextStyle(fontWeight: FontWeight.w700))),
+        const SizedBox(height: 12),
+        Row(children: [
+          if (cancelable) Expanded(child: OutlinedButton(onPressed: () => _cancelar(p), child: const Text('Cancelar'))),
+          if (cancelable) const SizedBox(width: 8),
+          Expanded(child: FilledButton.icon(icon: const Icon(Icons.replay), label: const Text('Repetir'), onPressed: () {
+            repetirPedido(p, widget.productos);
+            Navigator.pop(ctx);
+            Navigator.push(context, MaterialPageRoute(builder: (_) => CarritoPantalla(productos: widget.productos)));
+          })),
+        ]),
+      ]),
+    ));
+    _cargar();
+  }
+
+  Widget _lista_(List<Map<String, dynamic>> l, String vacio) => RefreshIndicator(
+    onRefresh: _cargar,
+    child: l.isEmpty
+        ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(vacio))])
+        : ListView.separated(
+            itemCount: l.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) {
+              final p = l[i];
+              return ListTile(
+                title: Text('${p['codigo']} · ${dinero(((p['total'] as num?) ?? 0).toDouble())}'),
+                subtitle: Text('${_etiquetaPedido[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _detalle(p),
+              );
+            },
+          ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final l = (_lista ?? const []).cast<Map<String, dynamic>>();
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mis pedidos')),
-      body: RefreshIndicator(
-        onRefresh: _cargar,
-        child: _lista == null
+    bool en(Map p, List<String> e) => e.contains(p['estado']);
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Mis pedidos'), bottom: const TabBar(tabs: [Tab(text: 'En curso'), Tab(text: 'Entregados'), Tab(text: 'Cancelados')])),
+        body: _lista == null
             ? const Center(child: CircularProgressIndicator())
-            : l.isEmpty
-                ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('Aún no tienes pedidos'))])
-                : ListView.separated(
-                    itemCount: l.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, i) {
-                      final p = l[i];
-                      final cancelable = p['estado'] == 'REGISTRADO' || p['estado'] == 'CONFIRMADO';
-                      return ListTile(
-                        title: Text('${p['codigo']} · ${dinero(((p['total'] as num?) ?? 0).toDouble())}'),
-                        subtitle: Text('${_etiqueta[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'),
-                        trailing: cancelable ? TextButton(onPressed: () => _cancelar(p), child: const Text('Cancelar')) : null,
-                      );
-                    },
-                  ),
+            : TabBarView(children: [
+                _lista_(l.where((p) => en(p, ['REGISTRADO', 'CONFIRMADO', 'EN_PRODUCCION', 'LISTO', 'DESPACHADO'])).toList(), 'No tienes pedidos en curso'),
+                _lista_(l.where((p) => en(p, ['ENTREGADO'])).toList(), 'Aún no tienes pedidos entregados'),
+                _lista_(l.where((p) => en(p, ['CANCELADO', 'RECHAZADO'])).toList(), 'Sin pedidos cancelados'),
+              ]),
       ),
     );
   }

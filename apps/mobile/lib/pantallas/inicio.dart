@@ -11,6 +11,7 @@ import 'operacion.dart';
 import 'ventas.dart';
 import 'catalogo.dart';
 import 'perfil.dart';
+import 'notificaciones.dart';
 
 /// Contenedor principal: el menú se construye a partir de los permisos que
 /// devuelve el servidor. Si un permiso no está, la pestaña no existe.
@@ -106,6 +107,21 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     ];
   }
 
+  /// Un aviso abre su pantalla: la pestaña o la acción relacionada (A11).
+  void _abrirRuta(String ruta) {
+    final api = Api.instancia;
+    Widget? pantalla;
+    if (ruta.startsWith('/pedidos/') && api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) pantalla = MisPedidos(productos: _productos);
+    if (ruta.startsWith('/almacen/requisiciones')) pantalla = const Requisiciones();
+    if (ruta.startsWith('/almacen/conteos')) pantalla = Conteos(datos: widget.datos);
+    if (pantalla != null) { Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla!)); return; }
+    if (ruta.startsWith('/ventas/pedidos')) _irA('Pedidos');
+    if (ruta.startsWith('/almacen')) _irA('Almacén');
+    if (ruta.startsWith('/ventas/cobranza')) _irA('Cobranza');
+  }
+
+  List<Map<String, dynamic>> get _productos => (widget.datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>();
+
   /// Accesos rápidos del panel: salta a la pestaña por su título.
   void _irA(String titulo) {
     final i = _pestanas.indexWhere((p) => p.titulo == titulo);
@@ -134,6 +150,7 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
                 ],
               ),
             ),
+            Campana(onAbrir: _abrirRuta),
             Semantics(
               button: true,
               label: 'Mi perfil',
@@ -363,7 +380,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('produccion.planificar')) accion('Nueva OP', Icons.add_task_outlined, NuevaOrden(datos: datos)),
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
-      if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, const MisPedidos()),
+      if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, MisPedidos(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>())),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mi estado de cuenta', Icons.account_balance_wallet_outlined, const EstadoCuenta()),
       if (api.puede('pedidos.ver')) chip('Pedidos', Icons.receipt_long_outlined),
       if (api.puede('cobranza.ver')) chip('Cobranza', Icons.account_balance_wallet_outlined),

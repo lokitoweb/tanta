@@ -404,9 +404,16 @@ class Api {
   Future<List<dynamic>> misPedidos() async => await _get('/pedidos') as List<dynamic>;
 
   Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, required String fechaEntrega, String hora = '', String observaciones = '',
-          String tipoEntrega = 'RECOJO', String direccion = ''}) async =>
+          String tipoEntrega = 'RECOJO', String direccion = '', String pagoEntrega = 'EFECTIVO'}) async =>
       await _post('/pedidos', {'items': items, 'fechaEntrega': fechaEntrega, 'horaEntrega': hora, 'observaciones': observaciones,
-        'tipoEntrega': tipoEntrega, 'direccion': direccion}, idempotente: true) as Map<String, dynamic>;
+        'tipoEntrega': tipoEntrega, 'direccion': direccion, 'pagoEntrega': pagoEntrega}, idempotente: true) as Map<String, dynamic>;
+
+  /// A09: línea de tiempo del pedido (solo los propios para el cliente).
+  Future<List<dynamic>> historialPedido(String codigo) async => await _get('/pedidos/$codigo/historial') as List<dynamic>;
+
+  /// A11: centro de notificaciones.
+  Future<Map<String, dynamic>> notificaciones() async => await _get('/notificaciones') as Map<String, dynamic>;
+  Future<void> marcarLeidas(List<int>? ids) async => await _post('/notificaciones/leidas', {if (ids != null) 'ids': ids});
 
   Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;
 

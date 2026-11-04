@@ -4,6 +4,7 @@ import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
+import { avisar } from './notificaciones.js';
 
 /**
  * Flujo operativo del PDF (Fig. 2): el cliente registra su pedido → Producción consolida y
@@ -63,6 +64,8 @@ export async function rutasFlujo(app: FastifyInstance) {
     // PED-03: recojo en tienda o delivery (con dirección).
     tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).default('RECOJO'),
     direccion: z.string().trim().max(200).default(''),
+    // Sin pasarela: el cliente paga al recibir; indica cómo para que el vendedor lleve vuelto o POS.
+    pagoEntrega: z.enum(['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA', 'CREDITO']).default('EFECTIVO'),
   }).refine((d) => d.tipoEntrega !== 'DELIVERY' || d.direccion.length >= 5, { message: 'Indica la dirección de entrega.', path: ['direccion'] });
 
   app.post('/pedidos', { preHandler: autenticar }, async (req, reply) => {
@@ -79,8 +82,8 @@ export async function rutasFlujo(app: FastifyInstance) {
 
     try {
       const r = await tx(async (c) => {
-        const cli = (await c.query<{ nombre: string; estado: string; limite_credito: string; deuda: string }>(
-          `SELECT c.nombre, c.estado, c.limite_credito,
+        const cli = (await c.query<{ nombre: string; estado: string; limite_credito: string; deuda: string; condicion_pago: string }>(
+          `SELECT c.nombre, c.estado, c.limite_credito, c.condicion_pago,
                   coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) deuda
            FROM core.cliente c WHERE c.id = $1`, [clienteId])).rows[0];
         if (!cli || cli.estado !== 'ACTIVO') throw Object.assign(new Error('El cliente no existe o está inactivo.'), { status: 422 });
@@ -97,18 +100,20 @@ export async function rutasFlujo(app: FastifyInstance) {
           const lento = prods.rows.find((x) => Number(x.anticipacion_horas) === horas)!.nombre;
           throw Object.assign(new Error(`${lento} se pide con ${horas} h de anticipación: elige una entrega posterior.`), { status: 422 });
         }
+        if (d.pagoEntrega === 'CREDITO' && cli.condicion_pago !== 'CREDITO') throw Object.assign(new Error('Tu cuenta compra al contado: elige cómo pagarás al recibir.'), { status: 422 });
         // PED-04 / RN-35: con línea de crédito, el pedido no puede superar el saldo disponible.
-        if (num(cli.limite_credito) > 0 && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
+        // Solo si paga al crédito: un pedido contra entrega no consume línea.
+        if (d.pagoEntrega === 'CREDITO' && num(cli.limite_credito) > 0 && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
           throw Object.assign(new Error(`Supera la línea de crédito: debe S/ ${num(cli.deuda).toFixed(2)} de S/ ${num(cli.limite_credito).toFixed(2)}.`), { status: 409 });
         }
         // PED-09: el pedido que registra el vendedor ya queda confirmado; el del cliente espera confirmación (PED-08).
         const estadoInicial = yo?.cliente_id ? 'REGISTRADO' : 'CONFIRMADO';
         const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
         const ped = (await c.query<{ id: string }>(
-          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en)
-           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END) RETURNING id`,
+          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en, pago_entrega)
+           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END, $13) RETURNING id`,
           [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), d.fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
-            estadoInicial, d.tipoEntrega, d.direccion])).rows[0];
+            estadoInicial, d.tipoEntrega, d.direccion, d.pagoEntrega])).rows[0];
         for (const i of d.items) {
           const pr = mapa.get(i.productoId)!;
           await c.query('INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv) VALUES ($1,$2,$3,$4,$5)',
@@ -133,7 +138,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     const filas = await q<Record<string, string>>(`
       SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
-             p.tipo_entrega AS "tipoEntrega", p.direccion, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
+             p.tipo_entrega AS "tipoEntrega", p.direccion, p.pago_entrega AS "pagoEntrega", p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada))
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
       FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
@@ -291,6 +296,7 @@ export async function rutasFlujo(app: FastifyInstance) {
       if (d.pedidoId) await c.query("UPDATE core.pedido SET estado = 'EN_PRODUCCION' WHERE id = $1 AND estado = 'CONFIRMADO'", [d.pedidoId]);
       return cod;
     });
+    avisar([{ permiso: 'requisiciones.atender' }], { tipo: 'requisicion', titulo: `Requisición de ${op}`, cuerpo: `Producción pide insumos para ${d.cantidad} unidades${req2.some((x) => x.falta > 0) ? ' · hay insumos que faltan' : ''}`, ruta: '/almacen/requisiciones' });
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'OP_CREADA', entidad: 'orden_produccion', entidadId: op, detalle: d, ip: req.ip });
     // La OP se crea igual aunque falten insumos: Producción decide; la alerta queda en la respuesta.
     return reply.code(201).send({ codigo: op, estado: 'PENDIENTE', calculo: { lotes: calc.lotes, unidadesObtenidas: calc.unidadesObtenidas, masaKg: calc.masaKg, costoInsumos: calc.costoInsumos },

@@ -57,13 +57,13 @@
 <body>
 <main>
   <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
-  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: seis fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: siete fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
 
   <div class="kpis">
-    <div class="kpi"><b>6</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>7</b><span>migraciones nuevas (024 a 030)</span></div>
-    <div class="kpi"><b>72</b><span>pruebas automáticas en verde</span></div>
-    <div class="kpi"><b>29 de 38</b><span>casos de prueba del Excel verificados</span></div>
+    <div class="kpi"><b>7</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>8</b><span>migraciones nuevas (024 a 031)</span></div>
+    <div class="kpi"><b>76</b><span>pruebas automáticas en verde</span></div>
+    <div class="kpi"><b>30 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
   </div>
 
@@ -71,7 +71,7 @@
   <p>Cada fase siguió el mismo ciclo: migración aditiva de base de datos, reglas en el servidor (la web y la app nunca deciden solas), pantallas web, pantallas de la app, pruebas con las cifras del Excel, prueba en el navegador con cada rol involucrado y subida a GitHub solo con el CI en verde.</p>
   <p>Nada quedó fijo en el código: tasas, topes, series, días de crédito, anticipación de pedidos y mano de obra son parámetros que el Administrador cambia desde la web. Todo cambio importante queda en la auditoría.</p>
 
-  <h2>Las seis fases</h2>
+  <h2>Las fases</h2>
 
   <section class="fase">
     <header><h3>Fase 1 · Motor de costos</h3><span class="meta">RN-01 a RN-17 · commit 79f6ec0</span></header>
@@ -145,6 +145,20 @@
     <p class="meta">Casos verificados: CP-03 y la matriz completa.</p>
   </section>
 
+  <section class="fase">
+    <header><h3>Fase 7 · Compra del cliente en la app y avisos por área</h3><span class="meta">A04–A11 · PED-01 a PED-08 · VEN-03</span></header>
+    <ul>
+      <li>Catálogo con búsqueda y categorías; detalle del pan con selector de cantidad (A05).</li>
+      <li>Carrito con cantidades editables, quitar productos, subtotal, IGV y total (A06).</li>
+      <li>Confirmación con fecha y hora, recojo o delivery, observaciones y <b>pago contra entrega</b>: el cliente elige efectivo, Yape, Plin o tarjeta (POS). No hay pasarela de pago; el vendedor ve cómo pagará al despachar.</li>
+      <li>Mis pedidos con pestañas En curso, Entregados y Cancelados; línea de tiempo con la fecha de cada estado; Repetir carga el carrito a precios de hoy (A08, A09).</li>
+      <li>Avisos por área definidos por permiso: pedido nuevo → Vendedor; confirmado → Producción; listo → Vendedor; requisición → Almacén; descuento y conteo → Gerente; venta → Gerente (<code>alertas.ventas</code>); stock mínimo → Almacén y Gerente. El cliente recibe cada cambio de su pedido.</li>
+      <li>Centro de notificaciones en la web y en la app (A11): contador de no leídas, marcar como leído y cada aviso abre su pantalla. Los avisos se guardan aunque el celular no tenga push.</li>
+      <li>Un pedido contra entrega no consume la línea de crédito; solo el que se paga al crédito.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-10 y el aviso de CP-36 en menos de 30 s.</p>
+  </section>
+
   <h2>Matriz de permisos aplicada</h2>
   <p>C crear · L consultar · M modificar · A anular · P aprobar. El servidor valida cada permiso; la web y la app solo muestran lo que el rol puede usar.</p>
   <div class="tabla"><table>
@@ -182,7 +196,7 @@
       <tr><td>CP-05, CP-06</td><td>Costo por unidad base y conversión de unidades</td><td><span class="et av">Implementado en el motor; sin caso dedicado</span></td></tr>
       <tr><td>CP-07, CP-08</td><td>Receta: peso, % panadero y costo del lote</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-09</td><td>Bloqueo de crédito al pedir</td><td><span class="et ok">Prueba automática</span></td></tr>
-      <tr><td>CP-10</td><td>Seguimiento de estados en tiempo real</td><td><span class="et av">Estados probados; tiempo real no medido</span></td></tr>
+      <tr><td>CP-10</td><td>Seguimiento de estados en tiempo real</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-11</td><td>Cancelación del cliente antes de producir</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-12 a CP-18</td><td>Lotes, consumo, requisición, cierre, merma y costo real</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-19</td><td>Costo promedio ponderado</td><td><span class="et ok">Prueba automática</span></td></tr>
@@ -196,7 +210,7 @@
       <tr><td>CP-33</td><td>Dashboard coincide con el detalle de ventas</td><td><span class="et av">Sin prueba automática</span></td></tr>
       <tr><td>CP-34</td><td>Antigüedad de deuda (5, 20 y 40 días)</td><td><span class="et ok">Prueba automática</span></td></tr>
       <tr><td>CP-35</td><td>Varianza de producción</td><td><span class="et ok">Prueba automática</span></td></tr>
-      <tr><td>CP-36</td><td>Notificación push en menos de 30 s</td><td><span class="et av">Sin medición</span></td></tr>
+      <tr><td>CP-36</td><td>Notificación push en menos de 30 s</td><td><span class="et av">Aviso en la app medido (menos de 30 s); llegada al teléfono no verificada</span></td></tr>
       <tr><td>CP-37</td><td>Envío sin conexión sin duplicar</td><td><span class="et av">Cola con idempotencia para cobros; cierre de producción no probado</span></td></tr>
       <tr><td>CP-38</td><td>Restauración de respaldo</td><td><span class="et no">Fuera de alcance (infraestructura)</span></td></tr>
     </tbody>
