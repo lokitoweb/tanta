@@ -249,6 +249,7 @@ async function main() {
       ['factor_beneficios', '0', 'porcentaje', 'Beneficios y aportes sobre el sueldo (0.45 = 45 %)'],
       ['horas_mes', '192', 'numero', 'Horas trabajadas al mes por persona'],
       ['tolerancia_varianza', '0.03', 'porcentaje', 'Tolerancia del consumo real frente al teórico'],
+      ['dias_alerta_vencimiento', '7', 'numero', 'Días antes del vencimiento de un lote de insumo para avisar a Almacén y Gerencia'],
     ]) {
       await c.query('INSERT INTO core.parametro (clave,valor,tipo,descripcion) VALUES ($1,$2,$3,$4)', [clave, valor, tipo, desc]);
     }
@@ -539,6 +540,8 @@ async function main() {
     await c.query(`SELECT setval('core.venta_correlativo_seq', GREATEST((SELECT coalesce(max(substring(codigo from '(\\d+)$')::bigint), 0) FROM core.venta), 1)),
                           setval('core.pedido_correlativo_seq', GREATEST((SELECT coalesce(max(substring(codigo from '(\\d+)$')::bigint), 0) FROM core.pedido), 1)),
                           setval('core.op_correlativo_seq', GREATEST((SELECT coalesce(max(substring(codigo from '(\\d+)$')::bigint), 0) FROM core.orden_produccion), 1))`);
+    // AIN-11: el stock de ejemplo entra como lote INICIAL (sin vencimiento) donde no vino por movimientos.
+    await c.query('SELECT core.cuadrar_lotes()');
     await c.query('COMMIT');
 
     const resumen = await c.query(`

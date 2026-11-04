@@ -96,7 +96,8 @@ export async function rutasAlmacen(app: FastifyInstance) {
     proveedorId: z.string().uuid(),
     docTipo: z.enum(['FACTURA', 'BOLETA', 'GUIA']),
     docNumero: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{3,20}$/, 'Número de documento inválido'),
-    items: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000), precio: z.number().positive().max(100_000) }))
+    items: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().positive().max(1_000_000), precio: z.number().positive().max(100_000),
+      lote: z.string().trim().toUpperCase().max(40).default(''), venceEn: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).default('') }))
       .min(1).max(100).refine((l) => new Set(l.map((i) => i.insumoId)).size === l.length, 'Un insumo aparece dos veces'),
   });
 
@@ -118,6 +119,8 @@ export async function rutasAlmacen(app: FastifyInstance) {
     const p = Compra.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Compra inválida.'));
     const d = p.data;
+    const hoy = new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+    if (d.items.some((i) => i.venceEn && i.venceEn < hoy)) return reply.code(422).send(error(422, 'LOTE_VENCIDO', 'Un lote ya está vencido: no se recibe.'));
     const clave = req.headers['idempotency-key'] as string | undefined;
     if (clave) {
       const previa = await uno<{ codigo: string; total: string }>('SELECT codigo, total FROM core.compra WHERE idempotency_key = $1', [clave]);
@@ -145,10 +148,10 @@ export async function rutasAlmacen(app: FastifyInstance) {
           const nuevoCpp = (saldo * cpp + it.cantidad * it.precio) / (saldo + it.cantidad);
           const nuevoSaldo = num(ins.stock) + it.cantidad;
           await c.query(`INSERT INTO core.movimiento_inventario
-              (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por)
-            VALUES ('COMPRA','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por,lote,vence_en)
+            VALUES ('COMPRA','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULLIF($11,'')::date)`,
             [it.insumoId, documento, it.cantidad.toFixed(6), it.precio.toFixed(6), (it.cantidad * it.precio).toFixed(4), nuevoSaldo.toFixed(6),
-              (nuevoSaldo * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), req.usuario!.id]);
+              (nuevoSaldo * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), req.usuario!.id, it.lote, it.venceEn]);
           await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3', [nuevoSaldo.toFixed(6), nuevoCpp.toFixed(6), it.insumoId]);
           await c.query('INSERT INTO core.compra_detalle (compra_id, insumo_id, cantidad, precio, cpp_anterior, cpp_nuevo) VALUES ($1,$2,$3,$4,$5,$6)',
             [compra.id, it.insumoId, it.cantidad.toFixed(6), it.precio.toFixed(6), cpp.toFixed(6), nuevoCpp.toFixed(6)]);
@@ -340,4 +343,40 @@ export async function rutasAlmacenes(app: FastifyInstance) {
     return q(`SELECT DISTINCT u.id, u.nombre FROM core.usuario u JOIN core.usuario_rol ur ON ur.usuario_id = u.id
       JOIN core.rol_permiso rp ON rp.rol_id = ur.rol_id WHERE rp.permiso_id = 'ventas.registrar' AND u.estado = 'ACTIVO' AND u.cliente_id IS NULL ORDER BY u.nombre`);
   });
+}
+
+/** AIN-11: lotes de insumos con saldo, del que vence antes al que vence después (orden de consumo FEFO). */
+export async function rutasLotes(app: FastifyInstance) {
+  app.get('/lotes', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'inventario.ver')) return;
+    const p = z.object({ insumoId: z.string().uuid().optional(), dias: z.coerce.number().int().min(0).max(365).optional() }).safeParse(req.query);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Filtro inválido.'));
+    const filas = await q<Record<string, string>>(`
+      SELECT l.id, i.codigo, i.nombre insumo, i.unidad, l.lote, l.vence_en::text vence, l.cantidad_inicial, l.saldo, l.creado_en::date::text ingreso,
+             CASE WHEN l.vence_en IS NULL THEN NULL ELSE l.vence_en - (now() AT TIME ZONE 'America/Lima')::date END dias
+      FROM core.lote_insumo l JOIN core.insumo i ON i.id = l.insumo_id
+      WHERE l.saldo > 0 AND (i.activo OR $1::uuid IS NOT NULL) AND ($1::uuid IS NULL OR l.insumo_id = $1) AND ($2::int IS NULL OR l.vence_en <= (now() AT TIME ZONE 'America/Lima')::date + $2::int)
+      ORDER BY l.vence_en NULLS LAST, l.id LIMIT 500`, [p.data.insumoId ?? null, p.data.dias ?? null]);
+    return filas.map((f) => {
+      const dias = f.dias === null ? null : num(f.dias);
+      return { id: num(f.id), codigo: f.codigo, insumo: f.insumo, unidad: f.unidad, lote: f.lote, vence: f.vence, ingreso: f.ingreso,
+        cantidadInicial: num(f.cantidad_inicial), saldo: num(f.saldo), dias, estado: dias === null ? 'SIN_VENCIMIENTO' : dias < 0 ? 'VENCIDO' : 'VIGENTE' };
+    });
+  });
+}
+
+/** AIN-11: avisa una vez por lote cuando entra en la ventana de vencimiento (parámetro dias_alerta_vencimiento). */
+export async function despacharAlertasVencimiento(): Promise<number> {
+  const lotes = await tx(async (c) => (await c.query<{ insumo: string; unidad: string; lote: string; vence: string; saldo: string; dias: number }>(`
+    UPDATE core.lote_insumo l SET alerta_en = now() FROM core.insumo i
+    WHERE l.id IN (SELECT id FROM core.lote_insumo WHERE alerta_en IS NULL AND saldo > 0 AND vence_en IS NOT NULL
+                     AND vence_en <= (now() AT TIME ZONE 'America/Lima')::date + coalesce((SELECT valor::int FROM core.parametro WHERE clave = 'dias_alerta_vencimiento'), 7)
+                   ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED) AND i.id = l.insumo_id AND i.activo
+    RETURNING i.nombre insumo, i.unidad, l.lote, l.vence_en::text vence, l.saldo, (l.vence_en - (now() AT TIME ZONE 'America/Lima')::date) dias`)).rows);
+  for (const l of lotes) {
+    const cuando = l.dias < 0 ? `venció hace ${-l.dias} día(s)` : l.dias === 0 ? 'vence hoy' : `vence en ${l.dias} día(s)`;
+    await notificar([{ permiso: 'alertas.stock' }], { tipo: 'stock', titulo: 'Lote por vencer', ruta: '/almacen',
+      cuerpo: `${l.insumo} · lote ${l.lote}: ${cuando} (${l.vence}); quedan ${num(l.saldo).toFixed(2)} ${l.unidad.toLowerCase()}` });
+  }
+  return lotes.length;
 }

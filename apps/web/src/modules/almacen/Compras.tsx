@@ -8,7 +8,7 @@ import { Boton, Encabezado, Tarjeta, Vacio } from '@/ui/primitives';
 interface Proveedor { id: string; razonSocial: string; ruc: string; estado: string }
 interface Compra { codigo: string; fecha: string; proveedor: string; documento: string; total: number; registradoPor: string;
   items: Array<{ insumo: string; unidad: string; cantidad: number; precio: number; cppAnterior: number; cppNuevo: number }> }
-interface Linea { insumoId: string; cantidad: string; precio: string }
+interface Linea { insumoId: string; cantidad: string; precio: string; lote: string; venceEn: string }
 
 /** Registro de compras (M05): proveedor, documento y varias líneas; muestra el nuevo costo promedio antes de guardar. */
 export function Compras() {
@@ -25,7 +25,7 @@ export function Compras() {
   useEffect(() => { void cargar(); }, []);
 
   const insumos = dataset.insumos;
-  const nueva = () => setForm({ proveedorId: proveedores[0]?.id ?? '', docTipo: 'FACTURA', docNumero: '', lineas: [{ insumoId: insumos[0]?.id ?? '', cantidad: '', precio: '' }] });
+  const nueva = () => setForm({ proveedorId: proveedores[0]?.id ?? '', docTipo: 'FACTURA', docNumero: '', lineas: [{ insumoId: insumos[0]?.id ?? '', cantidad: '', precio: '', lote: '', venceEn: '' }] });
   const linea = (i: number, cambio: Partial<Linea>) => form && setForm({ ...form, lineas: form.lineas.map((l, j) => (j === i ? { ...l, ...cambio } : l)) });
   const total = form?.lineas.reduce((s, l) => s + Number(l.cantidad) * Number(l.precio), 0) ?? 0;
   const validas = form ? form.lineas.every((l) => l.insumoId && Number(l.cantidad) > 0 && Number(l.precio) > 0)
@@ -38,7 +38,7 @@ export function Compras() {
     try {
       const r = await api<{ codigo: string; total: number }>('/compras', { method: 'POST', conIdempotencia: true, body: {
         proveedorId: form.proveedorId, docTipo: form.docTipo, docNumero: form.docNumero.trim(),
-        items: form.lineas.map((l) => ({ insumoId: l.insumoId, cantidad: Number(l.cantidad), precio: Number(l.precio) })) } });
+        items: form.lineas.map((l) => ({ insumoId: l.insumoId, cantidad: Number(l.cantidad), precio: Number(l.precio), lote: l.lote.trim(), venceEn: l.venceEn })) } });
       setForm(null);
       await Promise.all([cargar(), refrescarDatos()]);
       setAviso({ tono: 'ok', texto: `Compra ${r.codigo} registrada por ${money(r.total)}: stock y costo promedio actualizados.` });
@@ -67,7 +67,7 @@ export function Compras() {
               <input className="field__input" maxLength={20} placeholder="F001-123" value={form.docNumero} onChange={(e) => setForm({ ...form, docNumero: e.target.value.toUpperCase() })} /></label>
           </div>
           <table className="table table--compacta">
-            <thead><tr><th>Insumo</th><th className="t-right">Cantidad</th><th className="t-right">Precio unit.</th><th className="t-right">Costo prom. actual → nuevo</th><th /></tr></thead>
+            <thead><tr><th>Insumo</th><th className="t-right">Cantidad</th><th className="t-right">Precio unit.</th><th>Lote</th><th>Vence</th><th className="t-right">Costo prom. actual → nuevo</th><th /></tr></thead>
             <tbody>{form.lineas.map((l, i) => {
               const ins = insumos.find((x) => x.id === l.insumoId);
               const c = Number(l.cantidad), p = Number(l.precio), s = Math.max(ins?.stock ?? 0, 0);
@@ -78,6 +78,8 @@ export function Compras() {
                     {insumos.map((x) => <option key={x.id} value={x.id}>{x.nombre} ({x.unidad})</option>)}</select></td>
                   <td><input className="field__input t-right" type="number" min="0" step="0.001" value={l.cantidad} onChange={(e) => linea(i, { cantidad: e.target.value })} /></td>
                   <td><input className="field__input t-right" type="number" min="0" step="0.01" value={l.precio} onChange={(e) => linea(i, { precio: e.target.value })} /></td>
+                  <td><input className="field__input" maxLength={40} placeholder="Opcional" value={l.lote} onChange={(e) => linea(i, { lote: e.target.value.toUpperCase() })} /></td>
+                  <td><input className="field__input" type="date" min={new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10)} value={l.venceEn} onChange={(e) => linea(i, { venceEn: e.target.value })} /></td>
                   <td className="t-right">{ins ? money(ins.cpp) : '—'}{nuevoCpp !== null && <> → <strong>{money(nuevoCpp)}</strong></>}</td>
                   <td>{form.lineas.length > 1 && <Boton onClick={() => setForm({ ...form, lineas: form.lineas.filter((_, j) => j !== i) })}>Quitar</Boton>}</td>
                 </tr>
@@ -86,7 +88,7 @@ export function Compras() {
           </table>
           <div className="form__acciones">
             {!validas && <span className="field__aviso">Cantidad y precio mayores a cero, sin insumos repetidos</span>}
-            <Boton icono="plus" onClick={() => setForm({ ...form, lineas: [...form.lineas, { insumoId: insumos.find((x) => !form.lineas.some((l) => l.insumoId === x.id))?.id ?? '', cantidad: '', precio: '' }] })}>Agregar insumo</Boton>
+            <Boton icono="plus" onClick={() => setForm({ ...form, lineas: [...form.lineas, { insumoId: insumos.find((x) => !form.lineas.some((l) => l.insumoId === x.id))?.id ?? '', cantidad: '', precio: '', lote: '', venceEn: '' }] })}>Agregar insumo</Boton>
           </div>
         </>)}
       </Dialogo>

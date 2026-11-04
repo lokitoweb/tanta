@@ -57,12 +57,12 @@
 <body>
 <main>
   <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
-  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: ocho fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: nueve fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
 
   <div class="kpis">
-    <div class="kpi"><b>8</b><span>fases entregadas</span></div>
-    <div class="kpi"><b>9</b><span>migraciones nuevas (024 a 032)</span></div>
-    <div class="kpi"><b>80</b><span>pruebas automáticas en verde</span></div>
+    <div class="kpi"><b>9</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>10</b><span>migraciones nuevas (024 a 033)</span></div>
+    <div class="kpi"><b>83</b><span>pruebas automáticas en verde</span></div>
     <div class="kpi"><b>30 de 38</b><span>casos de prueba del Excel verificados</span></div>
     <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
   </div>
@@ -170,6 +170,17 @@
     </ul>
   </section>
 
+  <section class="fase">
+    <header><h3>Fase 9 · Lotes y fechas de vencimiento de insumos</h3><span class="meta">AIN-11 (ampliación del Excel)</span></header>
+    <ul>
+      <li>Cada línea de compra entra como un lote con número y vencimiento (opcionales; sin número se genera uno). Un lote ya vencido no se recibe.</li>
+      <li>Toda salida de insumo (baja, requisición, producción, ajuste de conteo) consume primero el lote que vence antes (FEFO). Lo aplica la base al registrar el movimiento, así ninguna operación lo salta.</li>
+      <li>El stock anterior quedó como lote INICIAL; los lotes siempre suman el stock del insumo.</li>
+      <li>Alerta única por lote cuando entra en la ventana de vencimiento (parámetro <code>dias_alerta_vencimiento</code>, 7 días por defecto), para Almacén y Gerente.</li>
+      <li>Tarjeta "Lotes por vencer" en Almacén; lote y vencimiento en el kárdex; lote y vencimiento al comprar en la web y en la app.</li>
+    </ul>
+  </section>
+
   <h2>Matriz de permisos aplicada</h2>
   <p>C crear · L consultar · M modificar · A anular · P aprobar. El servidor valida cada permiso; la web y la app solo muestran lo que el rol puede usar.</p>
   <div class="tabla"><table>
@@ -238,7 +249,6 @@
 
   <h2>Pendiente o fuera de alcance</h2>
   <ul>
-    <li><b>Lotes y fechas de vencimiento de insumos</b> (AIN-11): el Excel lo marca como ampliación.</li>
     <li><b>Respaldo y restauración</b> (fila 23 y CP-38): corresponde a la infraestructura de despliegue.</li>
   </ul>
 

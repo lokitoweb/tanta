@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
@@ -90,6 +90,8 @@ export function Almacen() {
         />
       </Tarjeta>
 
+      <LotesPorVencer />
+
       {registrar && (
         <RegistrarMovimiento insumos={dataset.insumos} onCerrar={() => setRegistrar(false)}
           onListo={async () => { setRegistrar(false); await refrescarDatos(); }} />
@@ -177,4 +179,31 @@ function RegistrarMovimiento({ insumos, onCerrar, onListo }: { insumos: Insumo[]
 
 function IconoAlerta() {
   return <span className="aviso__icono">!</span>;
+}
+
+interface Lote { id: number; insumo: string; unidad: string; lote: string; vence: string | null; saldo: number; dias: number | null; estado: string }
+
+/** AIN-11: lotes con saldo que vencen en los próximos 30 días (o ya vencieron), en orden de consumo FEFO. */
+function LotesPorVencer() {
+  const { dataset } = useApp();
+  const [lotes, setLotes] = useState<Lote[] | null>(null);
+  useEffect(() => { api<Lote[]>('/lotes?dias=30').then(setLotes).catch(() => setLotes([])); }, [dataset]);
+  if (!lotes?.length) return null;
+  return (
+    <Tarjeta padding="none">
+      <div className="card__head card__head--padded"><div>
+        <h3 className="card__title">Lotes por vencer</h3>
+        <p className="card__sub">Próximos 30 días · las salidas consumen primero el lote que vence antes</p>
+      </div></div>
+      <div className="table-wrap"><table className="table table--compacta">
+        <thead><tr><th>Insumo</th><th>Lote</th><th>Vence</th><th className="t-right">Saldo</th><th>Estado</th></tr></thead>
+        <tbody>{lotes.map((l) => (
+          <tr key={l.id}><td>{l.insumo}</td><td className="mono">{l.lote}</td><td>{l.vence}</td>
+            <td className="t-right">{num2(l.saldo)} {l.unidad.toLowerCase()}</td>
+            <td>{l.estado === 'VENCIDO' ? <Insignia tono="danger" punto>Vencido hace {-(l.dias ?? 0)} d</Insignia>
+              : <Insignia tono={(l.dias ?? 99) <= 7 ? 'warn' : 'neutral'} punto>{l.dias === 0 ? 'Vence hoy' : `En ${l.dias} d`}</Insignia>}</td></tr>
+        ))}</tbody>
+      </table></div>
+    </Tarjeta>
+  );
 }

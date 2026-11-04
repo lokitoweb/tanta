@@ -386,6 +386,8 @@ class _LineaCompra {
   String? insumoId;
   final cantidad = TextEditingController();
   final precio = TextEditingController();
+  final lote = TextEditingController();
+  DateTime? vence;
   double get c => double.tryParse(cantidad.text.replaceAll(',', '.')) ?? 0;
   double get p => double.tryParse(precio.text.replaceAll(',', '.')) ?? 0;
 }
@@ -418,7 +420,8 @@ class _NuevaCompraState extends State<NuevaCompra> {
     final nav = Navigator.of(context);
     try {
       final r = await Api.instancia.registrarCompra(proveedorId: _proveedor!, docTipo: _docTipo, docNumero: _docNumero.text.trim().toUpperCase(),
-          items: [for (final l in _lineas) {'insumoId': l.insumoId, 'cantidad': l.c, 'precio': l.p}]);
+          items: [for (final l in _lineas) {'insumoId': l.insumoId, 'cantidad': l.c, 'precio': l.p, 'lote': l.lote.text.trim().toUpperCase(),
+            'venceEn': l.vence == null ? '' : l.vence!.toIso8601String().substring(0, 10)}]);
       aviso.showSnackBar(SnackBar(content: Text('Compra ${r['codigo']} registrada por ${dinero(((r['total'] as num?) ?? 0).toDouble())}')));
       nav.pop(true);
     } catch (e) {
@@ -469,6 +472,21 @@ class _NuevaCompraState extends State<NuevaCompra> {
               Expanded(child: TextField(controller: _lineas[i].cantidad, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad'))),
               const SizedBox(width: 12),
               Expanded(child: TextField(controller: _lineas[i].precio, onChanged: (_) => setState(() {}), keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio unit. (S/)'))),
+            ]),
+            // AIN-11: lote y vencimiento (opcionales); las salidas consumen primero lo que vence antes.
+            Row(children: [
+              Expanded(child: TextField(controller: _lineas[i].lote, maxLength: 40, textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(labelText: 'Lote (opcional)', counterText: ''))),
+              const SizedBox(width: 12),
+              Expanded(child: OutlinedButton.icon(
+                icon: const Icon(Icons.event_outlined),
+                label: Text(_lineas[i].vence == null ? 'Vence (opcional)' : 'Vence ${_lineas[i].vence!.day}/${_lineas[i].vence!.month}/${_lineas[i].vence!.year}'),
+                onPressed: () async {
+                  final hoy = DateTime.now();
+                  final d = await showDatePicker(context: context, helpText: 'Fecha de vencimiento', initialDate: hoy.add(const Duration(days: 30)), firstDate: hoy, lastDate: hoy.add(const Duration(days: 1095)));
+                  if (d != null) setState(() => _lineas[i].vence = d);
+                },
+              )),
             ]),
           ]),
         )),
