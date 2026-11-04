@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementación INF-TEC-001</title>
+<style>
+  :root {
+    --fondo: #f7f4ef; --tarjeta: #ffffff; --texto: #2a211b; --suave: #6e6259; --borde: #e4ddd3;
+    --acento: #3b2a1e; --ok: #1f7a4d; --ok-fondo: #e3f3ea; --aviso: #8a5a00; --aviso-fondo: #fbf0d9;
+    --no: #a23a2a; --no-fondo: #f8e3df; --codigo: #f1ece4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fondo: #17120e; --tarjeta: #211a15; --texto: #f1e9df; --suave: #b3a597; --borde: #3a2f27;
+      --acento: #e8c9a2; --ok: #7fd3a5; --ok-fondo: #1d3328; --aviso: #f0c46c; --aviso-fondo: #3a2e15;
+      --no: #f29c8c; --no-fondo: #3d211c; --codigo: #2b231d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --fondo: #17120e; --tarjeta: #211a15; --texto: #f1e9df; --suave: #b3a597; --borde: #3a2f27;
+    --acento: #e8c9a2; --ok: #7fd3a5; --ok-fondo: #1d3328; --aviso: #f0c46c; --aviso-fondo: #3a2e15;
+    --no: #f29c8c; --no-fondo: #3d211c; --codigo: #2b231d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.2; margin: 0 0 8px; color: var(--acento); }
+  h2 { font-size: 1.35rem; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--borde); }
+  h3 { font-size: 1.08rem; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .bajada { color: var(--suave); max-width: 70ch; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 24px 0; }
+  .kpi { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 14px 16px; }
+  .kpi b { display: block; font-size: 1.6rem; color: var(--acento); }
+  .kpi span { color: var(--suave); font-size: .875rem; }
+  .fase { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 18px 20px; margin: 14px 0; }
+  .fase header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; margin-bottom: 8px; }
+  .fase ul { margin: 6px 0 10px; padding-left: 20px; }
+  .fase li { margin: 3px 0; }
+  .meta { color: var(--suave); font-size: .85rem; }
+  code { background: var(--codigo); padding: 1px 5px; border-radius: 4px; font-size: .88em; }
+  .tabla { overflow-x: auto; border: 1px solid var(--borde); border-radius: 12px; background: var(--tarjeta); margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--borde); text-align: left; vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--suave); background: var(--codigo); }
+  tr:last-child td { border-bottom: 0; }
+  .et { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .78rem; font-weight: 600; white-space: nowrap; }
+  .ok { background: var(--ok-fondo); color: var(--ok); }
+  .av { background: var(--aviso-fondo); color: var(--aviso); }
+  .no { background: var(--no-fondo); color: var(--no); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  pre { background: var(--codigo); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: .85rem; }
+  footer { margin-top: 48px; color: var(--suave); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Panadería Tanta · Implementación del informe técnico INF-TEC-001</h1>
+  <p class="bajada">Qué se construyó para alinear el sistema al Excel <em>Informe técnico de interfaces y requerimientos</em>: seis fases sobre la API, la web y la app Android/iOS, con los permisos de cada rol y pruebas automáticas que corren en cada subida. Fecha de cierre: 3 de noviembre de 2026.</p>
+
+  <div class="kpis">
+    <div class="kpi"><b>6</b><span>fases entregadas</span></div>
+    <div class="kpi"><b>6</b><span>migraciones nuevas (024 a 029)</span></div>
+    <div class="kpi"><b>71</b><span>pruebas automáticas en verde</span></div>
+    <div class="kpi"><b>28 de 38</b><span>casos de prueba del Excel verificados</span></div>
+    <div class="kpi"><b>CI</b><span>en verde en cada fase</span></div>
+  </div>
+
+  <h2>Cómo se trabajó</h2>
+  <p>Cada fase siguió el mismo ciclo: migración aditiva de base de datos, reglas en el servidor (la web y la app nunca deciden solas), pantallas web, pantallas de la app, pruebas con las cifras del Excel, prueba en el navegador con cada rol involucrado y subida a GitHub solo con el CI en verde.</p>
+  <p>Nada quedó fijo en el código: tasas, topes, series, días de crédito, anticipación de pedidos y mano de obra son parámetros que el Administrador cambia desde la web. Todo cambio importante queda en la auditoría.</p>
+
+  <h2>Las seis fases</h2>
+
+  <section class="fase">
+    <header><h3>Fase 1 · Motor de costos</h3><span class="meta">RN-01 a RN-17 · commit 79f6ec0</span></header>
+    <ul>
+      <li>Unidades esperadas por masa del lote, con merma de proceso y pérdida por cocción.</li>
+      <li>Porcentaje panadero: las harinas suman 100 %.</li>
+      <li>Mano de obra directa por las horas hombre de cada pan, no por una hora fija por lote.</li>
+      <li>Costos indirectos repartidos en tres bases: horas de horno, kg de masa o unidades (decisión D-07).</li>
+      <li>Conversión de unidades de receta a unidad base (gr → kg, ml → L).</li>
+      <li>Pruebas con las cifras del pan francés del Excel: costo del lote, unidades, % panadero, margen y markup.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-07, CP-08, CP-30, CP-31.</p>
+  </section>
+
+  <section class="fase">
+    <header><h3>Fase 2 · Producción</h3><span class="meta">M04 · RN-18 a RN-28 · commit 3876e4f</span></header>
+    <ul>
+      <li>Orden de producción con criterio <em>proporcional</em> o <em>lotes completos</em>: 1,000 panes franceses = 4 lotes completos o 3.46 proporcionales.</li>
+      <li>Requerimiento de insumos con alerta FALTA y requisición que Almacén entrega (RN-27).</li>
+      <li>Cierre con unidades buenas, merma por motivo, horas reales y costo real (RN-28).</li>
+      <li>Anulación de órdenes, presupuesto de un pedido (RN-22/23), plan P-01 y varianza P-02.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-12 a CP-18 y CP-35.</p>
+  </section>
+
+  <section class="fase">
+    <header><h3>Fase 3 · Pedidos y despacho</h3><span class="meta">M06 · commit 63ecfda</span></header>
+    <ul>
+      <li>Estados Registrado → Confirmado o Rechazado (con motivo) → En producción → Listo → Despachado → Entregado.</li>
+      <li>Tipo de entrega (recojo o delivery con dirección) y anticipación mínima por producto.</li>
+      <li>Control de crédito al pedir y reserva de stock al pasar a Listo (RN-29).</li>
+      <li>Despacho desde el pedido: genera la venta vinculada; entrega con observación.</li>
+      <li>El cliente cancela antes de producir y se registra solo, con DNI o RUC validado.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-04, CP-09, CP-11, CP-23.</p>
+  </section>
+
+  <section class="fase">
+    <header><h3>Fase 4 · Ventas y cobranza</h3><span class="meta">M07, M08 · RN-31 a RN-36 · commit 9e91cbf</span></header>
+    <ul>
+      <li>Nota de venta con serie y correlativo únicos (<code>NV01-00000016</code>); base + IGV = total, a dos decimales.</li>
+      <li>Pago con tarjeta, Yape, Plin o transferencia exige número de operación.</li>
+      <li>Recibo de cobranza (<code>RC01-…</code>) que se aplica a varias deudas, de la más antigua a la más nueva, sin superar el saldo.</li>
+      <li>Cierre del día por forma de pago y por vendedor; estado de cuenta por cliente (el cliente solo ve el suyo).</li>
+      <li>Descuento sobre el máximo: el vendedor lo pide y el Gerente lo aprueba; la aprobación vale 24 horas y una sola venta.</li>
+      <li>Condición de pago del cliente (contado o crédito) y antigüedad de deuda contada desde el vencimiento.</li>
+      <li>Series de comprobantes administrables; una serie usada no se reutiliza.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-25 a CP-29 y CP-34.</p>
+  </section>
+
+  <section class="fase">
+    <header><h3>Fase 5 · Almacén</h3><span class="meta">M05 · MAE-09 · commit 153cfba</span></header>
+    <ul>
+      <li>Maestro de proveedores: RUC único; con compras solo se inactiva.</li>
+      <li>Compras con proveedor, documento (factura, boleta o guía) y varias líneas; actualizan stock y costo promedio ponderado, con vista previa del nuevo costo.</li>
+      <li>Un documento de un proveedor no se registra dos veces.</li>
+      <li>Conteo físico: Almacén cuenta y envía; el stock solo se ajusta cuando el Gerente aprueba. El ajuste respeta los movimientos ocurridos después del conteo.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-19, CP-22.</p>
+  </section>
+
+  <section class="fase">
+    <header><h3>Fase 6 · Permisos por rol y app</h3><span class="meta">Hoja Actores_Permisos · commit fdc09a9</span></header>
+    <ul>
+      <li>Cada rol quedó ajustado a la matriz del Excel (tabla siguiente) y una prueba automática la vigila.</li>
+      <li>El Gerente consulta usuarios sin poder crearlos ni bloquearlos.</li>
+      <li>El cliente consulta en la app su estado de cuenta: deuda, vencimientos y pagos.</li>
+    </ul>
+    <p class="meta">Casos verificados: CP-03 y la matriz completa.</p>
+  </section>
+
+  <h2>Matriz de permisos aplicada</h2>
+  <p>C crear · L consultar · M modificar · A anular · P aprobar. El servidor valida cada permiso; la web y la app solo muestran lo que el rol puede usar.</p>
+  <div class="tabla"><table>
+    <thead><tr><th>Función</th><th>Admin.</th><th>Cliente</th><th>Producción</th><th>Almacén</th><th>Vendedor</th><th>Gerente</th></tr></thead>
+    <tbody>
+      <tr><td>Usuarios y roles</td><td>CLMA</td><td>—</td><td>—</td><td>—</td><td>—</td><td>L</td></tr>
+      <tr><td>Catálogo y precios</td><td>CLM</td><td>L</td><td>L</td><td>L</td><td>L</td><td>L</td></tr>
+      <tr><td>Insumos y recetas</td><td>CLM</td><td>—</td><td>L</td><td>L</td><td>—</td><td>L</td></tr>
+      <tr><td>Clientes</td><td>CLM</td><td>—</td><td>—</td><td>—</td><td>CLM</td><td>L</td></tr>
+      <tr><td>Proveedores</td><td>CLM</td><td>—</td><td>—</td><td>L</td><td>—</td><td>L</td></tr>
+      <tr><td>Pedidos</td><td>L</td><td>CL propios · A antes de producir</td><td>L</td><td>L (despacho)</td><td>CLMA</td><td>L</td></tr>
+      <tr><td>Órdenes de producción</td><td>L</td><td>—</td><td>CLMA</td><td>L</td><td>—</td><td>L</td></tr>
+      <tr><td>Requisición de insumos</td><td>—</td><td>—</td><td>C</td><td>LM (atiende)</td><td>—</td><td>—</td></tr>
+      <tr><td>Compras</td><td>CL</td><td>—</td><td>—</td><td>CL</td><td>—</td><td>L</td></tr>
+      <tr><td>Bajas de inventario</td><td>L</td><td>—</td><td>—</td><td>C</td><td>—</td><td>L</td></tr>
+      <tr><td>Kárdex e inventarios</td><td>L</td><td>—</td><td>L</td><td>L</td><td>L (sin costos)</td><td>L</td></tr>
+      <tr><td>Toma de inventario</td><td>—</td><td>—</td><td>—</td><td>CLM</td><td>—</td><td>P</td></tr>
+      <tr><td>Ventas y comprobantes</td><td>L</td><td>—</td><td>—</td><td>—</td><td>CL</td><td>LAP</td></tr>
+      <tr><td>Descuentos sobre el límite</td><td>—</td><td>—</td><td>—</td><td>—</td><td>C (solicita)</td><td>P</td></tr>
+      <tr><td>Cobranza</td><td>L</td><td>—</td><td>—</td><td>—</td><td>CL</td><td>L</td></tr>
+      <tr><td>Cuentas por cobrar</td><td>L</td><td>L (propia)</td><td>—</td><td>—</td><td>L</td><td>L</td></tr>
+      <tr><td>Costos, rentabilidad y dashboard</td><td>L</td><td>—</td><td>—</td><td>—</td><td>—</td><td>L</td></tr>
+      <tr><td>Auditoría</td><td>L</td><td>—</td><td>—</td><td>—</td><td>—</td><td>L</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Casos de prueba del Excel</h2>
+  <div class="tabla"><table>
+    <thead><tr><th>Caso</th><th>Qué comprueba</th><th>Estado</th></tr></thead>
+    <tbody>
+      <tr><td>CP-01</td><td>Inicio de sesión; mensaje genérico con credenciales inválidas</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-02</td><td>Bloqueo por intentos fallidos</td><td><span class="et av">Sin prueba automática</span></td></tr>
+      <tr><td>CP-03</td><td>Acceso por rol: el Vendedor no ve costos ni gerencia</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-04</td><td>Autorregistro con documento validado</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-05, CP-06</td><td>Costo por unidad base y conversión de unidades</td><td><span class="et av">Implementado en el motor; sin caso dedicado</span></td></tr>
+      <tr><td>CP-07, CP-08</td><td>Receta: peso, % panadero y costo del lote</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-09</td><td>Bloqueo de crédito al pedir</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-10</td><td>Seguimiento de estados en tiempo real</td><td><span class="et av">Estados probados; tiempo real no medido</span></td></tr>
+      <tr><td>CP-11</td><td>Cancelación del cliente antes de producir</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-12 a CP-18</td><td>Lotes, consumo, requisición, cierre, merma y costo real</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-19</td><td>Costo promedio ponderado</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-20</td><td>Baja sin motivo rechazada</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-21</td><td>Notificación única de stock mínimo</td><td><span class="et no">Pendiente</span></td></tr>
+      <tr><td>CP-22</td><td>Ajuste de conteo con aprobación del Gerente</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-23, CP-24</td><td>Despacho y venta a terceros</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-25 a CP-29</td><td>Descuento con aprobación, IGV, pagos parciales, pago mayor al saldo y crédito</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-30, CP-31</td><td>Ficha de costo, margen y markup</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-32</td><td>Mes cerrado no admite cambios</td><td><span class="et av">Sin prueba automática</span></td></tr>
+      <tr><td>CP-33</td><td>Dashboard coincide con el detalle de ventas</td><td><span class="et av">Sin prueba automática</span></td></tr>
+      <tr><td>CP-34</td><td>Antigüedad de deuda (5, 20 y 40 días)</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-35</td><td>Varianza de producción</td><td><span class="et ok">Prueba automática</span></td></tr>
+      <tr><td>CP-36</td><td>Notificación push en menos de 30 s</td><td><span class="et av">Sin medición</span></td></tr>
+      <tr><td>CP-37</td><td>Envío sin conexión sin duplicar</td><td><span class="et av">Cola con idempotencia para cobros; cierre de producción no probado</span></td></tr>
+      <tr><td>CP-38</td><td>Restauración de respaldo</td><td><span class="et no">Fuera de alcance (infraestructura)</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Decisiones tomadas</h2>
+  <div class="grid2">
+    <div class="fase"><h3>D-01 · Facturación electrónica</h3><p>Queda fuera del alcance aprobado. Se emite la nota de venta interna; SUNAT requiere un proveedor autorizado (PSE/OSE) y una solicitud de cambio.</p></div>
+    <div class="fase"><h3>D-02 · iOS</h3><p>Se mantiene: la app Flutter compila para Android e iOS con los mismos permisos por rol.</p></div>
+    <div class="fase"><h3>D-05 / D-06 · Crédito y descuentos</h3><p>Configurables: días y límite por cliente, tope de descuento en Parámetros y aprobación del Gerente sobre el tope.</p></div>
+    <div class="fase"><h3>D-07 · Costos indirectos</h3><p>Tres bases disponibles: horas de horno, kg de masa y unidades.</p></div>
+    <div class="fase"><h3>D-08 · Recetas reales</h3><p>El Administrador carga los datos reales de cada receta; el sistema trae datos de ejemplo.</p></div>
+  </div>
+
+  <h2>Pendiente o fuera de alcance</h2>
+  <ul>
+    <li><b>Alerta única de stock mínimo</b> (CP-21) a Almacén y Gerente: hoy el insumo se marca bajo mínimo, pero no se envía una notificación única.</li>
+    <li><b>Lotes y fechas de vencimiento de insumos</b> (AIN-11): el Excel lo marca como ampliación.</li>
+    <li><b>Varios almacenes</b>: la panadería opera con uno; llevar stock por almacén es un cambio mayor.</li>
+    <li><b>Compras desde la app</b>: se registran en la web.</li>
+    <li><b>Elegir proveedor y vendedor asignado</b> en las fichas de insumo y cliente desde la web: la API ya los acepta.</li>
+    <li><b>Respaldo y restauración</b> (fila 23 y CP-38): corresponde a la infraestructura de despliegue.</li>
+  </ul>
+
+  <h2>Cómo verificarlo</h2>
+  <p>Con la API levantada en <code>127.0.0.1:3001</code> y la semilla cargada:</p>
+<pre>node --test --test-concurrency=1 tests/*.test.mjs
+node tests/concurrencia-ventas.mjs 12</pre>
+  <p>Las pruebas que siguen al Excel están en <code>tests/*-excel.test.mjs</code>: costos, producción, pedidos, ventas, almacén y permisos. GitHub Actions las corre en cada subida, junto con la revisión de tipos y el build de la web.</p>
+  <p>Usuarios de demostración (contraseña <code>tanta</code>): osquilcate (Gerente), lbermudez (Administrador), rquispe (Producción), jramos (Almacén), cmedina (Vendedor), mfernandez (Cliente).</p>
+
+  <footer>Sistema Integral de Gestión · Panadería Tanta · documento generado al cierre de la Fase 6.</footer>
+</main>
+</body>
+</html>
