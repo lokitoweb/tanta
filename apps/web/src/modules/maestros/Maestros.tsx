@@ -89,16 +89,19 @@ export function CostosIndirectos() {
 export function Categorias() {
   const { dataset, refrescarDatos } = useApp();
   return (
-    <Crud titulo="Categorías" nombreExport="categorias" deps={dataset.categorias} descripcion="Agrupan productos y fijan el margen objetivo del semáforo (verde, ámbar, rojo)."
-      cargar={async () => dataset.categorias.map((c) => ({ ...c } as unknown as Reg))}
-      nuevo={{ nombre: '', margenObjetivo: 0.5, orden: 0 }}
+    <Crud titulo="Categorías" nombreExport="categorias" deps={dataset.categorias} descripcion="Agrupan los productos en el catálogo, las ventas y los reportes. Una categoría con productos no se puede eliminar."
+      // Orden de presentación (campo «Orden en listas») y, a igual orden, alfabético.
+      cargar={async () => [...dataset.categorias]
+        .sort((a, b) => (Number((a as unknown as Reg).orden ?? 0) - Number((b as unknown as Reg).orden ?? 0)) || a.nombre.localeCompare(b.nombre, 'es'))
+        .map((c) => ({ ...c } as unknown as Reg))}
+      nuevo={{ nombre: '', orden: 0 }}
       crear={async (d) => { await api('/categorias', { method: 'POST', body: d }); await refrescarDatos(); }}
       editar={async (id, d) => { await api(`/categorias/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); }}
-      columnas={[{ key: 'nombre', label: 'Categoría' }, { key: 'margenObjetivo', label: 'Margen objetivo', tipo: 'pct' }, { key: 'margen', label: 'Margen real (30 d)', tipo: 'pct' }, { key: 'ventas', label: 'Ventas (30 d)', tipo: 'dinero' }]}
+      eliminar={async (id) => { await api(`/categorias/${id}`, { method: 'DELETE' }); await refrescarDatos(); }}
+      columnas={[{ key: 'nombre', label: 'Categoría' }]}
       campos={[
         { key: 'nombre', label: 'Nombre', requerido: true, max: 60 },
-        { key: 'margenObjetivo', label: 'Margen objetivo (%)', tipo: 'pct', requerido: true },
-        { key: 'orden', label: 'Orden en listas', tipo: 'numero' },
+        { key: 'orden', label: 'Orden en listas', tipo: 'numero', ayuda: '0 = primero. A igual orden, alfabético' },
       ]} />
   );
 }
@@ -137,7 +140,7 @@ export function Productos() {
         { key: 'perdidaCoccion', label: 'Pérdida por cocción (%)', tipo: 'pct' },
         { key: 'horasHombreLote', label: 'Horas hombre por lote', tipo: 'numero' },
         { key: 'horasHornoLote', label: 'Horas de horno por lote', tipo: 'numero' },
-        { key: 'anticipacionHoras', label: 'Anticipación mínima del pedido (horas)', tipo: 'numero', ayuda: 'Ej.: 24 para tortas por encargo' },
+        { key: 'anticipacionHoras', label: 'Anticipación mínima del pedido (horas)', tipo: 'numero', ayuda: 'Ej.: 24 para pan por encargo' },
         { key: 'insumoId', label: 'Produce el insumo (sub-receta)', tipo: 'select', ancho: true,
           opciones: [{ valor: '', texto: 'No: es un producto de venta' }, ...dataset.insumos.map((i) => ({ valor: i.id, texto: `${i.nombre} (${i.unidadInventario ?? i.unidad})` }))],
           ayuda: 'Para masa madre o rellenos: su receta da el costo, su OP entra al almacén de insumos y no se vende. La unidad de venta debe ser la del stock del insumo.' },

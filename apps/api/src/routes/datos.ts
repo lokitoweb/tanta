@@ -76,7 +76,7 @@ export async function rutasDatos(app: FastifyInstance) {
         ORDER BY f.fecha`)),
 
       recordar('cat:categorias', CATALOGO_MS, () => q<Record<string, string>>(`
-        SELECT c.id, c.nombre, c.margen_objetivo,
+        SELECT c.id, c.nombre, c.margen_objetivo, c.orden,
                coalesce(x.ventas,0)   AS ventas,
                coalesce(x.costo,0)    AS costo,
                coalesce(x.utilidad,0) AS utilidad
@@ -95,7 +95,7 @@ export async function rutasDatos(app: FastifyInstance) {
             AND v.estado = 'CONFIRMADA'
             AND v.creado_en >= now() - interval '30 days'
         ) x ON true
-        ORDER BY c.orden`)),
+        ORDER BY c.orden, c.nombre`)),
 
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
@@ -265,7 +265,7 @@ export async function rutasDatos(app: FastifyInstance) {
         const v = num(c.ventas);
         const u2 = num(c.utilidad);
         return {
-          id: c.id, nombre: c.nombre,
+          id: c.id, nombre: c.nombre, orden: Number(c.orden ?? 0),
           ventas: v, costo: num(c.costo), utilidad: u2,
           margen: v > 0 ? u2 / v : 0,
           margenObjetivo: num(c.margen_objetivo),

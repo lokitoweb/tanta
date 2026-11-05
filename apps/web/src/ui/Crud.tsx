@@ -20,11 +20,13 @@ type Reg = Record<string, unknown> & { id?: string };
  * Administración genérica de un maestro: lista con búsqueda, alta, edición y exportación.
  * La validación de verdad la hace el API; aquí solo se guía al usuario y se muestra el error.
  */
-export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, crear, editar, extra, acciones, nombreExport, deps }: {
+export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, crear, editar, eliminar, extra, acciones, nombreExport, deps }: {
   titulo: string; descripcion: string; cargar: () => Promise<Reg[]>; columnas: ColRep[]; campos: Campo[];
   nuevo: Reg; crear?: (d: Reg) => Promise<unknown>; editar?: (id: string, d: Reg) => Promise<unknown>; extra?: ReactNode; nombreExport: string;
   /** Botones extra en el encabezado (p. ej. Importar). */
   acciones?: ReactNode;
+  /** Elimina un registro; el API rechaza si está en uso y el mensaje se muestra tal cual. */
+  eliminar?: (id: string) => Promise<unknown>;
   /** Si cambia (p. ej. los datos globales tras guardar), la lista se vuelve a cargar. */
   deps?: unknown;
 }) {
@@ -35,6 +37,16 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [cargaError, setCargaError] = useState<string | null>(null);
+  const [aBorrar, setABorrar] = useState<Reg | null>(null);
+  const [borrando, setBorrando] = useState(false);
+  const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
+  const borrar = async () => {
+    if (!aBorrar?.id || !eliminar) return;
+    setBorrando(true); setErrorBorrar(null);
+    try { await eliminar(String(aBorrar.id)); setABorrar(null); await refrescar(); }
+    catch (e) { setErrorBorrar(e instanceof Error ? e.message : 'No se pudo eliminar.'); }
+    finally { setBorrando(false); }
+  };
 
   const refrescar = async () => { try { setFilas(await cargar()); setCargaError(null); } catch (e) { setCargaError(e instanceof Error ? e.message : 'No se pudo cargar.'); } };
   useEffect(() => { void refrescar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [deps]);
@@ -83,9 +95,16 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
         {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setFilas(null); void refrescar(); }} />
           : filas === null ? <TablaEsqueleto columnas={Math.min(columnas.length, 6)} />
           : visibles.length === 0 ? <Vacio titulo="Sin registros" detalle={q ? 'Prueba con otra búsqueda.' : 'Crea el primero con «Nuevo».'} />
-            : <TablaReporte columnas={columnas} filas={visibles} onFila={editar ? (f) => { setError(null); setForm({ ...f }); } : undefined} />}
+            : <TablaReporte columnas={columnas} filas={visibles} onFila={editar ? (f) => { setError(null); setForm({ ...f }); } : undefined}
+              onEliminar={eliminar ? (f) => { setErrorBorrar(null); setABorrar(f); } : undefined} />}
       </Tarjeta>
 
+      <Dialogo abierto={aBorrar !== null} titulo={`Eliminar · ${String(aBorrar?.[(campos.find((c) => c.tipo !== 'imagen') ?? campos[0]).key] ?? '')}`}
+        descripcion="Se borra de forma permanente y queda en la auditoría. Si está en uso, el sistema no lo permite."
+        onCerrar={() => setABorrar(null)}
+        acciones={<><Boton onClick={() => setABorrar(null)}>Cancelar</Boton><Boton variant="danger" onClick={() => void borrar()} disabled={borrando}>{borrando ? 'Eliminando…' : 'Eliminar'}</Boton></>}>
+        {errorBorrar ? <p className="form__error" role="alert">{errorBorrar}</p> : <p>¿Seguro que quieres eliminarlo?</p>}
+      </Dialogo>
       <Dialogo abierto={form !== null} titulo={form?.id ? `Editar · ${String(form?.[(campos.find((c) => c.tipo !== 'imagen') ?? campos[0]).key] ?? '')}` : `Nuevo · ${titulo.toLowerCase()}`}
         onCerrar={() => setForm(null)}
         acciones={<><Boton onClick={() => setForm(null)}>Cancelar</Boton><Boton variant="primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</Boton></>}>

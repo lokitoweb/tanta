@@ -164,3 +164,15 @@ test('proveedor: el RUC es obligatorio (informe de compras §5.2)', async () => 
   const r = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: 'Sin RUC ' + sufijo });
   assert.equal(r.s, 422);
 });
+
+test('categorías: no se elimina una con productos; una vacía sí', async () => {
+  const adm = await login('lbermudez');
+  const usada = sql('SELECT categoria_id FROM core.producto LIMIT 1');
+  const r = await api(adm, 'DELETE', `/categorias/${usada}`);
+  assert.equal(r.s, 409);
+  assert.match(r.b.detail, /producto/);
+  const nueva = await api(adm, 'POST', '/categorias', { nombre: 'Vacía ' + sufijo, orden: 9 });
+  assert.equal(nueva.s, 201);
+  assert.equal((await api(adm, 'DELETE', `/categorias/${nueva.b.id}`)).s, 204);
+  assert.equal(sql(`SELECT count(*) FROM core.categoria WHERE id = '${nueva.b.id}'`), '0');
+});

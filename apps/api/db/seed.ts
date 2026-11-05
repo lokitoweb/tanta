@@ -101,22 +101,22 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-compras', 'Operación', 'Compras', '/almacen/compras', 'sack', 'compras.ver', 6, 1],
   ['n-conteos', 'Operación', 'Conteo físico', '/almacen/conteos', 'clipboard', 'inventario.ver', 7, 1],
   ['n-deudas', 'Operación', 'Deudas por pagar', '/compras/deudas', 'wallet', 'deudas.ver', 8, 1],
-  ['n-pedidos', 'Comercial', 'Pedidos', '/ventas/pedidos', 'clipboard', 'pedidos.ver', 1, 2],
-  ['n-cobranza', 'Comercial', 'Cobranza', '/ventas/cobranza', 'wallet', 'cobranza.ver', 2, 2],
-  ['n-catalogo', 'Comercial', 'Catálogo', '/catalogo', 'bread', 'catalogo.ver', 3, 2],
-  ['n-caja', 'Comercial', 'Caja chica', '/caja', 'wallet', 'caja.abrir', 5, 2],
-  ['n-aprobaciones', 'Comercial', 'Aprobaciones', '/ventas/aprobaciones', 'check', 'descuentos.aprobar', 4, 2],
-  ['n-productos', 'Maestros', 'Productos', '/maestros/productos', 'bread', 'maestros.ver', 1, 3],
-  ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 3],
-  ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 3],
-  ['n-proveedores', 'Maestros', 'Proveedores', '/maestros/proveedores', 'truck', 'proveedores.gestionar', 4, 3],
-  ['n-almacenes', 'Maestros', 'Almacenes', '/maestros/almacenes', 'box', 'maestros.editar', 5, 3],
-  ['n-catalogos', 'Maestros', 'Catálogos', '/maestros/catalogos', 'clipboard', 'maestros.editar', 9, 3],
-  ['n-categorias', 'Maestros', 'Categorías', '/maestros/categorias', 'clipboard', 'maestros.editar', 3, 3],
-  ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 3],
-  ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 3],
-  ['n-usuarios', 'Maestros', 'Usuarios y roles', '/seguridad/usuarios', 'shield', 'usuarios.ver', 6, 3],
-  ['n-parametros', 'Maestros', 'Parámetros', '/seguridad/parametros', 'settings', 'parametros.gestionar', 7, 3],
+  ['n-pedidos', 'Comercial', 'Pedidos', '/ventas/pedidos', 'clipboard', 'pedidos.ver', 1, 3],
+  ['n-cobranza', 'Comercial', 'Cobranza', '/ventas/cobranza', 'wallet', 'cobranza.ver', 2, 3],
+  ['n-catalogo', 'Comercial', 'Catálogo', '/catalogo', 'bread', 'catalogo.ver', 3, 3],
+  ['n-caja', 'Comercial', 'Caja chica', '/caja', 'wallet', 'caja.abrir', 5, 3],
+  ['n-aprobaciones', 'Comercial', 'Aprobaciones', '/ventas/aprobaciones', 'check', 'descuentos.aprobar', 4, 3],
+  ['n-productos', 'Maestros', 'Productos', '/maestros/productos', 'bread', 'maestros.ver', 1, 2],
+  ['n-insumos', 'Maestros', 'Insumos', '/maestros/insumos', 'sack', 'maestros.ver', 2, 2],
+  ['n-recetas', 'Maestros', 'Recetas', '/maestros/recetas', 'recipe', 'recetas.ver', 3, 2],
+  ['n-proveedores', 'Maestros', 'Proveedores', '/maestros/proveedores', 'truck', 'proveedores.gestionar', 4, 2],
+  ['n-almacenes', 'Maestros', 'Almacenes', '/maestros/almacenes', 'box', 'maestros.editar', 5, 2],
+  ['n-catalogos', 'Maestros', 'Catálogos', '/maestros/catalogos', 'clipboard', 'maestros.editar', 9, 2],
+  ['n-categorias', 'Maestros', 'Categorías', '/maestros/categorias', 'clipboard', 'maestros.editar', 3, 2],
+  ['n-clientes', 'Maestros', 'Clientes', '/maestros/clientes', 'user', 'clientes.gestionar', 4, 2],
+  ['n-cif', 'Maestros', 'Costos indirectos', '/maestros/cif', 'wallet', 'maestros.editar', 5, 2],
+  ['n-usuarios', 'Maestros', 'Usuarios y roles', '/seguridad/usuarios', 'shield', 'usuarios.ver', 6, 2],
+  ['n-parametros', 'Maestros', 'Parámetros', '/seguridad/parametros', 'settings', 'parametros.gestionar', 7, 2],
   ['n-roles', 'Sistema', 'Roles y permisos', '/sistema/roles', 'shield', 'roles.gestionar', 1, 9],
   ['n-config', 'Sistema', 'Configuración', '/sistema/configuracion', 'settings', 'config.gestionar', 2, 9],
   ['n-auditoria', 'Sistema', 'Auditoría', '/sistema/auditoria', 'ledger', 'auditoria.ver', 3, 9],
@@ -125,11 +125,9 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-periodos', 'Gerencia', 'Períodos de costo', '/gerencia/periodos', 'report', 'periodos.cerrar', 3, 4],
 ];
 
-// Solo panadería: pan, pastelería y tortas, cada producto con su receta.
+// Una sola categoría: Panadería. Cada pan con su receta.
 const CATEGORIAS: Array<[string, string, number]> = [
-  ['pan', 'Pan', 0.45],
-  ['pasteleria', 'Pastelería', 0.6],
-  ['tortas', 'Tortas', 0.55],
+  ['pan', 'Panadería', 0.45],
 ];
 
 /** [categoria, nombre, unidad, precioConIgv, vendidos30d, peso de la receta] */
@@ -140,13 +138,6 @@ const PRODUCTOS: Array<[string, string, string, number, number]> = [
   ['pan', 'Pan integral de molde', 'UNIDAD', 9.9, 48],
   ['pan', 'Bagguette artesanal', 'UNIDAD', 4.5, 96],
   ['pan', 'Pan de masa madre', 'UNIDAD', 12.0, 42],
-  ['pasteleria', 'Empanada de carne', 'UNIDAD', 4.5, 210],
-  ['pasteleria', 'Croissant de mantequilla', 'UNIDAD', 5.5, 140],
-  ['pasteleria', 'Alfajor de manjar', 'UNIDAD', 3.5, 180],
-  ['pasteleria', 'Pionono de lúcuma', 'PORCION', 7.9, 64],
-  ['tortas', 'Torta de chocolate', 'UNIDAD', 45.0, 14],
-  ['tortas', 'Torta de tres leches', 'UNIDAD', 42.0, 11],
-  ['tortas', 'Cheesecake de maracuyá', 'UNIDAD', 48.0, 9],
 ];
 
 const INSUMOS: Array<[string, string, string, number, number, number, string]> = [
@@ -158,9 +149,6 @@ const INSUMOS: Array<[string, string, string, number, number, number, string]> =
   ['INS-006', 'Leche evaporada', 'L', 6.8, 22, 8, 'Gloria'],
   ['INS-007', 'Huevos', 'UNIDAD', 0.62, 180, 60, 'Granja Sur'],
   ['INS-008', 'Sal', 'KG', 1.1, 8.5, 2, 'Distribuidora Lima'],
-  ['INS-009', 'Manjar blanco', 'KG', 14.5, 9.5, 4, 'Lácteos Andinos'],
-  ['INS-010', 'Cacao en polvo', 'KG', 32.0, 4.2, 2, 'Cacao del Perú'],
-  ['INS-011', 'Lúcuma pulpa', 'KG', 26.0, 3.1, 2, 'Frutas Andinas'],
   ['INS-012', 'Gas GLP', 'BALON', 68.0, 6, 2, 'Repsol'],
 ];
 
@@ -171,13 +159,6 @@ const PESOS: Record<string, Array<[string, number]>> = {
   'Pan integral de molde': [['INS-002', 1], ['INS-003', 0.08], ['INS-005', 0.1], ['INS-004', 0.02]],
   'Bagguette artesanal': [['INS-001', 1], ['INS-004', 0.02], ['INS-008', 0.008]],
   'Pan de masa madre': [['INS-001', 1], ['INS-004', 0.015], ['INS-008', 0.006]],
-  'Empanada de carne': [['INS-001', 1], ['INS-005', 0.18], ['INS-007', 0.2], ['INS-008', 0.01]],
-  'Croissant de mantequilla': [['INS-001', 1], ['INS-005', 0.45], ['INS-003', 0.1], ['INS-004', 0.02]],
-  'Alfajor de manjar': [['INS-001', 1], ['INS-009', 0.5], ['INS-003', 0.2]],
-  'Pionono de lúcuma': [['INS-001', 1], ['INS-011', 0.55], ['INS-007', 0.3], ['INS-003', 0.25]],
-  'Torta de chocolate': [['INS-001', 1], ['INS-010', 0.35], ['INS-007', 0.6], ['INS-005', 0.4], ['INS-003', 0.45]],
-  'Torta de tres leches': [['INS-001', 1], ['INS-006', 0.9], ['INS-007', 0.6], ['INS-003', 0.4]],
-  'Cheesecake de maracuyá': [['INS-001', 1], ['INS-005', 0.5], ['INS-007', 0.5], ['INS-003', 0.35]],
 };
 
 const CLIENTES: Array<[string, string, string, string, number, number, string]> = [
@@ -251,7 +232,9 @@ async function main() {
       ['moneda', 'PEN', 'texto', 'Moneda del sistema'],
       ['margen_objetivo_global', '0.52', 'porcentaje', 'Margen objetivo por defecto'],
       ['permitir_saldo_negativo', 'false', 'booleano', 'Política estricta de inventario'],
-      ['cif_base_prorrateo', 'UNIDADES', 'texto', 'Base de prorrateo del CIF: UNIDADES o COSTO_INSUMOS'],
+      ['cif_base_prorrateo', 'UNIDADES', 'texto', 'Reparto del CIF: UNIDADES = cada concepto por su base (horas de horno, kg de masa o unidades) · COSTO_INSUMOS = en proporción al costo de insumos'],
+      ['formula_merma', 'MULTIPLICAR', 'texto', 'Costo con merma: MULTIPLICAR = insumos × (1 + merma) (PDF del dueño) · DIVIDIR = insumos ÷ (1 − merma) (Excel RN-07)'],
+      ['metodo_costo_insumo', 'PROMEDIO', 'texto', 'Costo del insumo al verificar una compra: PROMEDIO (ponderado) o ULTIMO (último costo de compra)'],
       ['descuento_maximo', '0.10', 'porcentaje', 'Descuento máximo que un vendedor puede aplicar en una venta'],
       ['sueldo_base', '1500', 'numero', 'Sueldo mensual de referencia del personal de producción (S/)'],
       ['factor_beneficios', '0', 'porcentaje', 'Beneficios y aportes sobre el sueldo (0.45 = 45 %)'],
@@ -307,16 +290,13 @@ async function main() {
 
     // Cada categoría tiene su propia estructura de costo: el pan es volumen con margen ajustado,
     // la pastelería tiene margen alto. Sin esta variación el dashboard miente por uniformidad.
-    const RATIO_COSTO: Record<string, number> = { pan: 0.58, pasteleria: 0.43, tortas: 0.48 };
+    const RATIO_COSTO: Record<string, number> = { pan: 0.58 };
 
     // Gramos del insumo principal por unidad vendida. Son cantidades FÍSICAS: una ciabatta
     // lleva ~110 g de harina, no 500. Las recetas se derivan de aquí y el costo cae donde cae.
     const PESO_FISICO: Record<string, number> = {
       'Pan francés': 0.060, 'Pan ciabatta': 0.110, 'Pan de yema': 0.070,
       'Pan integral de molde': 0.480, 'Bagguette artesanal': 0.250, 'Pan de masa madre': 0.500,
-      'Empanada de carne': 0.080, 'Croissant de mantequilla': 0.075,
-      'Alfajor de manjar': 0.050, 'Pionono de lúcuma': 0.090,
-      'Torta de chocolate': 1.100, 'Torta de tres leches': 1.200, 'Cheesecake de maracuyá': 1.100,
     };
 
     for (const [categoria, nombre, unidad, precio, vendidos] of PRODUCTOS) {
@@ -504,12 +484,12 @@ async function main() {
     const ops: Array<[string, string, number, string, string, string, number]> = [
       ['OP-2026-000312', 'Pan ciabatta', 240, 'EN_PROCESO', '2026-11-01', 'Rosa Quispe', 0.62],
       ['OP-2026-000313', 'Pan francés', 1800, 'PENDIENTE', '2026-11-01', 'Rosa Quispe', 0.4],
-      ['OP-2026-000314', 'Croissant de mantequilla', 320, 'PENDIENTE', '2026-11-01', 'Julio Ramos', 0.7],
-      ['OP-2026-000315', 'Torta de chocolate', 18, 'EN_PROCESO', '2026-11-02', 'Milagros Vega', 0.85],
+      ['OP-2026-000314', 'Pan integral de molde', 60, 'PENDIENTE', '2026-11-01', 'Julio Ramos', 0.7],
+      ['OP-2026-000315', 'Pan de masa madre', 40, 'EN_PROCESO', '2026-11-02', 'Milagros Vega', 0.85],
       ['OP-2026-000316', 'Pan de yema', 600, 'TERMINADA', '2026-10-31', 'Rosa Quispe', 1],
-      ['OP-2026-000317', 'Empanada de carne', 400, 'TERMINADA', '2026-10-31', 'Julio Ramos', 1],
+      ['OP-2026-000317', 'Pan francés', 1500, 'TERMINADA', '2026-10-31', 'Julio Ramos', 1],
       ['OP-2026-000318', 'Bagguette artesanal', 150, 'TERMINADA', '2026-10-31', 'Milagros Vega', 1],
-      ['OP-2026-000319', 'Cheesecake de maracuyá', 12, 'PENDIENTE', '2026-11-02', 'Milagros Vega', 0.15],
+      ['OP-2026-000319', 'Pan ciabatta', 200, 'PENDIENTE', '2026-11-02', 'Milagros Vega', 0.15],
     ];
     for (const [codigo, producto, cantidad, estado, entrega, responsable, avance] of ops) {
       const p = productosCreados.find((x) => x.nombre === producto)!;

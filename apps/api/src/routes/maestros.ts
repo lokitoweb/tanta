@@ -42,7 +42,8 @@ export async function rutasMaestros(app: FastifyInstance) {
     ({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol });
 
   /* ------------------------------------------------------------ categorías */
-  const Categoria = z.object({ nombre: texto(2, 60), margenObjetivo: pct, orden: z.number().int().min(0).max(999).default(0) });
+  // El margen objetivo se administra en Rentabilidad/Parámetros, no al crear la categoría: si no llega, nace con el margen global y al editar se conserva.
+  const Categoria = z.object({ nombre: texto(2, 60), margenObjetivo: pct.optional(), orden: z.number().int().min(0).max(999).nullable().default(0) });
 
   app.post('/categorias', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'maestros.editar')) return;
@@ -50,7 +51,10 @@ export async function rutasMaestros(app: FastifyInstance) {
     if (!p.success) return invalido(reply, p.error);
     const id = p.data.nombre.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]+/g, '_').slice(0, 30);
     if (await uno('SELECT 1 FROM core.categoria WHERE id = $1', [id])) return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe esa categoría.'));
-    await q('INSERT INTO core.categoria (id, nombre, margen_objetivo, orden) VALUES ($1,$2,$3,$4)', [id, p.data.nombre, p.data.margenObjetivo, p.data.orden]);
+    await q(`INSERT INTO core.categoria (id, nombre, margen_objetivo, orden)
+      VALUES ($1, $2, coalesce($3::numeric, (SELECT valor::numeric FROM core.parametro WHERE clave = 'margen_objetivo_global'), 0.45), $4)`,
+      [id, p.data.nombre, p.data.margenObjetivo ?? null, p.data.orden ?? 0]);
+    invalidar('cat:');
     await auditar({ ...actor(req), accion: 'CATEGORIA_CREADA', entidad: 'categoria', entidadId: id, detalle: p.data, ip: req.ip });
     return reply.code(201).send({ id, ...p.data });
   });
@@ -60,10 +64,30 @@ export async function rutasMaestros(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const p = Categoria.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
-    const r = await q('UPDATE core.categoria SET nombre = $2, margen_objetivo = $3, orden = $4 WHERE id = $1 RETURNING id', [id, p.data.nombre, p.data.margenObjetivo, p.data.orden]);
+    const r = await q('UPDATE core.categoria SET nombre = $2, margen_objetivo = coalesce($3::numeric, margen_objetivo), orden = $4 WHERE id = $1 RETURNING id', [id, p.data.nombre, p.data.margenObjetivo ?? null, p.data.orden ?? 0]);
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La categoría no existe.'));
+    invalidar('cat:');
     await auditar({ ...actor(req), accion: 'CATEGORIA_EDITADA', entidad: 'categoria', entidadId: id, detalle: p.data, ip: req.ip });
     return { id, ...p.data };
+  });
+
+  // Solo se elimina una categoría sin productos (activos o no): sus ventas y recetas dependen de ella.
+  app.delete('/categorias/:id', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const { id } = req.params as { id: string };
+    const uso = await uno<{ n: string; nombres: string | null }>(`SELECT count(*) n,
+      (SELECT string_agg(nombre, ', ') FROM (SELECT nombre FROM core.producto WHERE categoria_id = $1 ORDER BY nombre LIMIT 5) x) nombres
+      FROM core.producto WHERE categoria_id = $1`, [id]);
+    const total = Number(uso?.n ?? 0);
+    if (total > 0) {
+      return reply.code(409).send(error(409, 'CATEGORIA_EN_USO',
+        `No se puede eliminar: tiene ${total} producto(s) (${uso?.nombres}${total > 5 ? '…' : ''}). Muévelos a otra categoría o elimínalos primero.`));
+    }
+    const r = await q<{ nombre: string }>('DELETE FROM core.categoria WHERE id = $1 RETURNING nombre', [id]);
+    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La categoría no existe.'));
+    invalidar('cat:');
+    await auditar({ ...actor(req), accion: 'CATEGORIA_ELIMINADA', entidad: 'categoria', entidadId: id, detalle: { nombre: r[0].nombre }, ip: req.ip });
+    return reply.code(204).send();
   });
 
   /* ------------------------------------------------------------- productos */
