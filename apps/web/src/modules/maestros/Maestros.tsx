@@ -169,7 +169,7 @@ export function Productos() {
         editar={edita ? async (id, d) => { await api(`/productos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
         accionesFila={edita ? [
           { etiqueta: 'Ajustar precio', icono: 'tag', visible: (f) => verCosto && !f.insumoId, onClick: (f) => setAjustar(dataset.productos.find((p) => p.id === f.id) ?? null) },
-          { etiqueta: (f) => (f.estado === 'ACTIVO' ? 'Anular' : 'Reactivar'), icono: (f) => (f.estado === 'ACTIVO' ? 'ban' : 'sync'), peligro: (f) => f.estado === 'ACTIVO', onClick: (f) => void cambiarEstado(f) },
+          { etiqueta: (f) => (f.estado === 'ACTIVO' ? 'Anular' : 'Reactivar'), icono: (f) => (f.estado === 'ACTIVO' ? 'close' : 'sync'), peligro: (f) => f.estado === 'ACTIVO', onClick: (f) => void cambiarEstado(f) },
         ] : []}
         columnas={columnas}
         campos={[
@@ -371,7 +371,7 @@ export function Insumos() {
         editar={editaInsumos ? async (id, d) => { await api(`/insumos/${id}`, { method: 'PATCH', body: aApi(d) }); await refrescarDatos(); } : undefined}
         accionesFila={[
           ...(verCosto ? [{ etiqueta: 'Ajustar costos', icono: 'tag' as const, onClick: (f: Reg) => setCostos(String(f.id)) }] : []),
-          ...(editaInsumos ? [{ etiqueta: (f: Reg) => (f.activo === false ? 'Reactivar' : 'Anular'), icono: (f: Reg) => (f.activo === false ? 'sync' as const : 'ban' as const),
+          ...(editaInsumos ? [{ etiqueta: (f: Reg) => (f.activo === false ? 'Reactivar' : 'Anular'), icono: (f: Reg) => (f.activo === false ? 'sync' as const : 'close' as const),
             peligro: (f: Reg) => f.activo !== false, onClick: (f: Reg) => void cambiarEstado(f) }] : []),
         ]}
         columnas={[

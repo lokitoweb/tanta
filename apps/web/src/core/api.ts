@@ -112,6 +112,9 @@ export async function api<T>(ruta: string, op: Opciones = {}): Promise<T> {
     headers: cabeceras,
     credentials: 'include',
     body: body === undefined ? undefined : JSON.stringify(body),
+  }).catch(() => {
+    // Sin red, servidor caído o túnel vencido: el navegador solo dice «Failed to fetch».
+    throw new ApiError(0, 'SIN_CONEXION', 'No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.');
   });
 
   if (res.status === 401 && !sinAuth && reintentar) {

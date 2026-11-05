@@ -10,7 +10,6 @@ import { Icon } from '@/ui/icons';
 /** Mensaje claro para el usuario; nunca revela si el usuario existe. */
 function mensajeError(e: unknown, defecto: string): string {
   if (e instanceof ApiError && e.status === 429) return 'Demasiados intentos. Espera un minuto antes de volver a intentar.';
-  if (e instanceof TypeError) return 'No hay conexión con el servidor. Revisa tu internet.';
   return e instanceof Error ? e.message : defecto;
 }
 
