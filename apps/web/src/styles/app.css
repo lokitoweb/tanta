@@ -1372,16 +1372,32 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .campana { position: relative; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; color: var(--tanta-text-secondary); }
 .campana:hover, .campana[aria-expanded="true"] { background: var(--tanta-surface-card); color: var(--tanta-text-primary); }
 .campana__n { position: absolute; top: 2px; right: 1px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--tanta-state-danger, #b3261e); color: #fff; font-size: 0.625rem; font-weight: 700; line-height: 17px; text-align: center; }
-.campana__menu { width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto; }
-.campana__cab { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--tanta-border-subtle); margin-bottom: 4px; }
-.campana__vacio { padding: 12px 10px; margin: 0; }
-.campana__item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 9px 10px; border-radius: 6px; text-align: left; color: var(--tanta-text-secondary); }
+.campana__menu { width: min(380px, calc(100vw - 32px)); max-height: 72vh; padding: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 14px; }
+.campana__cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 14px 16px 12px; border-bottom: 1px solid var(--tanta-border-subtle); }
+.campana__cab > b { display: flex; align-items: center; gap: 8px; font-size: 0.9375rem; font-weight: 700; color: var(--tanta-text-primary); }
+.campana__chip { padding: 2px 8px; border-radius: 999px; background: var(--tanta-state-danger-bg); color: var(--tanta-state-danger); font-size: 0.6875rem; font-weight: 700; }
+.campana__todas { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; color: var(--tanta-text-secondary); }
+.campana__todas:hover { background: var(--tanta-surface-page); color: var(--tanta-text-primary); }
+.campana__lista { overflow-y: auto; padding: 6px; }
+.campana__vacio { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 32px 16px; color: var(--tanta-text-muted); text-align: center; }
+.campana__vacio span { margin-top: 6px; font-weight: 600; color: var(--tanta-text-primary); }
+.campana__vacio small { font-size: 0.75rem; }
+.campana__item { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px; border-radius: 10px; text-align: left; color: var(--tanta-text-secondary); transition: background 0.12s; }
+.campana__item + .campana__item { margin-top: 2px; }
 .campana__item:hover { background: var(--tanta-surface-page); }
-.campana__item b { font-size: 0.8125rem; font-weight: 500; color: var(--tanta-text-primary); }
-.campana__item.is-nueva b { font-weight: 700; }
-.campana__item.is-nueva { border-left: 3px solid var(--tanta-ink-800); }
-.campana__item span { font-size: 0.8125rem; }
-.campana__item small { font-size: 0.6875rem; color: var(--tanta-text-muted); }
+.campana__item.is-nueva { background: color-mix(in srgb, var(--tanta-state-info-bg) 55%, transparent); }
+.campana__item.is-nueva:hover { background: var(--tanta-state-info-bg); }
+.campana__ico { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--tanta-surface-page); color: var(--tanta-text-secondary); }
+.campana__ico.tono-danger { background: var(--tanta-state-danger-bg); color: var(--tanta-state-danger); }
+.campana__ico.tono-warn { background: var(--tanta-state-warn-bg); color: var(--tanta-state-warn); }
+.campana__ico.tono-ok { background: var(--tanta-state-ok-bg); color: var(--tanta-state-ok); }
+.campana__ico.tono-info { background: var(--tanta-state-info-bg); color: var(--tanta-state-info); }
+.campana__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.campana__txt b { font-size: 0.8125rem; font-weight: 600; line-height: 1.3; color: var(--tanta-text-primary); }
+.campana__item.is-nueva .campana__txt b { font-weight: 700; }
+.campana__txt span { font-size: 0.78125rem; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.campana__txt small { margin-top: 2px; font-size: 0.6875rem; color: var(--tanta-text-muted); }
+.campana__punto { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--tanta-state-info); }
 
 /* Compra de insumos: línea con su conversión F1/F2/F3 y conteo de Almacén */
 .linea-compra { border: 1px solid var(--tanta-border-subtle); border-radius: 10px; padding: 12px; margin-top: 12px; display: grid; gap: 8px; }
