@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '@/core/api';
 import { invalidarCatalogos } from '@/core/catalogos';
+import { useApp } from '@/core/app-state';
 import { Crud, type Campo } from '@/ui/Crud';
 import type { ColRep } from '@/ui/TablaReporte';
 
@@ -8,6 +9,8 @@ type Reg = Record<string, unknown> & { id?: string };
 const PESTANAS = [
   ['medios-pago', 'Medios de pago', 'mediosPago'], ['tipos-documento', 'Documentos de compra', 'tiposDocumento'],
   ['tipos-insumo', 'Tipos de insumo', 'tiposInsumo'], ['unidades', 'Unidades', 'unidades'],
+  ['presentaciones-compra', 'Presentaciones de compra', 'presentacionesCompra'], ['presentaciones-venta', 'Presentaciones de venta', 'presentacionesVenta'],
+  ['bancos', 'Bancos', 'bancos'],
 ] as const;
 type Ruta = typeof PESTANAS[number][0];
 
@@ -45,12 +48,39 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
       { key: 'familia', label: 'Familia', tipo: 'select', opciones: [{ valor: 'MASA', texto: 'Masa (patrón kg)' }, { valor: 'VOLUMEN', texto: 'Volumen (patrón L)' }, { valor: 'CONTEO', texto: 'Conteo (patrón unidad)' }] },
       { key: 'factorAPatron', label: 'Equivale a cuántas unidades patrón', tipo: 'numero', ayuda: 'g = 0.001 kg · ml = 0.001 L · lb = 0.453592 kg' }, ...comunes],
   },
+  'presentaciones-compra': {
+    descripcion: 'Cómo se compra cada insumo: saco x 50 kg, botella 900 ml, celda x 30 unid. La equivalencia es cuánto trae en la unidad base del insumo y llena sola su ficha.',
+    nuevo: { codigo: '', nombre: '', equivalencia: 1, orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'equivalencia', label: 'Equivalencia', tipo: 'num' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60, placeholder: 'Saco x 50 kg' },
+      { key: 'equivalencia', label: 'Equivalencia (cuánto trae en unidad base)', tipo: 'numero', requerido: true, ayuda: 'Saco x 50 kg = 50 · botella 900 ml con base L = 0.9' }, ...comunes],
+  },
+  'presentaciones-venta': {
+    descripcion: 'Cómo se vende cada pan: unidad, paquete x 6… La equivalencia son los panes que lleva; el empaque (bolsa) se descuenta solo del almacén al vender.',
+    nuevo: { codigo: '', nombre: '', equivalencia: 1, insumoId: '', cantidadInsumo: '', orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'equivalencia', label: 'Equivalencia', tipo: 'num' }, { key: 'insumo', label: 'Descuenta' }, { key: 'activo', label: 'Activo' }],
+    campos: [],
+  },
+  bancos: {
+    descripcion: 'Bancos para las cuentas de los proveedores.',
+    nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, ...comunes],
+  },
 };
 
 /** Maestros → Catálogos: listas que antes estaban fijas en el código. Solo el Administrador las mantiene. */
 export function Catalogos() {
   const [pestana, setPestana] = useState<Ruta>('medios-pago');
-  const def = DEF[pestana];
+  const { dataset } = useApp();
+  const insumos = dataset.insumos.filter((i) => i.activo !== false);
+  // Presentación de venta: el empaque se elige de los insumos (bolsa 5 x 10").
+  const def = pestana !== 'presentaciones-venta' ? DEF[pestana] : { ...DEF[pestana], campos: [
+    { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60, placeholder: 'Paquete x 6 unid' },
+    { key: 'equivalencia', label: 'Equivalencia (panes que lleva)', tipo: 'numero', requerido: true, ayuda: 'Al vender 1 paquete x 6 el stock baja 6 panes' },
+    { key: 'insumoId', label: 'Producto adicional a descontar', tipo: 'select', opciones: [{ valor: '', texto: 'Ninguno' }, ...insumos.map((i) => ({ valor: i.id, texto: `${i.nombre} (${(i.unidadInventario ?? i.unidad).toLowerCase()})` }))],
+      ayuda: 'Empaque que sale solo del almacén al vender (bolsa)' },
+    { key: 'cantidadInsumo', label: 'Cantidad a descontar por presentación', tipo: 'numero', ayuda: 'Ej.: 1 bolsa por paquete' }, ...comunes] as Campo[] };
   const clave = PESTANAS.find((p) => p[0] === pestana)![2];
   const guardar = async (cuerpo: Reg, codigo?: string) => {
     await api(codigo ? `/catalogos/${pestana}/${codigo}` : `/catalogos/${pestana}`, { method: codigo ? 'PATCH' : 'POST', body: cuerpo });
@@ -62,9 +92,10 @@ export function Catalogos() {
         {PESTANAS.map(([r, t]) => <button key={r} className={`chipfilter ${pestana === r ? 'is-active' : ''}`} onClick={() => setPestana(r)}>{t}</button>)}
       </div></div>
       <Crud key={pestana} titulo={PESTANAS.find((p) => p[0] === pestana)![1]} nombreExport={`catalogo-${pestana}`} descripcion={def.descripcion}
-        cargar={async () => ((await api<Record<string, Reg[]>>('/catalogos/administrar'))[clave] ?? []).map((r) => ({ ...r, id: String(r.codigo) }))}
+        cargar={async () => ((await api<Record<string, Reg[]>>('/catalogos/administrar'))[clave] ?? []).map((r) => ({ ...r, id: String(r.codigo),
+          insumo: r.insumoId ? `${r.cantidadInsumo} × ${insumos.find((i) => i.id === r.insumoId)?.nombre ?? 'insumo'}` : '', insumoId: r.insumoId ?? '', cantidadInsumo: r.cantidadInsumo ?? '' }))}
         nuevo={def.nuevo}
-        crear={(d) => guardar(d)} editar={(id, d) => { const { codigo: _c, id: _i, ...resto } = d; return guardar(resto, id); }}
+        crear={(d) => guardar(d)} editar={(id, d) => { const { codigo: _c, id: _i, insumo: _x, ...resto } = d; return guardar(resto, id); }}
         columnas={def.columnas}
         campos={[{ key: 'codigo', label: 'Código (mayúsculas, no se cambia después)', requerido: true, max: 20, soloAlCrear: true }, ...def.campos]} />
     </>

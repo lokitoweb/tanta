@@ -32,6 +32,20 @@ async function conIdempotencia<T>(
   return resultado;
 }
 
+/** Presentación de venta de un producto (paquete x 6): precio, equivalencia y empaque a descargar. */
+export interface Pres { equivalencia: number; precio: number; nombre: string; insumoId: string | null; cantidadInsumo: number }
+export async function presentacionesDe(c: import('pg').PoolClient, items: Array<{ productoId: string; presentacion?: string }>): Promise<Map<string, Pres>> {
+  const pedidas = items.filter((i) => i.presentacion);
+  if (!pedidas.length) return new Map();
+  const r = await c.query<{ producto_id: string; codigo: string; precio_con_igv: string; equivalencia: string; nombre: string; insumo_id: string | null; cantidad_insumo: string | null }>(
+    `SELECT pp.producto_id, pp.presentacion_codigo codigo, pp.precio_con_igv, v.equivalencia, v.nombre, v.insumo_id, v.cantidad_insumo
+     FROM core.producto_presentacion pp JOIN core.presentacion_venta v ON v.codigo = pp.presentacion_codigo
+     WHERE pp.activo AND v.activo AND (pp.producto_id, pp.presentacion_codigo) IN (SELECT * FROM unnest($1::uuid[], $2::text[]))`,
+    [pedidas.map((i) => i.productoId), pedidas.map((i) => i.presentacion!)]);
+  return new Map(r.rows.map((x) => [`${x.producto_id}|${x.codigo}`, {
+    equivalencia: Number(x.equivalencia), precio: Number(x.precio_con_igv), nombre: x.nombre, insumoId: x.insumo_id, cantidadInsumo: Number(x.cantidad_insumo ?? 0) }]));
+}
+
 export async function rutasOperaciones(app: FastifyInstance) {
   /* ------------------------------------------------------------ productos */
   const NuevoProducto = z.object({
@@ -315,7 +329,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
     items: z.array(z.object({
       productoId: z.string().uuid(),
       // Un tope por línea evita desbordes numéricos y ventas absurdas por error de tecleo.
+      // Con presentación (paquete x 6) la cantidad va en presentaciones; sin ella, en unidades del producto.
       cantidad: z.number().positive().max(10_000),
+      presentacion: z.string().trim().toUpperCase().max(20).optional(),
     })).min(1).max(50),
     // Catálogo de medios de pago: el medio debe estar activo y habilitado para ventas.
     formaPago: z.string().trim().toUpperCase().max(20).default('EFECTIVO'),
@@ -369,10 +385,27 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const ids = [...new Set(items.map((i) => i.productoId))].sort();
           const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; costo_unitario: string; stock: string; reservado: string }>(
             `SELECT id, nombre, precio_con_igv, costo_unitario, stock, reservado
-             FROM core.producto WHERE id = ANY($1::uuid[]) AND insumo_id IS NULL ORDER BY id FOR UPDATE`, // los intermedios no se venden
+             FROM core.producto WHERE id = ANY($1::uuid[]) AND insumo_id IS NULL AND estado = 'ACTIVO' ORDER BY id FOR UPDATE`, // los intermedios y los anulados no se venden
             [ids],
           );
           const mapa = new Map(prods.rows.map((r) => [r.id, r]));
+          // Presentaciones de venta (Excel): precio propio, equivalencia en unidades y empaque que se descarga solo.
+          const pres = await presentacionesDe(c, items);
+          const conUnidades = items.map((it) => {
+            if (!it.presentacion) return { ...it, unidades: it.cantidad, precioUnidad: null as number | null, pres: null as Pres | null };
+            const x = pres.get(`${it.productoId}|${it.presentacion}`);
+            if (!x) throw Object.assign(new Error(`El producto no se vende en la presentación ${it.presentacion} o está inactiva.`), { status: 422 });
+            return { ...it, unidades: it.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, pres: x };
+          });
+          // Empaques: se bloquean en orden de id (sin deadlocks) y se valida su stock si se controla.
+          const empaque = new Map<string, number>();
+          for (const it of conUnidades) if (it.pres?.insumoId) empaque.set(it.pres.insumoId, (empaque.get(it.pres.insumoId) ?? 0) + it.cantidad * it.pres.cantidadInsumo);
+          const insumosEmpaque = new Map((await c.query<{ id: string; nombre: string; stock: string; cpp: string; maneja_stock: boolean; unidad_inventario: string }>(
+            'SELECT id, nombre, stock, cpp, maneja_stock, unidad_inventario FROM core.insumo WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [[...empaque.keys()]])).rows.map((r) => [r.id, r]));
+          const costoEmpaque = (it: { cantidad: number; pres: Pres | null }) => {
+            const ins = it.pres?.insumoId ? insumosEmpaque.get(it.pres.insumoId) : undefined;
+            return ins?.maneja_stock ? it.cantidad * it.pres!.cantidadInsumo * Number(ins.cpp) : 0;
+          };
           const stockRestante = new Map(prods.rows.map((r) => [r.id, Number(r.stock)]));
           const reservado = new Map(prods.rows.map((r) => [r.id, Number(r.reservado)]));
           if (pedidoId) {
@@ -382,8 +415,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
             if (ped.estado !== 'LISTO') throw Object.assign(new Error('Solo se despacha un pedido en estado Listo.'), { status: 409 });
             const pedidas = new Map((await c.query<{ producto_id: string; cantidad: string }>(
               'SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id', [pedidoId])).rows.map((r) => [r.producto_id, Number(r.cantidad)]));
-            for (const it of items) {
-              if (it.cantidad > (pedidas.get(it.productoId) ?? 0) + 1e-6) throw Object.assign(new Error('No se puede despachar más de lo pedido.'), { status: 422 });
+            const despachar = new Map<string, number>();
+            for (const it of conUnidades) despachar.set(it.productoId, (despachar.get(it.productoId) ?? 0) + it.unidades);
+            for (const [prod, cant] of despachar) {
+              if (cant > (pedidas.get(prod) ?? 0) + 1e-6) throw Object.assign(new Error('No se puede despachar más de lo pedido.'), { status: 422 });
             }
             for (const [prod, cant] of pedidas) {
               if (!reservado.has(prod)) continue;
@@ -391,19 +426,30 @@ export async function rutasOperaciones(app: FastifyInstance) {
               await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [prod, cant]);
             }
             for (const [prod, cant] of pedidas) if (!reservado.has(prod)) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [prod, cant]);
-            for (const it of items) {
-              await c.query('UPDATE core.pedido_detalle SET cantidad_despachada = $3 WHERE pedido_id = $1 AND producto_id = $2', [pedidoId, it.productoId, it.cantidad]);
+            // Lo despachado se reparte entre las líneas del pedido de ese producto, en orden.
+            for (const [prod, cant] of despachar) {
+              let resto = cant;
+              const det = (await c.query<{ id: string; cantidad: string }>('SELECT id, cantidad FROM core.pedido_detalle WHERE pedido_id = $1 AND producto_id = $2 ORDER BY id', [pedidoId, prod])).rows;
+              for (const [k, d] of det.entries()) {
+                const toma = k === det.length - 1 ? resto : Math.min(resto, Number(d.cantidad));
+                await c.query('UPDATE core.pedido_detalle SET cantidad_despachada = $2 WHERE id = $1', [d.id, toma]);
+                resto -= toma;
+              }
             }
             await c.query("UPDATE core.pedido SET estado = 'DESPACHADO', despachado_en = now() WHERE id = $1", [pedidoId]);
           }
 
-          for (const it of items) {
+          for (const it of conUnidades) {
             const prod = mapa.get(it.productoId);
-            if (!prod) throw Object.assign(new Error('PRODUCTO_NO_EXISTE'), { status: 404 });
+            if (!prod) throw Object.assign(new Error('El producto no existe o está anulado: no se vende.'), { status: 404 });
+            // Precio por unidad: el de la presentación ÷ su equivalencia, o el del producto.
+            const precioUnidad = it.precioUnidad ?? Number(prod.precio_con_igv);
+            const precioLinea = it.pres ? it.pres.precio * it.cantidad : precioUnidad * it.unidades;
 
-            const netoLinea = Number(((Number(prod.precio_con_igv) * (1 - descuentoPct) / (1 + igv)) * it.cantidad).toFixed(4));
-            totalConIgv += Number(prod.precio_con_igv) * (1 - descuentoPct) * it.cantidad;
-            const costoLinea = Number((Number(prod.costo_unitario) * it.cantidad).toFixed(4));
+            const netoLinea = Number(((precioLinea * (1 - descuentoPct)) / (1 + igv)).toFixed(4));
+            totalConIgv += precioLinea * (1 - descuentoPct);
+            // Costo de venta = costo del pan + el empaque que se descarga (bolsa).
+            const costoLinea = Number((Number(prod.costo_unitario) * it.unidades + costoEmpaque(it)).toFixed(4));
             const utilidad = Number((netoLinea - costoLinea).toFixed(4));
             const margen = netoLinea > 0 ? utilidad / netoLinea : 0;
 
@@ -411,12 +457,13 @@ export async function rutasOperaciones(app: FastifyInstance) {
             costoTotal += costoLinea;
 
             lineas.push({
-              productoId: prod.id, producto: prod.nombre, cantidad: it.cantidad,
-              precioConIgv: Number(prod.precio_con_igv), precioNeto: Number((netoLinea / it.cantidad).toFixed(4)),
-              costoUnitario: Number(prod.costo_unitario), utilidad, margen,
+              productoId: prod.id, producto: it.pres ? `${prod.nombre} · ${it.pres.nombre}` : prod.nombre, cantidad: it.unidades,
+              precioConIgv: precioUnidad, precioNeto: Number((netoLinea / it.unidades).toFixed(4)),
+              costoUnitario: costoLinea / it.unidades, utilidad, margen,
+              presentacion: it.presentacion ?? null, cantidadPresentacion: it.pres ? it.cantidad : null,
             });
 
-            const nuevoStock = (stockRestante.get(prod.id) ?? 0) - it.cantidad;
+            const nuevoStock = (stockRestante.get(prod.id) ?? 0) - it.unidades;
             // RN-29: lo reservado por pedidos listos no se vende a terceros.
             if (nuevoStock - (reservado.get(prod.id) ?? 0) < -0.000001) {
               throw Object.assign(
@@ -430,11 +477,28 @@ export async function rutasOperaciones(app: FastifyInstance) {
               `INSERT INTO core.movimiento_inventario
                  (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
                VALUES ('VENTA','PRODUCTO',$1,$8,$2,$3,$4,$5,$6,$7)`,
-              [prod.id, (-it.cantidad).toFixed(6), Number(prod.costo_unitario).toFixed(6),
-                (-costoLinea).toFixed(4), nuevoStock.toFixed(6), valorSaldo.toFixed(4),
+              [prod.id, (-it.unidades).toFixed(6), Number(prod.costo_unitario).toFixed(6),
+                (-(Number(prod.costo_unitario) * it.unidades)).toFixed(4), nuevoStock.toFixed(6), valorSaldo.toFixed(4),
                 Number(prod.costo_unitario).toFixed(6), codigo],
             );
             await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStock.toFixed(6), prod.id]);
+          }
+
+          // Excel «PRESENTACION VENTA»: al vender se descarga solo el empaque (1 bolsa por paquete) del almacén de insumos.
+          for (const [insumoId, cant] of [...empaque].sort(([a], [b]) => a.localeCompare(b))) {
+            const ins = insumosEmpaque.get(insumoId);
+            if (!ins || !ins.maneja_stock) continue; // «maneja stock = N»: no se descuenta
+            const saldo = Number(ins.stock) - cant;
+            if (saldo < -1e-6) {
+              throw Object.assign(new Error(`No alcanza el empaque ${ins.nombre}: se necesitan ${cant} ${ins.unidad_inventario.toLowerCase()} y quedan ${Number(ins.stock)}.`), { status: 409 });
+            }
+            await c.query(`INSERT INTO core.movimiento_inventario
+                (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,motivo_tipo,registrado_por)
+              VALUES ('VENTA','INSUMO',$1,$2,$3,$4,$5,$6,$7,$4,'CONSUMO',$8)`,
+              [insumoId, codigo, (-cant).toFixed(6), Number(ins.cpp).toFixed(6), (-cant * Number(ins.cpp)).toFixed(4), saldo.toFixed(6),
+                (saldo * Number(ins.cpp)).toFixed(4), req.usuario!.id]);
+            await c.query(`UPDATE core.insumo SET stock = $2, actualizado_en = now(), estado = CASE WHEN $2::numeric < minimo THEN 'BAJO_MINIMO' ELSE 'OK' END WHERE id = $1`,
+              [insumoId, saldo.toFixed(6)]);
           }
 
           netas = Number(netas.toFixed(4));
@@ -469,11 +533,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
           if (lineas.length > 0) {
             await c.query(
               `INSERT INTO core.venta_detalle
-                 (venta_id, producto_id, producto, cantidad, precio_con_igv, precio_neto, costo_unitario, utilidad, margen)
+                 (venta_id, producto_id, producto, cantidad, precio_con_igv, precio_neto, costo_unitario, utilidad, margen, presentacion_codigo, cantidad_presentacion)
                SELECT $1, t.* FROM unnest(
                  $2::uuid[], $3::text[], $4::numeric[], $5::numeric[],
-                 $6::numeric[], $7::numeric[], $8::numeric[], $9::numeric[]
-               ) AS t(producto_id, producto, cantidad, precio_con_igv, precio_neto, costo_unitario, utilidad, margen)`,
+                 $6::numeric[], $7::numeric[], $8::numeric[], $9::numeric[], $10::text[], $11::numeric[]
+               ) AS t(producto_id, producto, cantidad, precio_con_igv, precio_neto, costo_unitario, utilidad, margen, presentacion_codigo, cantidad_presentacion)`,
               [
                 ventaId,
                 lineas.map((l) => l.productoId),
@@ -484,6 +548,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
                 lineas.map((l) => (l.costoUnitario as number).toFixed(6)),
                 lineas.map((l) => (l.utilidad as number).toFixed(4)),
                 lineas.map((l) => (l.margen as number).toFixed(6)),
+                lineas.map((l) => l.presentacion as string | null),
+                lineas.map((l) => (l.cantidadPresentacion === null ? null : (l.cantidadPresentacion as number).toFixed(4))),
               ],
             );
           }
@@ -586,6 +652,19 @@ export async function rutasOperaciones(app: FastifyInstance) {
               saldo.toFixed(6), (saldo * cpp).toFixed(4), req.usuario!.id],
           );
           await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [saldo.toFixed(6), l.producto_id]);
+        }
+        // El empaque descargado (bolsas) vuelve al almacén de insumos, a su costo de salida.
+        const empaques = (await c.query<{ insumo_id: string; cantidad: string; costo_unitario: string }>(`SELECT insumo_id, -sum(cantidad) cantidad, max(costo_unitario) costo_unitario
+          FROM core.movimiento_inventario WHERE tipo = 'VENTA' AND item_tipo = 'INSUMO' AND documento = $1 GROUP BY insumo_id ORDER BY insumo_id`, [codigo])).rows;
+        for (const e of empaques) {
+          const ins = (await c.query<{ stock: string; cpp: string }>('SELECT stock, cpp FROM core.insumo WHERE id = $1 FOR UPDATE', [e.insumo_id])).rows[0];
+          const cant = Number(e.cantidad), saldo = Number(ins.stock) + cant;
+          await c.query(`INSERT INTO core.movimiento_inventario
+              (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,motivo_tipo,registrado_por)
+            VALUES ('DEVOLUCION','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,'ANULACION',$9)`,
+            [e.insumo_id, codigo, cant.toFixed(6), Number(e.costo_unitario).toFixed(6), (cant * Number(e.costo_unitario)).toFixed(4), saldo.toFixed(6),
+              (saldo * Number(ins.cpp)).toFixed(4), Number(ins.cpp).toFixed(6), req.usuario!.id]);
+          await c.query(`UPDATE core.insumo SET stock = $2, actualizado_en = now(), estado = CASE WHEN $2::numeric < minimo THEN 'BAJO_MINIMO' ELSE 'OK' END WHERE id = $1`, [e.insumo_id, saldo.toFixed(6)]);
         }
         await c.query(`UPDATE core.cuenta_por_cobrar SET estado = 'ANULADA', saldo = 0 WHERE venta_id = $1`, [v.id]);
         await c.query(`UPDATE core.venta SET estado = 'ANULADA', anulada_en = now(), anulada_por = $2, motivo_anulacion = $3 WHERE id = $1`,

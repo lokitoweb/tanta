@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Boton, Buscador, Encabezado, Tarjeta, TablaEsqueleto, Vacio } from './primitives';
 import { Dialogo } from './Dialogo';
-import { TablaReporte, type ColRep } from './TablaReporte';
+import { TablaReporte, type AccionFila, type ColRep } from './TablaReporte';
 import { exportarExcel } from '@/core/exportar';
 import { urlApi } from '@/core/api';
 import { imagenABase64 } from '@/core/imagen';
@@ -9,7 +9,7 @@ import { imagenABase64 } from '@/core/imagen';
 export interface Campo {
   key: string; label: string;
   /** seccion = subtítulo que agrupa campos; calculado = valor de solo lectura que se recalcula al escribir. */
-  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'imagen' | 'seccion' | 'calculado';
+  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'imagen' | 'seccion' | 'calculado' | 'filas';
   /** Para tipo calculado: recibe el formulario actual y devuelve el texto a mostrar. */
   calcular?: (form: Record<string, unknown>) => string;
   placeholder?: string;
@@ -17,6 +17,13 @@ export interface Campo {
   requerido?: boolean; ayuda?: string; max?: number; ancho?: boolean;
   /** Solo se escribe al crear (p. ej. el código de un catálogo): al editar se muestra sin cambiarlo. */
   soloAlCrear?: boolean;
+  /** Al cambiar este campo, devuelve otros valores a completar (p. ej. el contenido de la presentación elegida). */
+  alCambiar?: (valor: unknown, form: Record<string, unknown>) => Record<string, unknown>;
+  /** Para tipo filas: subtabla editable (presentaciones, cuentas bancarias…). El valor es un arreglo. */
+  columnasFila?: Array<{ key: string; label: string; tipo?: 'texto' | 'numero' | 'select' | 'bool'; opciones?: Array<{ valor: string; texto: string }>; max?: number; placeholder?: string }>;
+  nuevaFila?: Record<string, unknown>;
+  /** Para tipo filas: texto del botón para agregar. */
+  agregar?: string;
 }
 type Reg = Record<string, unknown> & { id?: string };
 
@@ -24,7 +31,7 @@ type Reg = Record<string, unknown> & { id?: string };
  * Administración genérica de un maestro: lista con búsqueda, alta, edición y exportación.
  * La validación de verdad la hace el API; aquí solo se guía al usuario y se muestra el error.
  */
-export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, crear, editar, eliminar, extra, acciones, nombreExport, deps }: {
+export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, crear, editar, eliminar, extra, acciones, accionesFila, nombreExport, deps, recargar }: {
   titulo: string; descripcion: string; cargar: () => Promise<Reg[]>; columnas: ColRep[]; campos: Campo[];
   nuevo: Reg; crear?: (d: Reg) => Promise<unknown>; editar?: (id: string, d: Reg) => Promise<unknown>; extra?: ReactNode; nombreExport: string;
   /** Botones extra en el encabezado (p. ej. Importar). */
@@ -33,6 +40,10 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
   eliminar?: (id: string) => Promise<unknown>;
   /** Si cambia (p. ej. los datos globales tras guardar), la lista se vuelve a cargar. */
   deps?: unknown;
+  /** Botones por fila (Anular, Ajustar precio…). */
+  accionesFila?: AccionFila[];
+  /** Cambia este número para recargar la lista desde fuera (tras una acción de fila). */
+  recargar?: number;
 }) {
   // null = cargando (esqueleto); [] = cargó y no hay registros.
   const [filas, setFilas] = useState<Reg[] | null>(null);
@@ -55,7 +66,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
   };
 
   const refrescar = async () => { try { setFilas(await cargar()); setCargaError(null); } catch (e) { setCargaError(e instanceof Error ? e.message : 'No se pudo cargar.'); } };
-  useEffect(() => { void refrescar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [deps]);
+  useEffect(() => { void refrescar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [deps, recargar]);
 
   const visibles = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -68,7 +79,12 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
     setGuardando(true);
     setError(null);
     try {
-      const datos = Object.fromEntries(campos.filter((c) => c.tipo !== 'seccion' && c.tipo !== 'calculado').map((c) => [c.key, (c.tipo === 'numero' || c.tipo === 'pct') && form[c.key] === '' ? null : form[c.key]]));
+      const datos = Object.fromEntries(campos.filter((c) => c.tipo !== 'seccion' && c.tipo !== 'calculado').map((c) => [c.key,
+        (c.tipo === 'numero' || c.tipo === 'pct') && form[c.key] === '' ? null
+          // Subtabla: números como número; filas vacías fuera.
+          : c.tipo === 'filas' ? ((form[c.key] as Reg[] | undefined) ?? []).map((fila) => Object.fromEntries(Object.entries(fila).map(([k, v]) =>
+            [k, c.columnasFila?.find((x) => x.key === k)?.tipo === 'numero' ? (v === '' || v === null ? null : Number(v)) : v])))
+          : form[c.key]]));
       if (form.id) await editar!(form.id, datos); else await crear!(datos);
       setForm(null);
       await refrescar();
@@ -76,9 +92,14 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
     finally { setGuardando(false); }
   };
 
-  const set = (c: Campo, v: string | boolean) => setForm((f) => f && ({
-    ...f, [c.key]: c.tipo === 'numero' ? (v === '' ? '' : Number(v)) : c.tipo === 'pct' ? (v === '' ? '' : Number(v) / 100) : v,
-  }));
+  const set = (c: Campo, v: string | boolean) => setForm((f) => {
+    if (!f) return f;
+    const valor = c.tipo === 'numero' ? (v === '' ? '' : Number(v)) : c.tipo === 'pct' ? (v === '' ? '' : Number(v) / 100) : v;
+    const nuevoForm = { ...f, [c.key]: valor };
+    return c.alCambiar ? { ...nuevoForm, ...c.alCambiar(valor, nuevoForm) } : nuevoForm;
+  });
+  const filasDe = (c: Campo) => ((form?.[c.key] as Reg[] | undefined) ?? []);
+  const setSub = (c: Campo, filas: Reg[]) => setForm((f) => f && ({ ...f, [c.key]: filas }));
   const valor = (c: Campo) => {
     const v = form?.[c.key];
     if (c.tipo === 'pct') return v === '' || v === undefined ? '' : String(Math.round(Number(v) * 10000) / 100);
@@ -101,7 +122,9 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
         {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setFilas(null); void refrescar(); }} />
           : filas === null ? <TablaEsqueleto columnas={Math.min(columnas.length, 6)} />
           : visibles.length === 0 ? <Vacio titulo="Sin registros" detalle={q ? 'Prueba con otra búsqueda.' : 'Crea el primero con «Nuevo».'} />
-            : <TablaReporte columnas={columnas} filas={visibles} onFila={editar ? (f) => { setError(null); setForm({ ...f }); } : undefined}
+            : <TablaReporte columnas={columnas} filas={visibles} // Excel: cada fila con «Modificar» visible (además del clic en la fila) y sus acciones propias.
+              acciones={[...(editar ? [{ etiqueta: 'Modificar', icono: 'edit' as const, onClick: (f: Reg) => { setError(null); setForm({ ...f }); } }] : []), ...(accionesFila ?? [])]}
+              onFila={editar ? (f) => { setError(null); setForm({ ...f }); } : undefined}
               onEliminar={eliminar ? (f) => { setErrorBorrar(null); setABorrar(f); } : undefined} />}
       </Tarjeta>
 
@@ -121,6 +144,37 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
             <div key={c.key} className={`field field--calculado ${c.ancho ? 'field--ancho' : ''}`}>
               <span className="field__label">{c.label}</span>
               <output className="field__valor">{form ? c.calcular?.(form) ?? '—' : '—'}</output>
+              {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}
+            </div>
+          ) : c.tipo === 'filas' ? (
+            <div key={c.key} className="field field--ancho subtabla">
+              <span className="field__label">{c.label}</span>
+              {filasDe(c).length > 0 && (
+                <div className="table-wrap"><table className="table table--compacta">
+                  <thead><tr>{c.columnasFila!.map((x) => <th key={x.key}>{x.label}</th>)}<th><span className="sr-only">Quitar</span></th></tr></thead>
+                  <tbody>{filasDe(c).map((fila, i) => (
+                    <tr key={i}>
+                      {c.columnasFila!.map((x) => {
+                        const cambiar = (v: unknown) => setSub(c, filasDe(c).map((y, j) => (j === i ? { ...y, [x.key]: v } : y)));
+                        return (
+                          <td key={x.key}>{x.tipo === 'select' ? (
+                            <select className="field__input" aria-label={x.label} value={String(fila[x.key] ?? '')} onChange={(e) => cambiar(e.target.value)}>
+                              {x.opciones?.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}</select>
+                          ) : x.tipo === 'bool' ? (
+                            <input type="checkbox" aria-label={x.label} checked={Boolean(fila[x.key])} onChange={(e) => cambiar(e.target.checked)} />
+                          ) : (
+                            <input className="field__input" aria-label={x.label} placeholder={x.placeholder} maxLength={x.max ?? 60}
+                              type={x.tipo === 'numero' ? 'number' : 'text'} step={x.tipo === 'numero' ? 'any' : undefined} min={x.tipo === 'numero' ? 0 : undefined}
+                              value={String(fila[x.key] ?? '')} onChange={(e) => cambiar(e.target.value)} />
+                          )}</td>);
+                      })}
+                      <td><button type="button" className="btn-icono btn-icono--peligro" title="Quitar" aria-label="Quitar fila"
+                        onClick={() => setSub(c, filasDe(c).filter((_, j) => j !== i))}>×</button></td>
+                    </tr>
+                  ))}</tbody>
+                </table></div>
+              )}
+              <div><Boton icono="plus" onClick={() => setSub(c, [...filasDe(c), { ...(c.nuevaFila ?? {}) }])}>{c.agregar ?? 'Agregar'}</Boton></div>
               {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}
             </div>
           ) : c.tipo === 'imagen' ? (

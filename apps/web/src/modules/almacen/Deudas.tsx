@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/core/api';
+import { api, urlApi } from '@/core/api';
+import { imagenABase64 } from '@/core/imagen';
 import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
 import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 
-interface Pago { codigo: string; fecha: string; caja: string; medio: string; monto: number; nroOperacion: string | null; estado: string; autoriza: string; motivoAnulacion: string | null; apertura: string | null }
+interface Pago { codigo: string; fecha: string; caja: string; medio: string; monto: number; nroOperacion: string | null; estado: string; autoriza: string; motivoAnulacion: string | null; apertura: string | null; comprobanteUrl: string | null }
 interface Deuda { codigo: string; estadoPago: 'PENDIENTE' | 'PARCIAL' | 'PAGADO'; documento: string; fecha: string; vencePago: string | null; dias: number | null;
-  proveedor: string; banco: string; cci: string; total: number; pagado: number; saldo: number; pagos: Pago[] }
+  proveedor: string; ruc: string; cuentas: Array<{ banco: string; numero: string }>; total: number; pagado: number; saldo: number; pagos: Pago[] }
 interface Caja { codigo: string; saldo: number }
 
 const TONO = { PENDIENTE: 'warn', PARCIAL: 'info', PAGADO: 'ok' } as const;
@@ -26,7 +27,7 @@ export function Deudas() {
   const [filtro, setFiltro] = useState<'abiertas' | 'PAGADO'>('abiertas');
   const [caja, setCaja] = useState<Caja | null>(null);
   const [ver, setVer] = useState<Deuda | null>(null);
-  const [pago, setPago] = useState<{ caja: 'CHICA' | 'GRANDE'; medio: string; monto: string; nroOperacion: string } | null>(null);
+  const [pago, setPago] = useState<{ caja: 'CHICA' | 'GRANDE'; medio: string; monto: string; nroOperacion: string; comprobante: string | null } | null>(null);
   const [anular, setAnular] = useState<{ codigo: string; motivo: string } | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -61,7 +62,7 @@ export function Deudas() {
     setOcupado(true);
     try {
       const r = await api<{ codigo: string; saldo: number; estadoPago: string }>(`/compras/${ver.codigo}/pagos`, { method: 'POST', conIdempotencia: true,
-        body: { caja: pago.caja, medio: pago.medio, monto, nroOperacion: pago.nroOperacion.trim() } });
+        body: { caja: pago.caja, medio: pago.medio, monto, nroOperacion: pago.nroOperacion.trim(), comprobante: pago.comprobante } });
       setPago(null);
       setAviso({ tono: 'ok', texto: `Pago ${r.codigo} registrado: ${r.estadoPago === 'PAGADO' ? 'deuda cancelada' : `queda ${money(r.saldo)} por pagar`}.` });
       await cargar();
@@ -95,15 +96,16 @@ export function Deudas() {
       </div></div>
 
       <Dialogo abierto={ver !== null} titulo={ver ? `${ver.codigo} · ${ver.proveedor}` : ''}
-        descripcion={ver ? `${ver.documento} · ${ver.fecha}${ver.vencePago ? ` · vence ${ver.vencePago}` : ''}${ver.banco ? ` · ${ver.banco}${ver.cci ? ` CCI ${ver.cci}` : ''}` : ''}` : ''}
+        descripcion={ver ? `${ver.documento} · ${ver.fecha}${ver.vencePago ? ` · vence ${ver.vencePago}` : ''}${ver.ruc ? ` · RUC ${ver.ruc}` : ''}` : ''}
         onCerrar={() => { setVer(null); setPago(null); setAnular(null); }}
         acciones={ver && (pago
           ? <><Boton onClick={() => setPago(null)}>Volver</Boton><Boton variant="primary" disabled={!!errorPago || ocupado} onClick={() => void registrar()}>{ocupado ? 'Registrando…' : `Pagar ${money(monto || 0)}`}</Boton></>
           : anular ? <><Boton onClick={() => setAnular(null)}>Volver</Boton><Boton variant="primary" disabled={anular.motivo.trim().length < 5 || ocupado} onClick={() => void anularPago()}>Anular pago</Boton></>
-            : <>{paga && ver.saldo > 0 && <Boton variant="primary" onClick={() => setPago({ caja: 'GRANDE', medio: mediosCaja('GRANDE')[0]?.codigo ?? '', monto: ver.saldo.toFixed(2), nroOperacion: '' })}>Registrar pago</Boton>}
+            : <>{paga && ver.saldo > 0 && <Boton variant="primary" onClick={() => setPago({ caja: 'GRANDE', medio: mediosCaja('GRANDE')[0]?.codigo ?? '', monto: ver.saldo.toFixed(2), nroOperacion: '', comprobante: null })}>Registrar pago</Boton>}
               <Boton onClick={() => setVer(null)}>Cerrar</Boton></>)}>
         {ver && (<>
           <p className="dialogo__nota">Total {money(ver.total)} · pagado {money(ver.pagado)} · <b>saldo {money(ver.saldo)}</b></p>
+          {ver.cuentas.length > 0 && <p className="dialogo__nota">Cuentas del proveedor: {ver.cuentas.map((k) => `${k.banco} ${k.numero}`).join(' · ')}</p>}
           {ver.pagos.length > 0 && (
             <div className="table-wrap"><table className="table table--compacta">
               <thead><tr><th>Pago</th><th>Fecha</th><th>Caja</th><th>Medio</th><th className="t-right">Monto</th><th>Estado</th><th /></tr></thead>
@@ -111,7 +113,7 @@ export function Deudas() {
                 <tr key={p.codigo}>
                   <td>{p.codigo}</td><td>{new Date(p.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
                   <td>{p.caja === 'CHICA' ? `Chica ${p.apertura ?? ''}` : 'Grande'}</td>
-                  <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}</td>
+                  <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}{p.comprobanteUrl && <> · <a href={urlApi(p.comprobanteUrl)} target="_blank" rel="noreferrer">comprobante</a></>}</td>
                   <td className="t-right">{money(p.monto)}</td>
                   <td>{p.estado === 'VIGENTE' ? <Insignia tono="ok">Vigente</Insignia> : <Insignia tono="neutral">Anulado</Insignia>}</td>
                   <td>{paga && p.estado === 'VIGENTE' && !pago && !anular && <Boton onClick={() => setAnular({ codigo: p.codigo, motivo: '' })}>Anular</Boton>}</td>
@@ -131,6 +133,7 @@ export function Deudas() {
                 <input className="field__input" type="number" min="0" step="0.01" max={ver.saldo} value={pago.monto} onChange={(e) => setPago({ ...pago, monto: e.target.value })} /></label>
               <label className="field"><span className="field__label">N.° de operación{digital ? '' : ' (opcional)'}</span>
                 <input className="field__input" maxLength={30} value={pago.nroOperacion} onChange={(e) => setPago({ ...pago, nroOperacion: e.target.value.toUpperCase() })} /></label>
+              <ComprobanteInput valor={pago.comprobante} onChange={(c) => setPago({ ...pago, comprobante: c })} onError={(t) => setAviso({ tono: 'danger', texto: t })} />
               {errorPago && <span className="field__aviso field--ancho">{errorPago}</span>}
             </div>
           )}
@@ -159,5 +162,23 @@ export function Deudas() {
         )}
       </Tarjeta>
     </>
+  );
+}
+
+/** Imagen del comprobante (voucher, captura de Yape): opcional, PNG/JPEG/WebP; se reduce antes de enviarla. */
+export function ComprobanteInput({ valor, onChange, onError }: { valor: string | null; onChange: (v: string | null) => void; onError: (t: string) => void }) {
+  return (
+    <div className="field field--ancho">
+      <span className="field__label">Imagen del comprobante (opcional)</span>
+      <div className="campo-imagen">
+        {valor ? <img src={valor} alt="Comprobante" /> : <span className="campo-imagen__vacio">Sin imagen</span>}
+        <label className="btn btn--secondary btn--md">{valor ? 'Cambiar' : 'Subir'}
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => {
+            const f = e.target.files?.[0]; e.target.value = '';
+            if (f) imagenABase64(f, 1200).then(onChange, (er: Error) => onError(er.message));
+          }} /></label>
+        {valor && <Boton onClick={() => onChange(null)}>Quitar</Boton>}
+      </div>
+    </div>
   );
 }

@@ -6,6 +6,7 @@ import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { medioPago } from './catalogos.js';
+import { presentacionesDe } from './operaciones.js';
 
 /**
  * Flujo operativo del PDF (Fig. 2): el cliente registra su pedido → Producción consolida y
@@ -58,7 +59,8 @@ export async function rutasFlujo(app: FastifyInstance) {
   /* --------------------------------------------------------------- pedidos */
   const NuevoPedido = z.object({
     clienteId: z.string().uuid().optional(),
-    items: z.array(z.object({ productoId: z.string().uuid(), cantidad: z.number().positive().max(10_000) })).min(1).max(50),
+    // Con presentación (paquete x 6) la cantidad va en presentaciones; sin ella, en unidades.
+    items: z.array(z.object({ productoId: z.string().uuid(), cantidad: z.number().positive().max(10_000), presentacion: z.string().trim().toUpperCase().max(20).optional() })).min(1).max(50),
     fechaEntrega: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     horaEntrega: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).or(z.literal('')).default(''),
     observaciones: z.string().trim().max(500).default(''),
@@ -94,7 +96,14 @@ export async function rutasFlujo(app: FastifyInstance) {
           "SELECT id, nombre, precio_con_igv, anticipacion_horas FROM core.producto WHERE id = ANY($1::uuid[]) AND estado = 'ACTIVO' AND insumo_id IS NULL", [ids]);
         if (prods.rowCount !== ids.length) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
         const mapa = new Map(prods.rows.map((x) => [x.id, x]));
-        const total = d.items.reduce((s, i) => s + num(mapa.get(i.productoId)!.precio_con_igv) * i.cantidad, 0);
+        const pres = await presentacionesDe(c, d.items);
+        const lineas = d.items.map((i) => {
+          if (!i.presentacion) return { ...i, unidades: i.cantidad, precioUnidad: num(mapa.get(i.productoId)!.precio_con_igv), importe: num(mapa.get(i.productoId)!.precio_con_igv) * i.cantidad };
+          const x = pres.get(`${i.productoId}|${i.presentacion}`);
+          if (!x) throw Object.assign(new Error(`${mapa.get(i.productoId)!.nombre} no se vende en la presentación ${i.presentacion}.`), { status: 422 });
+          return { ...i, unidades: i.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, importe: x.precio * i.cantidad };
+        });
+        const total = lineas.reduce((s, i) => s + i.importe, 0);
         // PED-04 / CP-09: anticipación mínima del producto más exigente (hora de Lima, UTC−5).
         const horas = Math.max(0, ...prods.rows.map((x) => Number(x.anticipacion_horas)));
         const entrega = Date.parse(`${d.fechaEntrega}T${d.horaEntrega || '08:00'}:00-05:00`);
@@ -117,10 +126,10 @@ export async function rutasFlujo(app: FastifyInstance) {
            VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END, $13) RETURNING id`,
           [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), d.fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
             estadoInicial, d.tipoEntrega, d.direccion, d.pagoEntrega])).rows[0];
-        for (const i of d.items) {
+        for (const i of lineas) {
           const pr = mapa.get(i.productoId)!;
-          await c.query('INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv) VALUES ($1,$2,$3,$4,$5)',
-            [ped.id, pr.id, pr.nombre, i.cantidad, pr.precio_con_igv]);
+          await c.query(`INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv, presentacion_codigo, cantidad_presentacion)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)`, [ped.id, pr.id, pr.nombre, i.unidades, i.precioUnidad.toFixed(4), i.presentacion ?? null, i.presentacion ? i.cantidad : null]);
         }
         return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: estadoInicial };
       });
@@ -142,12 +151,14 @@ export async function rutasFlujo(app: FastifyInstance) {
       SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
              p.tipo_entrega AS "tipoEntrega", p.direccion, p.pago_entrega AS "pagoEntrega", p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
-             coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada))
+             coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
+               'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion) ORDER BY d.id)
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
       FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
       WHERE ($1::uuid IS NULL OR p.cliente_id = $1)
       GROUP BY p.id ORDER BY p.creado_en DESC LIMIT 200`, [yo?.cliente_id ?? null]);
-    return filas.map((f) => ({ ...f, total: num(f.total), items: (f.items as unknown as Array<Record<string, unknown>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), despachado: num(i.despachado as string) })) }));
+    return filas.map((f) => ({ ...f, total: num(f.total), items: (f.items as unknown as Array<Record<string, unknown>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), despachado: num(i.despachado as string),
+      cantidadPresentacion: i.cantidadPresentacion === null ? null : num(i.cantidadPresentacion as string) })) }));
   });
 
   // PED-07: el cliente cancela su pedido, con motivo, solo antes de que pase a producción.

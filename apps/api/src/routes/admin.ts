@@ -67,7 +67,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     }
     // Parámetros de fórmula con valores cerrados: un error de tipeo no puede cambiar el costeo.
     const OPCIONES: Record<string, string[]> = {
-      formula_merma: ['MULTIPLICAR', 'DIVIDIR'], metodo_costo_insumo: ['PROMEDIO', 'ULTIMO'],
+      formula_merma: ['MULTIPLICAR', 'DIVIDIR'], metodo_costo_insumo: ['PROMEDIO', 'ULTIMO'], costo_insumo_formulas: ['MANUAL', 'AUTOMATICO'],
     };
     if (OPCIONES[clave] && !OPCIONES[clave].includes(nuevo.toUpperCase())) {
       return reply.code(422).send(error(422, 'VALOR_INVALIDO', `Usa ${OPCIONES[clave].join(' o ')}.`));
@@ -78,9 +78,11 @@ export async function rutasAdmin(app: FastifyInstance) {
 
     const cerrado = clave === 'cif_base_prorrateo' || Boolean(OPCIONES[clave]);
     // Parámetros que entran en la ficha de costo: se recostea en la misma transacción y el catálogo lo ve al instante.
-    const recostea = ['cif_base_prorrateo', 'formula_merma', 'sueldo_base', 'factor_beneficios', 'horas_mes'].includes(clave);
+    const recostea = ['cif_base_prorrateo', 'formula_merma', 'sueldo_base', 'factor_beneficios', 'horas_mes', 'costo_insumo_formulas'].includes(clave);
     await tx(async (c) => {
       await c.query('UPDATE core.parametro SET valor = $1 WHERE clave = $2', [cerrado ? nuevo.toUpperCase() : nuevo, clave]);
+      // Pasar a AUTOMATICO: las fórmulas vuelven a seguir al kárdex (se descartan los costos fijados a mano).
+      if (clave === 'costo_insumo_formulas' && nuevo.toUpperCase() === 'AUTOMATICO') await c.query('UPDATE core.insumo SET costo_formula = NULL WHERE costo_formula IS NOT NULL');
       if (recostea) await c.query('SELECT core.recalcular_costos()');
       await c.query(
         'INSERT INTO audit.parametro_historial (clave, valor_antes, valor_nuevo, usuario_id) VALUES ($1,$2,$3,$4)',

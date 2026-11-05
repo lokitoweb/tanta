@@ -21,6 +21,7 @@ export async function responder<T>(reply: { code: (n: number) => { send: (b: unk
   try { return await fn(); } catch (e) {
     const err = e as Error & { status?: number; code?: string };
     if (err.code === '23505') return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un registro con esos datos.'));
+    if (err.code === '23514') return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Un dato no cumple las reglas (formato o valor fuera de rango).'));
     if (!err.status) throw e;
     return reply.code(err.status).send(error(err.status, codigo, err.message));
   }
@@ -29,8 +30,14 @@ export async function responder<T>(reply: { code: (n: number) => { send: (b: unk
 export async function rutasAlmacen(app: FastifyInstance) {
   /* ------------------------------------------------------------ proveedores */
   const Proveedor = z.object({
-    // Informe de compras §5.2: RUC obligatorio, único y de 11 dígitos.
-    ruc: z.string({ required_error: 'El RUC es obligatorio.' }).trim().regex(/^(10|15|17|20)\d{9}$/, 'El RUC tiene 11 dígitos y empieza en 10, 15, 17 o 20'),
+    // Excel «INTERFACES TANTA»: RUC OPCIONAL (las notas de pedido no lo traen); si se escribe, es válido y único.
+    ruc: z.union([z.literal(''), z.string().trim().regex(/^(10|15|17|20)\d{9}$/, 'El RUC tiene 11 dígitos y empieza en 10, 15, 17 o 20')]).default(''),
+    codigo: z.string().trim().toUpperCase().regex(/^([A-Z0-9][A-Z0-9-]{0,19})?$/, 'El código lleva hasta 20 letras, números o guiones').default(''),
+    // Una o más cuentas (banco del catálogo + n.° de cuenta o CCI).
+    cuentas: z.array(z.object({
+      banco: z.string().trim().toUpperCase().min(2).max(20),
+      numero: z.string().trim().regex(/^[0-9][0-9 -]{4,38}[0-9]$/, 'N.° de cuenta o CCI: de 6 a 40 dígitos (se permiten guiones)'),
+    })).max(10).default([]),
     razonSocial: z.string().trim().min(2).max(160),
     contacto: z.string().trim().max(120).default(''),
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido').default(''),
@@ -42,15 +49,32 @@ export async function rutasAlmacen(app: FastifyInstance) {
     cci: z.union([z.literal(''), z.string().trim().regex(/^\d{20}$/, 'El CCI tiene 20 dígitos')]).default(''),
   });
 
+  /** Reemplaza las cuentas bancarias del proveedor; cada banco debe estar activo en el catálogo. */
+  async function guardarCuentas(c: import('pg').PoolClient, proveedorId: string, cuentas: Array<{ banco: string; numero: string }>) {
+    const nums = cuentas.map((k) => k.numero.replace(/[ -]/g, ''));
+    if (new Set(nums).size !== nums.length) throw fallo(422, 'Una cuenta aparece dos veces.');
+    if (cuentas.length) {
+      const ok = (await c.query<{ codigo: string }>('SELECT codigo FROM core.banco WHERE codigo = ANY($1) AND activo', [cuentas.map((k) => k.banco)])).rows.map((x) => x.codigo);
+      const falta = cuentas.find((k) => !ok.includes(k.banco));
+      if (falta) throw fallo(422, `El banco ${falta.banco} no existe o está inactivo (Maestros → Catálogos → Bancos).`);
+    }
+    await c.query('DELETE FROM core.proveedor_cuenta WHERE proveedor_id = $1', [proveedorId]);
+    for (const [i, k] of cuentas.entries()) {
+      await c.query('INSERT INTO core.proveedor_cuenta (proveedor_id, banco, numero, orden) VALUES ($1,$2,$3,$4)', [proveedorId, k.banco, k.numero, i + 1]);
+    }
+  }
+
   app.get('/proveedores', { preHandler: autenticar }, async (req, reply) => {
     if (!['proveedores.gestionar', 'compras.registrar', 'maestros.ver'].some((x) => req.usuario!.permisos.has(x)))
       return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso proveedores.gestionar.'));
     const filas = await q<Record<string, string>>(`
-      SELECT p.id, coalesce(p.ruc, '') ruc, p.razon_social, p.contacto, p.telefono, p.email, p.estado, p.direccion, p.vendedor, p.banco, coalesce(p.cci, '') cci,
+      SELECT p.id, p.codigo, coalesce(p.ruc, '') ruc,
+             coalesce((SELECT json_agg(json_build_object('banco', k.banco, 'bancoNombre', b.nombre, 'numero', k.numero) ORDER BY k.orden)
+               FROM core.proveedor_cuenta k JOIN core.banco b ON b.codigo = k.banco WHERE k.proveedor_id = p.id), '[]') cuentas, p.razon_social, p.contacto, p.telefono, p.email, p.estado, p.direccion, p.vendedor, p.banco, coalesce(p.cci, '') cci,
              (SELECT string_agg(i.nombre, ', ' ORDER BY i.nombre) FROM core.insumo i WHERE i.proveedor_id = p.id) insumos,
              (SELECT count(*) FROM core.compra c WHERE c.proveedor_id = p.id) compras
       FROM core.proveedor p ORDER BY p.estado, p.razon_social`);
-    return filas.map((f) => ({ id: f.id, ruc: f.ruc, razonSocial: f.razon_social, contacto: f.contacto, telefono: f.telefono, email: f.email,
+    return filas.map((f) => ({ id: f.id, codigo: f.codigo, cuentas: f.cuentas, ruc: f.ruc, razonSocial: f.razon_social, contacto: f.contacto, telefono: f.telefono, email: f.email,
       estado: f.estado, direccion: f.direccion, vendedor: f.vendedor, banco: f.banco, cci: f.cci, insumos: f.insumos ?? '', compras: num(f.compras) }));
   });
 
@@ -60,10 +84,15 @@ export async function rutasAlmacen(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Proveedor inválido.'));
     const d = p.data;
     return responder(reply, 'PROVEEDOR_INVALIDO', async () => {
-      const r = await uno<{ id: string }>(`INSERT INTO core.proveedor (ruc, razon_social, contacto, telefono, email, estado, direccion, vendedor, banco, cci)
-        VALUES (NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,'')) RETURNING id`, [d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado, d.direccion, d.vendedor, d.banco, d.cci]);
-      await auditar({ ...actor(req), accion: 'PROVEEDOR_CREADO', entidad: 'proveedor', entidadId: r!.id, detalle: { ruc: d.ruc, razonSocial: d.razonSocial } });
-      return reply.code(201).send({ id: r!.id, ...d });
+      const r = await tx(async (c) => {
+        const x = (await c.query<{ id: string; codigo: string }>(`INSERT INTO core.proveedor (ruc, razon_social, contacto, telefono, email, estado, direccion, vendedor, banco, cci, codigo)
+          VALUES (NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULLIF($11,'')) RETURNING id, codigo`,
+          [d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado, d.direccion, d.vendedor, d.banco, d.cci, d.codigo])).rows[0];
+        await guardarCuentas(c, x.id, d.cuentas);
+        return x;
+      });
+      await auditar({ ...actor(req), accion: 'PROVEEDOR_CREADO', entidad: 'proveedor', entidadId: r.id, detalle: { ruc: d.ruc, razonSocial: d.razonSocial, codigo: r.codigo } });
+      return reply.code(201).send({ ...d, id: r.id, codigo: r.codigo });
     });
   });
 
@@ -74,9 +103,13 @@ export async function rutasAlmacen(app: FastifyInstance) {
     if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error?.issues[0]?.message ?? 'Proveedor inválido.'));
     const d = p.data;
     return responder(reply, 'PROVEEDOR_INVALIDO', async () => {
-      const r = await q(`UPDATE core.proveedor SET ruc = NULLIF($2,''), razon_social = $3, contacto = $4, telefono = $5, email = $6, estado = $7,
-        direccion = $8, vendedor = $9, banco = $10, cci = NULLIF($11,'') WHERE id = $1 RETURNING id`, [id, d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado, d.direccion, d.vendedor, d.banco, d.cci]);
-      if (!r.length) throw fallo(404, 'El proveedor no existe.');
+      await tx(async (c) => {
+        const r = await c.query(`UPDATE core.proveedor SET ruc = NULLIF($2,''), razon_social = $3, contacto = $4, telefono = $5, email = $6, estado = $7,
+          direccion = $8, vendedor = $9, banco = $10, cci = NULLIF($11,''), codigo = coalesce(NULLIF($12,''), codigo) WHERE id = $1 RETURNING id`,
+          [id, d.ruc, d.razonSocial, d.contacto, d.telefono, d.email, d.estado, d.direccion, d.vendedor, d.banco, d.cci, d.codigo]);
+        if (!r.rowCount) throw fallo(404, 'El proveedor no existe.');
+        await guardarCuentas(c, id, d.cuentas);
+      });
       await auditar({ ...actor(req), accion: 'PROVEEDOR_EDITADO', entidad: 'proveedor', entidadId: id, detalle: { razonSocial: d.razonSocial, estado: d.estado } });
       return { id, ...d };
     });
@@ -191,10 +224,12 @@ export async function rutasAlmacen(app: FastifyInstance) {
  * a quien tiene el permiso alertas.stock. SKIP LOCKED: con varias instancias, cada alerta sale una vez.
  */
 export async function despacharAlertasStock(): Promise<number> {
-  const alertas = await tx(async (c) => (await c.query<{ insumo: string; unidad: string; stock: string; minimo: string }>(`
+  const alertas = (await tx(async (c) => (await c.query<{ insumo: string; unidad: string; stock: string; minimo: string; maneja_stock: boolean }>(`
     UPDATE core.alerta_stock a SET enviada_en = now() FROM core.insumo i
     WHERE a.id IN (SELECT id FROM core.alerta_stock WHERE enviada_en IS NULL ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED) AND i.id = a.insumo_id
-    RETURNING i.nombre insumo, i.unidad, a.stock, a.minimo`)).rows);
+    RETURNING i.nombre insumo, i.unidad, a.stock, a.minimo, i.maneja_stock`)).rows))
+    // «Maneja stock = N»: la alerta se marca enviada pero no se avisa.
+    .filter((x) => x.maneja_stock !== false);
   if (!alertas.length) return 0;
   for (const a of alertas) {
     const texto = `${a.insumo}: quedan ${num(a.stock).toFixed(2)} ${a.unidad.toLowerCase()} (mínimo ${num(a.minimo).toFixed(2)})`;
@@ -210,16 +245,17 @@ export async function rutasAlmacenes(app: FastifyInstance) {
     nombre: z.string().trim().min(3).max(80), tipo: z.enum(['INSUMOS', 'PRODUCTOS']),
     responsableId: z.union([z.literal(''), z.string().uuid()]).default(''), ubicacion: z.string().trim().max(160).default(''),
     principal: z.boolean().default(false), estado: z.enum(['ACTIVO', 'INACTIVO']).default('ACTIVO'),
+    codigo: z.string().trim().toUpperCase().regex(/^([A-Z0-9][A-Z0-9-]{0,19})?$/, 'El código lleva hasta 20 letras, números o guiones').default(''),
   }).refine((d) => !d.principal || d.estado === 'ACTIVO', { message: 'El almacén principal debe estar activo.', path: ['estado'] });
 
   app.get('/almacenes', { preHandler: autenticar }, async (req, reply) => {
     if (!['inventario.ver', 'maestros.ver', 'maestros.editar'].some((x) => req.usuario!.permisos.has(x)))
       return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso inventario.ver.'));
     const filas = await q<Record<string, string>>(`
-      SELECT a.id, a.nombre, a.tipo, coalesce(a.responsable_id::text, '') responsable_id, coalesce(u.nombre, '') responsable, a.ubicacion, a.principal, a.estado,
+      SELECT a.id, a.codigo, a.nombre, a.tipo, coalesce(a.responsable_id::text, '') responsable_id, coalesce(u.nombre, '') responsable, a.ubicacion, a.principal, a.estado,
              (SELECT count(*) FROM core.movimiento_inventario m WHERE m.almacen_id = a.id) movimientos
       FROM core.almacen a LEFT JOIN core.usuario u ON u.id = a.responsable_id ORDER BY a.tipo, NOT a.principal, a.nombre`);
-    return filas.map((f) => ({ id: f.id, nombre: f.nombre, tipo: f.tipo, responsableId: f.responsable_id, responsable: f.responsable, ubicacion: f.ubicacion,
+    return filas.map((f) => ({ id: f.id, codigo: f.codigo, nombre: f.nombre, tipo: f.tipo, responsableId: f.responsable_id, responsable: f.responsable, ubicacion: f.ubicacion,
       principal: Boolean(f.principal), estado: f.estado, movimientos: num(f.movimientos) }));
   });
 
@@ -235,10 +271,11 @@ export async function rutasAlmacenes(app: FastifyInstance) {
     else if (id && (await c.query('SELECT 1 FROM core.almacen WHERE id = $1 AND principal', [id])).rowCount)
       throw fallo(409, 'Marca otro almacén como principal antes de quitarle ese rol a este.');
     const r = id
-      ? await c.query(`UPDATE core.almacen SET nombre = $2, tipo = $3, responsable_id = NULLIF($4,'')::uuid, ubicacion = $5, principal = $6, estado = $7 WHERE id = $1 RETURNING id`,
-        [id, d.nombre, d.tipo, d.responsableId, d.ubicacion, d.principal, d.estado])
-      : await c.query(`INSERT INTO core.almacen (nombre, tipo, responsable_id, ubicacion, principal, estado) VALUES ($1,$2,NULLIF($3,'')::uuid,$4,$5,$6) RETURNING id`,
-        [d.nombre, d.tipo, d.responsableId, d.ubicacion, d.principal, d.estado]);
+      ? await c.query(`UPDATE core.almacen SET nombre = $2, tipo = $3, responsable_id = NULLIF($4,'')::uuid, ubicacion = $5, principal = $6, estado = $7,
+          codigo = coalesce(NULLIF($8,''), codigo) WHERE id = $1 RETURNING id`,
+        [id, d.nombre, d.tipo, d.responsableId, d.ubicacion, d.principal, d.estado, d.codigo])
+      : await c.query(`INSERT INTO core.almacen (nombre, tipo, responsable_id, ubicacion, principal, estado, codigo) VALUES ($1,$2,NULLIF($3,'')::uuid,$4,$5,$6,NULLIF($7,'')) RETURNING id`,
+        [d.nombre, d.tipo, d.responsableId, d.ubicacion, d.principal, d.estado, d.codigo]);
     if (!r.rowCount) throw fallo(404, 'El almacén no existe.');
     return r.rows[0].id as string;
   });

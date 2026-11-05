@@ -1411,6 +1411,12 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   border: 1px solid transparent; background: transparent; color: var(--tanta-text-muted); cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
+.btn-icono:hover, .btn-icono:focus-visible { color: var(--tanta-text-primary); border-color: var(--tanta-border-default); background: var(--tanta-surface-card); }
+.t-acciones { white-space: nowrap; }
+.btn-link { background: none; border: 0; padding: 0; color: var(--tanta-brand-primary, inherit); text-decoration: underline; cursor: pointer; font: inherit; }
+.precio-sube { color: var(--tanta-state-danger); } .precio-baja { color: var(--tanta-state-success, #2e7d32); }
+.subtabla .table-wrap { margin: 4px 0 8px; }
+.subtabla .field__input { min-width: 0; }
 .btn-icono--peligro:hover, .btn-icono--peligro:focus-visible { color: var(--tanta-state-danger); border-color: var(--tanta-border-default); background: var(--tanta-surface-card); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
@@ -1424,3 +1430,6 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   background: var(--tanta-neutral-50); border: 1px dashed var(--tanta-border-default);
   font-variant-numeric: tabular-nums; font-weight: 600; color: var(--tanta-text-primary);
 }
+.totales-compra { display: grid; grid-template-columns: auto auto; justify-content: end; gap: 4px 16px; margin-top: 12px; text-align: right; }
+.linea-pedido { display: grid; grid-template-columns: 1fr; gap: 6px; }
+@media (min-width: 640px) { .linea-pedido { grid-template-columns: 2fr 1.4fr; } }

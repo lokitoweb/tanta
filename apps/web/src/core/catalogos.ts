@@ -6,9 +6,13 @@ export interface MedioPago { codigo: string; nombre: string; requiereOperacion: 
 export interface TipoDocumento { codigo: string; nombre: string; creditoFiscal: boolean; activo: boolean; orden: number }
 export interface TipoInsumo { codigo: string; nombre: string; esHarina: boolean; activo: boolean; orden: number }
 export interface Unidad { codigo: string; descripcion: string; familia: 'MASA' | 'VOLUMEN' | 'CONTEO'; factorAPatron: number; activo: boolean; orden: number }
-export interface Catalogos { mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[] }
+export interface PresentacionCompra { codigo: string; nombre: string; equivalencia: number; activo: boolean; orden: number }
+export interface PresentacionVenta { codigo: string; nombre: string; equivalencia: number; insumoId: string | null; cantidadInsumo: number | null; activo: boolean; orden: number }
+export interface Banco { codigo: string; nombre: string; activo: boolean; orden: number }
+export interface Catalogos { mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[];
+  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[] }
 
-const vacio: Catalogos = { mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [] };
+const vacio: Catalogos = { mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [] };
 let cache: Promise<Catalogos> | null = null;
 
 /** Recarga los catálogos (tras editarlos en Maestros → Catálogos). */

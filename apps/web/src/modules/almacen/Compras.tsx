@@ -7,7 +7,8 @@ import { Dialogo } from '@/ui/Dialogo';
 import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import type { Insumo } from '@/core/types';
 
-interface Proveedor { id: string; razonSocial: string; ruc: string; estado: string }
+interface Proveedor { id: string; codigo: string; razonSocial: string; ruc: string; estado: string; direccion: string; cuentas: Array<{ bancoNombre: string; numero: string }> }
+interface PrecioAnterior { precio: number; fecha: string; proveedor: string; sinIgv: boolean }
 interface Item {
   item: number; insumoId: string; insumo: string; presentacion: string; unidadBase: string; unidadInventario: string;
   cantidad: number; contenido: number; factor: number; cantidadBase: number; cantidadInventario: number;
@@ -17,11 +18,13 @@ interface Item {
 type Estado = 'REGISTRADA' | 'VERIFICADA' | 'OBSERVADA' | 'EN_CORRECCION' | 'ANULADA';
 interface Compra {
   codigo: string; estado: Estado; docTipo: string; serie: string; nro: string; documento: string; fecha: string; vencePago: string | null;
+  condicion: 'CONTADO' | 'CREDITO'; preciosConIgv: boolean; ruc: string; direccion: string; creadoEn: string;
   proveedorId: string; proveedor: string; total: number; base: number | null; igv: number | null; observacion: string | null;
   motivoAnulacion: string | null; registradoPor: string; verificadoPor: string | null; anuladoPor: string | null; anuladoEn: string | null; items: Item[];
 }
-interface Linea { insumoId: string; cantidad: string; precioUnitario: string; lote: string; venceEn: string }
-interface Form { codigo?: string; proveedorId: string; docTipo: string; serie: string; nro: string; fechaCompra: string; vencePago: string; lineas: Linea[] }
+interface Linea { insumoId: string; buscar: string; cantidad: string; precioUnitario: string; lote: string; venceEn: string }
+interface Form { codigo?: string; proveedorId: string; docTipo: string; serie: string; nro: string; fechaCompra: string; vencePago: string;
+  condicion: 'CONTADO' | 'CREDITO'; preciosConIgv: boolean; lineas: Linea[] }
 
 const ESTADO: Record<Estado, { texto: string; tono: 'warn' | 'ok' | 'danger' | 'info' | 'neutral' }> = {
   REGISTRADA: { texto: 'Por verificar', tono: 'warn' }, VERIFICADA: { texto: 'Verificada', tono: 'ok' }, OBSERVADA: { texto: 'Observada', tono: 'danger' },
@@ -49,6 +52,7 @@ export function Compras() {
   const [anular, setAnular] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const [anteriores, setAnteriores] = useState<Record<string, PrecioAnterior>>({});
 
   const registra = puede('compras.registrar');
   const docs = useCatalogos().tiposDocumento;
@@ -60,6 +64,10 @@ export function Compras() {
   }, []);
 
   const insumos = useMemo(() => dataset.insumos.filter((i) => (i as Insumo & { activo?: boolean }).activo !== false), [dataset.insumos]);
+  // Búsqueda por código (SKU) o nombre: «HAR-01 · Harina panadera».
+  const etiqueta = (i: Insumo) => `${i.codigo ?? ''} · ${i.nombre}${i.presentacion ? ` · ${i.presentacion}` : ''}`;
+  const lineaVacia = (insumoId = ''): Linea => { const i = insumos.find((x) => x.id === insumoId); return { insumoId, buscar: i ? etiqueta(i) : '', cantidad: '', precioUnitario: '', lote: '', venceEn: '' }; };
+  const cargarAnteriores = (excluir?: string) => api<Record<string, PrecioAnterior>>(`/compras/precios-anteriores${excluir ? `?excluir=${excluir}` : ''}`).then(setAnteriores).catch(() => setAnteriores({}));
   const porEstado = (e: Estado) => compras.filter((c) => c.estado === e).length;
   const filas = compras.filter((c) => filtro === 'todas' || c.estado === filtro);
 
@@ -72,21 +80,31 @@ export function Compras() {
   };
 
   /* ------------------------------------------------------------- registro y corrección */
-  const nueva = () => setForm({ proveedorId: proveedores[0]?.id ?? '', docTipo: 'FACTURA', serie: '', nro: '', fechaCompra: hoy(), vencePago: '',
-    lineas: [{ insumoId: insumos[0]?.id ?? '', cantidad: '', precioUnitario: '', lote: '', venceEn: '' }] });
+  const nueva = () => { void cargarAnteriores(); setForm({ proveedorId: proveedores[0]?.id ?? '', docTipo: 'FACTURA', serie: '', nro: '', fechaCompra: hoy(), vencePago: '',
+    condicion: 'CONTADO', preciosConIgv: true, lineas: [lineaVacia()] }); };
   const corregir = (c: Compra) => {
     setVer(null);
+    void cargarAnteriores(c.codigo);
     setForm({ codigo: c.codigo, proveedorId: c.proveedorId, docTipo: c.docTipo, serie: c.serie, nro: c.nro, fechaCompra: c.fecha, vencePago: c.vencePago ?? '',
-      lineas: c.items.map((i) => ({ insumoId: i.insumoId, cantidad: String(i.cantidad), precioUnitario: String(i.precioUnitario ?? ''), lote: i.lote ?? '', venceEn: i.venceEn ?? '' })) });
+      condicion: c.condicion ?? (c.vencePago ? 'CREDITO' : 'CONTADO'), preciosConIgv: c.preciosConIgv ?? true,
+      lineas: c.items.map((i) => ({ ...lineaVacia(i.insumoId), cantidad: String(i.cantidad), precioUnitario: String(i.precioUnitario ?? ''), lote: i.lote ?? '', venceEn: i.venceEn ?? '' })) });
   };
   const linea = (i: number, cambio: Partial<Linea>) => form && setForm({ ...form, lineas: form.lineas.map((l, j) => (j === i ? { ...l, ...cambio } : l)) });
-  const total = form?.lineas.reduce((s, l) => s + Math.round(Number(l.cantidad) * Number(l.precioUnitario) * 100) / 100, 0) ?? 0;
+  const suma = form?.lineas.reduce((s, l) => s + Math.round(Number(l.cantidad) * Number(l.precioUnitario) * 100) / 100, 0) ?? 0;
+  // Mismas reglas que el servidor: con factura los precios traen IGV (o no, si el detalle viene sin IGV); boleta y nota: sin desglose.
+  const fiscal = !!form && !!docs.find((t) => t.codigo === form.docTipo)?.creditoFiscal;
+  const conIgv = !fiscal || !!form?.preciosConIgv;
+  const tasa = dataset.negocio.igv;
+  const total = conIgv ? suma : Math.round(suma * (1 + tasa) * 100) / 100;
+  const subtotal = fiscal ? (conIgv ? Math.round(total / (1 + tasa) * 100) / 100 : suma) : total;
+  const prov = proveedores.find((p) => p.id === form?.proveedorId);
   const lineasOk = !!form && form.lineas.every((l) => l.insumoId && Number(l.cantidad) > 0 && Number(l.precioUnitario) > 0)
     && new Set(form.lineas.map((l) => l.insumoId)).size === form.lineas.length;
-  const valido = !!form && !!form.proveedorId && /^[A-Za-z0-9]{1,4}$/.test(form.serie.trim()) && /^[A-Za-z0-9]{1,10}$/.test(form.nro.trim())
-    && !!form.fechaCompra && form.fechaCompra <= hoy() && lineasOk;
+  const valido = !!form && !!form.proveedorId && /^[A-Za-z0-9]{0,4}$/.test(form.serie.trim()) && /^[A-Za-z0-9]{1,10}$/.test(form.nro.trim())
+    && !!form.fechaCompra && form.fechaCompra <= hoy() && lineasOk && (form.condicion === 'CONTADO' || !!form.vencePago);
   const guardar = () => form && accion(async () => {
-    const body = { proveedorId: form.proveedorId, docTipo: form.docTipo, serie: form.serie.trim(), nro: form.nro.trim(), fechaCompra: form.fechaCompra, vencePago: form.vencePago,
+    const body = { proveedorId: form.proveedorId, docTipo: form.docTipo, serie: form.serie.trim(), nro: form.nro.trim(), fechaCompra: form.fechaCompra,
+      vencePago: form.condicion === 'CREDITO' ? form.vencePago : '', condicion: form.condicion, preciosConIgv: conIgv,
       items: form.lineas.map((l) => ({ insumoId: l.insumoId, cantidad: Number(l.cantidad), precioUnitario: Number(l.precioUnitario), lote: l.lote.trim(), venceEn: l.venceEn })) };
     const r = await api<Compra>(form.codigo ? `/compras/${form.codigo}` : '/compras', { method: form.codigo ? 'PUT' : 'POST', body, conIdempotencia: !form.codigo });
     setForm(null);
@@ -134,7 +152,7 @@ export function Compras() {
 
       {/* ---------------------------------------------------- registrar o corregir */}
       <Dialogo abierto={form !== null} titulo={form?.codigo ? `Corregir ${form.codigo}` : 'Registrar compra'}
-        descripcion="Cantidades en presentaciones de compra; el sistema las convierte a unidad base y a unidad de inventario."
+        descripcion={`Fecha de registro: ${hoy()} (la pone el sistema). Cantidades en presentaciones de compra (sacos, botellas); se convierten a unidad base y de inventario.`}
         onCerrar={() => setForm(null)}
         acciones={<><Boton onClick={() => setForm(null)}>Cancelar</Boton><Boton variant="primary" disabled={!valido || ocupado} onClick={() => void guardar()}>{ocupado ? 'Guardando…' : `${form?.codigo ? 'Enviar a verificación' : 'Guardar'} ${money(total)}`}</Boton></>}>
         {form && (<>
@@ -144,32 +162,57 @@ export function Compras() {
                 {proveedores.map((p) => <option key={p.id} value={p.id}>{p.razonSocial}{p.ruc ? ` · ${p.ruc}` : ''}</option>)}</select></label>
             <label className="field"><span className="field__label">Documento</span>
               <select className="field__input" value={form.docTipo} onChange={(e) => setForm({ ...form, docTipo: e.target.value })}>{docs.map((t) => <option key={t.codigo} value={t.codigo}>{t.nombre}</option>)}</select></label>
-            <label className="field"><span className="field__label">Fecha del documento</span>
+            {prov && (
+              <div className="field field--ancho dialogo__nota">
+                {prov.codigo} · RUC {prov.ruc || 'no registrado'}{prov.direccion ? ` · ${prov.direccion}` : ''}
+                {prov.cuentas?.length > 0 && <><br />Cuentas: {prov.cuentas.map((k) => `${k.bancoNombre} ${k.numero}`).join(' · ')}</>}
+              </div>
+            )}
+            <label className="field"><span className="field__label">Fecha de emisión</span>
               <input className="field__input" type="date" max={hoy()} value={form.fechaCompra} onChange={(e) => setForm({ ...form, fechaCompra: e.target.value })} /></label>
-            <label className="field"><span className="field__label">Serie</span>
-              <input className="field__input" maxLength={4} placeholder="F001" value={form.serie} onChange={(e) => setForm({ ...form, serie: e.target.value.toUpperCase() })} /></label>
-            <label className="field"><span className="field__label">Número</span>
-              <input className="field__input" maxLength={10} placeholder="123" value={form.nro} onChange={(e) => setForm({ ...form, nro: e.target.value.toUpperCase() })} /></label>
-            <label className="field"><span className="field__label">Vence el pago (si es al crédito)</span>
-              <input className="field__input" type="date" min={form.fechaCompra} value={form.vencePago} onChange={(e) => setForm({ ...form, vencePago: e.target.value })} /></label>
+            <label className="field"><span className="field__label">Serie{fiscal ? '' : ' (opcional)'}</span>
+              <input className="field__input" maxLength={4} placeholder="E001" value={form.serie} onChange={(e) => setForm({ ...form, serie: e.target.value.toUpperCase() })} /></label>
+            <label className="field"><span className="field__label">N.° de documento</span>
+              <input className="field__input" maxLength={10} placeholder="545" value={form.nro} onChange={(e) => setForm({ ...form, nro: e.target.value.toUpperCase() })} /></label>
+            <label className="field"><span className="field__label">Condición</span>
+              <select className="field__input" value={form.condicion} onChange={(e) => setForm({ ...form, condicion: e.target.value as 'CONTADO' | 'CREDITO' })}>
+                <option value="CONTADO">Contado</option><option value="CREDITO">Crédito</option></select></label>
+            {form.condicion === 'CREDITO' && (
+              <label className="field"><span className="field__label">Fecha de vencimiento del pago</span>
+                <input className="field__input" type="date" min={form.fechaCompra} value={form.vencePago} onChange={(e) => setForm({ ...form, vencePago: e.target.value })} /></label>
+            )}
+            {fiscal && (
+              <label className="check field--ancho"><input type="checkbox" checked={form.preciosConIgv} onChange={(e) => setForm({ ...form, preciosConIgv: e.target.checked })} />
+                Los precios del documento incluyen IGV (desmárcalo si el detalle viene sin IGV)</label>
+            )}
           </div>
+          <datalist id="insumos-compra">{insumos.map((x) => <option key={x.id} value={etiqueta(x)} />)}</datalist>
           {form.lineas.map((l, i) => {
             const ins = insumos.find((x) => x.id === l.insumoId);
             const contenido = ins?.contenido ?? 1, factor = ins?.factor ?? 1;
             const cant = Number(l.cantidad), precio = Number(l.precioUnitario);
             const uInv = u(ins?.unidadInventario ?? ins?.unidad ?? '');
             // Mismo cálculo que el servidor: con crédito fiscal el costo va sin IGV (la tasa viene del parámetro igv).
-            const sinIgv = docs.find((t) => t.codigo === form.docTipo)?.creditoFiscal ? 1 / (1 + dataset.negocio.igv) : 1;
+            const sinIgv = fiscal && conIgv ? 1 / (1 + tasa) : 1;
+            const ant = anteriores[l.insumoId];
+            const delta = ant && precio > 0 ? (precio - ant.precio) / ant.precio : null;
             return (
               <div key={i} className="linea-compra">
                 <div className="form form--2col">
-                  <label className="field field--ancho"><span className="field__label">Insumo {i + 1}</span>
-                    <select className="field__input" value={l.insumoId} onChange={(e) => linea(i, { insumoId: e.target.value })}>
-                      {insumos.map((x) => <option key={x.id} value={x.id}>{x.nombre}{x.presentacion ? ` · ${x.presentacion}` : ''}</option>)}</select></label>
+                  <label className="field field--ancho"><span className="field__label">Insumo {i + 1} · busca por código o nombre</span>
+                    <input className="field__input" list="insumos-compra" placeholder="HAR-01 o harina" value={l.buscar}
+                      onChange={(e) => { const x = insumos.find((y) => etiqueta(y) === e.target.value); linea(i, { buscar: e.target.value, insumoId: x?.id ?? '' }); }} />
+                    {!l.insumoId && l.buscar && <span className="field__aviso">Elige un insumo de la lista</span>}</label>
                   <label className="field"><span className="field__label">Cantidad ({ins?.presentacion || `de ${n4(contenido)} ${u(ins?.unidad ?? '')}`})</span>
                     <input className="field__input" type="number" min="0" step="any" value={l.cantidad} onChange={(e) => linea(i, { cantidad: e.target.value })} /></label>
-                  <label className="field"><span className="field__label">Precio por presentación (S/{docs.find((t) => t.codigo === form.docTipo)?.creditoFiscal ? ', con IGV' : ''})</span>
-                    <input className="field__input" type="number" min="0" step="any" value={l.precioUnitario} onChange={(e) => linea(i, { precioUnitario: e.target.value })} /></label>
+                  <label className="field"><span className="field__label">Precio unitario (S/{fiscal ? (conIgv ? ', inc. IGV' : ', sin IGV') : ''})</span>
+                    <input className="field__input" type="number" min="0" step="any" value={l.precioUnitario} onChange={(e) => linea(i, { precioUnitario: e.target.value })} />
+                    {ant && <span className={`field__ayuda ${delta !== null && delta > 0.0001 ? 'precio-sube' : delta !== null && delta < -0.0001 ? 'precio-baja' : ''}`}>
+                      P. anterior {money(ant.precio)} ({ant.fecha}, {ant.proveedor}){delta !== null && Math.abs(delta) > 0.0001 ? ` · ${delta > 0 ? '▲ sube' : '▼ baja'} ${(Math.abs(delta) * 100).toFixed(1)} %` : ''}</span>}</label>
+                  <label className="field"><span className="field__label">Precio total de la línea (S/)</span>
+                    <input className="field__input" type="number" min="0" step="any" value={cant > 0 && precio > 0 ? String(Math.round(cant * precio * 100) / 100) : ''}
+                      onChange={(e) => cant > 0 && linea(i, { precioUnitario: String(Math.round(Number(e.target.value) / cant * 10_000) / 10_000) })}
+                      disabled={!(cant > 0)} placeholder={cant > 0 ? '' : 'Primero la cantidad'} /></label>
                   <label className="field"><span className="field__label">Lote (opcional)</span>
                     <input className="field__input" maxLength={40} value={l.lote} onChange={(e) => linea(i, { lote: e.target.value.toUpperCase() })} /></label>
                   <label className="field"><span className="field__label">Vence (opcional)</span>
@@ -187,14 +230,18 @@ export function Compras() {
           })}
           <div className="form__acciones">
             {!lineasOk && <span className="field__aviso">Cantidad y precio mayores a cero, sin insumos repetidos</span>}
-            <Boton icono="plus" onClick={() => setForm({ ...form, lineas: [...form.lineas, { insumoId: insumos.find((x) => !form.lineas.some((l) => l.insumoId === x.id))?.id ?? '', cantidad: '', precioUnitario: '', lote: '', venceEn: '' }] })}>Agregar insumo</Boton>
+            <Boton icono="plus" onClick={() => setForm({ ...form, lineas: [...form.lineas, lineaVacia()] })}>Agregar insumo</Boton>
+          </div>
+          <div className="totales-compra">
+            {fiscal && <><span>Subtotal</span><b>{money(subtotal)}</b><span>IGV</span><b>{money(total - subtotal)}</b></>}
+            <span>Total</span><b>{money(total)}</b>
           </div>
         </>)}
       </Dialogo>
 
       {/* ---------------------------------------------------- detalle y acciones por rol */}
       <Dialogo abierto={ver !== null} titulo={ver ? `${ver.codigo} · ${ESTADO[ver.estado].texto}` : ''}
-        descripcion={ver ? `${ver.proveedor} · ${ver.documento} · ${ver.fecha} · registró ${ver.registradoPor}${ver.verificadoPor ? ` · verificó ${ver.verificadoPor}` : ''}` : ''}
+        descripcion={ver ? `${ver.proveedor}${ver.ruc ? ` (RUC ${ver.ruc})` : ''} · ${ver.documento} · emitido ${ver.fecha} · registrado ${ver.creadoEn?.slice(0, 10) ?? ''} por ${ver.registradoPor} · ${ver.condicion === 'CREDITO' ? `crédito, vence ${ver.vencePago ?? ''}` : 'contado'}${ver.verificadoPor ? ` · verificó ${ver.verificadoPor}` : ''}` : ''}
         onCerrar={() => { setVer(null); setConteo(null); setAnular(null); }}
         acciones={ver && (<>
           {anular === null && ver.estado !== 'ANULADA' && puede('compras.anular') && <Boton onClick={() => setAnular('')}>Anular</Boton>}
@@ -202,7 +249,7 @@ export function Compras() {
           {['REGISTRADA', 'EN_CORRECCION'].includes(ver.estado) && registra && <Boton onClick={() => corregir(ver)}>{ver.estado === 'EN_CORRECCION' ? 'Corregir' : 'Editar'}</Boton>}
           {ver.estado === 'REGISTRADA' && puede('compras.verificar') && !conteo && <Boton variant="primary" onClick={() => abrirVerificar(ver)}>Verificar lo recibido</Boton>}
           {conteo && <Boton variant="primary" disabled={!conteoOk || ocupado} onClick={() => void verificar(ver)}>
-            {ver.items.some((i) => difiere(i)) ? 'Observar compra' : 'Confirmar: todo llegó'}</Boton>}
+            {ver.items.some((i) => difiere(i)) ? 'Observar compra' : 'Confirmar e ingresar al almacén'}</Boton>}
           {anular !== null && <Boton variant="primary" disabled={anular.trim().length < 5 || ocupado} onClick={() => void confirmarAnulacion(ver)}>Confirmar anulación</Boton>}
         </>)}>
         {ver && (<>
@@ -210,14 +257,23 @@ export function Compras() {
           {ver.motivoAnulacion && <p className="dialogo__nota">Anulada por {ver.anuladoPor} el {ver.anuladoEn?.slice(0, 16).replace('T', ' ')}: {ver.motivoAnulacion}</p>}
           <div className="table-wrap"><table className="table table--compacta">
             <thead><tr><th>Insumo</th><th className="t-right">Documento</th><th className="t-right">Unidad base</th><th className="t-right">Inventario</th>
-              {ver.items[0]?.costoInventario !== undefined && <th className="t-right">Costo</th>}<th className="t-right">{conteo ? 'Contado' : 'Verificado'}</th></tr></thead>
+              {ver.items[0]?.costoInventario !== undefined && <th className="t-right">Costo</th>}
+              {ver.estado === 'REGISTRADA' && <><th className="t-right">Stock actual</th><th className="t-right">Stock esperado</th></>}
+              <th className="t-right">{conteo ? 'Contado' : 'Verificado'}</th></tr></thead>
             <tbody>{ver.items.map((i) => (
               <tr key={i.item}>
-                <td>{i.insumo}<br /><small className="t-muted">{i.presentacion || `${n4(i.contenido)} ${u(i.unidadBase)} c/u`}{i.lote ? ` · lote ${i.lote}` : ''}</small></td>
+                <td>{dataset.insumos.find((x) => x.id === i.insumoId)?.codigo ?? ''} · {i.insumo}<br /><small className="t-muted">{i.presentacion || `${n4(i.contenido)} ${u(i.unidadBase)} c/u`}{i.lote ? ` · lote ${i.lote}` : ''}</small></td>
                 <td className="t-right">{n4(i.cantidad)}{i.precioUnitario !== undefined && <><br /><small className="t-muted">{money(i.precioUnitario)} c/u</small></>}</td>
                 <td className="t-right">{n4(i.cantidadBase)} {u(i.unidadBase)}</td>
                 <td className="t-right"><b>{n4(i.cantidadInventario)} {u(i.unidadInventario)}</b></td>
                 {i.costoInventario !== undefined && <td className="t-right">{money(i.costoInventario)}/{u(i.unidadInventario)}</td>}
+                {ver.estado === 'REGISTRADA' && (() => {
+                  // Validar ingreso (Excel): stock de hoy y el que quedará al ingresar lo contado.
+                  const stock = dataset.insumos.find((x) => x.id === i.insumoId)?.stock ?? 0;
+                  const contado = conteo ? Number(conteo[i.item]?.cantidad) : i.cantidad;
+                  const ingreso = i.cantidad > 0 ? i.cantidadInventario * (contado / i.cantidad) : 0;
+                  return <><td className="t-right">{n4(stock)} {u(i.unidadInventario)}</td><td className="t-right"><b>{n4(stock + (Number.isFinite(ingreso) ? ingreso : 0))}</b></td></>;
+                })()}
                 <td className="t-right">{conteo ? (
                   <div className="conteo-linea">
                     <input className="field__input t-right" type="number" min="0" step="any" aria-label={`Cantidad contada de ${i.insumo}`} value={conteo[i.item]?.cantidad ?? ''}
@@ -243,10 +299,10 @@ export function Compras() {
           : lista === null ? <TablaEsqueleto columnas={7} />
           : !filas.length ? <Vacio titulo="Sin compras en este estado" icono="sack" /> : (
           <div className="table-wrap"><table className="table">
-            <thead><tr><th>Código</th><th>Fecha</th><th>Proveedor</th><th>Documento</th><th className="t-right">Insumos</th><th className="t-right">Total</th><th>Estado</th></tr></thead>
+            <thead><tr><th>Código</th><th>Emisión</th><th>Proveedor</th><th>Documento</th><th>Condición</th><th className="t-right">Insumos</th><th className="t-right">Total</th><th>Estado</th></tr></thead>
             <tbody>{filas.map((c) => (
               <tr key={c.codigo} className="is-clickable" onClick={() => { setConteo(null); setAnular(null); setVer(c); }}>
-                <td><strong>{c.codigo}</strong></td><td>{c.fecha}</td><td>{c.proveedor}</td><td>{c.documento}</td>
+                <td><strong>{c.codigo}</strong></td><td>{c.fecha}</td><td>{c.proveedor}</td><td>{c.documento}</td><td>{c.condicion === 'CREDITO' ? `Crédito${c.vencePago ? ` · ${c.vencePago}` : ''}` : 'Contado'}</td>
                 <td className="t-right">{c.items.length}</td><td className="t-right">{money(c.total)}</td>
                 <td><Insignia tono={ESTADO[c.estado].tono} punto>{ESTADO[c.estado].texto}</Insignia></td>
               </tr>

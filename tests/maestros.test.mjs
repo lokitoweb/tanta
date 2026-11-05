@@ -58,9 +58,12 @@ test('Clientes: alta con validación de documento y edición', async () => {
   assert.equal((await api(await login('rquispe'), 'GET', '/clientes')).s, 403, 'Producción no gestiona clientes');
 });
 
-test('Compra de insumo: el nuevo CPP cambia el costo del producto', async () => {
-  const alm = await login('jramos');
+test('Compra de insumo: en modo AUTOMATICO el nuevo CPP cambia el costo del producto; en MANUAL no', async () => {
   const ger = await login('osquilcate');
+  const sa = await login('superadmin');
+  // Excel «INTERFACES TANTA»: por defecto el costo de las fórmulas se actualiza a mano; aquí se prueba el automático.
+  assert.equal((await api(sa, 'PATCH', '/parametros/costo_insumo_formulas', { valor: 'AUTOMATICO' })).s, 200);
+  try {
   // Insumo y producto propios de la prueba: comprar más caro no infla la harina real de la base.
   const ids = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock) VALUES ('T-CPP-' || substr(md5(random()::text), 1, 6), 'Insumo prueba CPP', 'KG', 2, 10) RETURNING id),
     p AS (INSERT INTO core.producto (codigo, nombre, categoria_id, precio_con_igv, estado)
@@ -74,7 +77,14 @@ test('Compra de insumo: el nuevo CPP cambia el costo del producto', async () => 
   sql('SELECT core.cuadrar_lotes()');
   await flujoCompras(api, login).comprarInventario(insumoId, 10, 6);
   assert.ok(Math.abs(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${insumoId}'`)) - 4) < 0.0001, 'CPP = (10 × 2 + 10 × 6) ÷ 20 = 4');
-  assert.ok((await ficha(ger, productoId)) > antes, 'comprar más caro sube el costo');
+  const despues = await ficha(ger, productoId);
+  assert.ok(despues > antes, 'comprar más caro sube el costo');
+  // MANUAL: la siguiente compra mueve el kárdex pero no la ficha de costo.
+  assert.equal((await api(sa, 'PATCH', '/parametros/costo_insumo_formulas', { valor: 'MANUAL' })).s, 200);
+  await flujoCompras(api, login).comprarInventario(insumoId, 10, 20);
+  assert.ok(Number(sql(`SELECT cpp FROM core.insumo WHERE id = '${insumoId}'`)) > 4, 'el kárdex sí sube');
+  assert.ok(Math.abs((await ficha(ger, productoId)) - despues) < 0.0001, 'la ficha de costo espera el ajuste manual');
+  } finally { await api(sa, 'PATCH', '/parametros/costo_insumo_formulas', { valor: 'MANUAL' }); }
 });
 
 after(() => sqlScript(ANULAR_COMPRAS_DE_PRUEBA));

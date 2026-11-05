@@ -160,9 +160,12 @@ test('merma del PDF del dueño: costo con merma = costo de insumos × (1 + merma
   assert.equal((await api(ger, 'PATCH', '/parametros/metodo_costo_insumo', { valor: 'X' })).s, 422);
 });
 
-test('proveedor: el RUC es obligatorio (informe de compras §5.2)', async () => {
-  const r = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: 'Sin RUC ' + sufijo });
-  assert.equal(r.s, 422);
+test('proveedor: RUC opcional (Excel: las notas de pedido no lo traen), pero si se escribe debe ser válido', async () => {
+  const adm = await login('lbermudez');
+  const r = await api(adm, 'POST', '/proveedores', { razonSocial: 'Sin RUC ' + sufijo });
+  assert.equal(r.s, 201, JSON.stringify(r.b));
+  limpiar.push(`DELETE FROM core.proveedor WHERE id = '${r.b.id}'`);
+  assert.equal((await api(adm, 'POST', '/proveedores', { razonSocial: 'RUC malo ' + sufijo, ruc: '123' })).s, 422);
 });
 
 test('categorías: no se elimina una con productos; una vacía sí', async () => {

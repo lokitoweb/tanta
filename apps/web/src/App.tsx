@@ -8,6 +8,7 @@ import { AnalisisPrecios, Almacenes, Categorias, Clientes, CostosIndirectos, Ins
 import { Compras } from '@/modules/almacen/Compras';
 import { Conteos } from '@/modules/almacen/Conteos';
 import { Deudas } from '@/modules/almacen/Deudas';
+import { PagosCostos } from '@/modules/almacen/PagosCostos';
 import { Catalogos } from '@/modules/maestros/Catalogos';
 import { CajaChica } from '@/modules/ventas/CajaChica';
 import { Auditoria } from '@/modules/sistema/Auditoria';
@@ -48,6 +49,7 @@ export function App() {
         <Route path="/almacen/kardex" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Kardex /></Gate>} />
         <Route path="/almacen/compras" element={<Gate permiso="compras.ver" siNo={<SinAcceso />}><Compras /></Gate>} />
         <Route path="/compras/deudas" element={<Gate permiso="deudas.ver" siNo={<SinAcceso />}><Deudas /></Gate>} />
+        <Route path="/compras/pagos-costos" element={<Gate permiso="compras.pagar" siNo={<SinAcceso />}><PagosCostos /></Gate>} />
         <Route path="/caja" element={<Gate permiso="caja.abrir" siNo={<SinAcceso />}><CajaChica /></Gate>} />
         <Route path="/almacen/conteos" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Conteos /></Gate>} />
         <Route path="/maestros/catalogos" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Catalogos /></Gate>} />

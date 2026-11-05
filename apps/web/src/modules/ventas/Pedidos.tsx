@@ -9,7 +9,9 @@ import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio }
 import { Dialogo } from '@/ui/Dialogo';
 import { NuevoPedido } from './NuevoPedido';
 
-interface Item { productoId: string; producto: string; cantidad: number; precio: number }
+interface Item { productoId: string; producto: string; cantidad: number; precio: number; presentacion?: string | null; cantidadPresentacion?: number | null }
+/** «2 Paquete x 6 (12 unid)» o «5 unid». */
+const cantidadTxt = (i: Item) => (i.presentacion && i.cantidadPresentacion ? `${i.cantidadPresentacion} × ${i.presentacion.toLowerCase()} (${i.cantidad} unid)` : String(i.cantidad));
 interface Pedido { id: string; codigo: string; clienteId: string; cliente: string; vendedor: string; estado: string; total: number; fecha_entrega: string; hora_entrega: string; observaciones: string; venta: string | null; items: Item[];
   tipoEntrega?: string; direccion?: string; pagoEntrega?: string; motivo?: string | null; entregaObs?: string | null }
 
@@ -71,7 +73,8 @@ export function Pedidos() {
   const despachar = (p: Pedido) => accion(async () => {
     const v = await api<{ codigo: string; comprobante: { numero: string } }>('/ventas', {
       method: 'POST', conIdempotencia: true,
-      body: { items: p.items.map((i) => ({ productoId: i.productoId, cantidad: i.cantidad })), formaPago: pago.formaPago, clienteId: p.clienteId, pedidoId: p.id, descuentoPct: Number(pago.descuento) / 100,
+      // Se despacha en la presentación pedida (paquete x 6): el servidor la convierte a unidades y descarga su empaque.
+      body: { items: p.items.map((i) => (i.presentacion ? { productoId: i.productoId, cantidad: i.cantidadPresentacion ?? i.cantidad, presentacion: i.presentacion } : { productoId: i.productoId, cantidad: i.cantidad })), formaPago: pago.formaPago, clienteId: p.clienteId, pedidoId: p.id, descuentoPct: Number(pago.descuento) / 100,
         referenciaPago: pago.referencia.trim(), ...(aprobacion ? { aprobacionDescuentoId: aprobacion.id } : {}) },
     });
     return `${p.codigo} despachado · nota de venta ${v.comprobante.numero}`;
@@ -83,7 +86,7 @@ export function Pedidos() {
     <>
       <Encabezado titulo="Pedidos" descripcion="Del registro del cliente al despacho · cada cambio queda auditado"
         acciones={<>
-          <Boton icono="download" onClick={() => exportarExcel('pedidos', filas.map(({ items, ...p }) => ({ ...p, productos: items.map((i) => `${i.cantidad} ${i.producto}`).join(', ') })))}>Excel</Boton>
+          <Boton icono="download" onClick={() => exportarExcel('pedidos', filas.map(({ items, ...p }) => ({ ...p, productos: items.map((i) => `${cantidadTxt(i)} ${i.producto}`).join(', ') })))}>Excel</Boton>
           <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
           {puede('pedidos.crear') && <Boton variant="primary" icono="plus" onClick={() => setNuevo(true)}>Registrar pedido</Boton>}
         </>} />
@@ -139,7 +142,7 @@ export function Pedidos() {
         {sel && (
           <>
             <table className="table table--compacta"><tbody>
-              {sel.items.map((i) => <tr key={i.productoId}><td>{i.producto}</td><td className="t-right">{num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
+              {sel.items.map((i, k) => <tr key={k}><td>{i.producto}</td><td className="t-right">{i.presentacion ? cantidadTxt(i) : num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
               <tr><td><strong>Total</strong></td><td /><td className="t-right"><strong>{money(sel.total)}</strong></td></tr>
             </tbody></table>
             <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Delivery a: ${sel.direccion}` : 'Recojo en tienda'} · paga contra entrega con {(medios.find((m) => m.codigo === sel.pagoEntrega)?.nombre ?? sel.pagoEntrega ?? 'efectivo').toLowerCase()}</p>

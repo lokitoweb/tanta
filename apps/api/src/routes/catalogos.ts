@@ -7,12 +7,15 @@ import { auditar } from '../auditoria.js';
 import { actor, fallo, responder } from './almacen.js';
 
 /**
- * Catálogos administrables: tipos de documento de compra, medios de pago, tipos de insumo y unidades.
+ * Catálogos administrables: tipos de documento de compra, medios de pago, tipos de insumo, unidades,
+ * presentaciones de compra y de venta, y bancos.
  * Las reglas salen de los atributos de cada fila (crédito fiscal, n.° de operación, caja chica, harina, familia),
  * no del código del valor: el Administrador puede agregar o desactivar valores sin cambiar el sistema.
  */
 
-const codigo = z.string().trim().toUpperCase().regex(/^[A-Z][A-Z0-9_]{1,19}$/, 'Código en mayúsculas, sin espacios (2 a 20 caracteres)');
+const codigo = z.string().trim().toUpperCase().regex(/^[A-Z0-9][A-Z0-9_-]{1,19}$/, 'Código en mayúsculas, sin espacios (2 a 20 letras, números, - o _)');
+// Los catálogos de antes empiezan con letra (lo exige su CHECK); los nuevos aceptan códigos numéricos (1001, 2001…).
+const conLetra = z.string().regex(/^[A-Z]/, 'En este catálogo el código empieza con una letra');
 const nombre = z.string().trim().min(2).max(60);
 const base = { nombre, activo: z.boolean().default(true), orden: z.number().int().min(0).max(999).default(0) };
 
@@ -47,7 +50,32 @@ const ESQUEMAS = {
     columnas: { descripcion: 'descripcion', familia: 'familia', factorAPatron: 'factor_a_patron', activo: 'activo', orden: 'orden' },
     enUso: `SELECT 1 FROM core.insumo WHERE unidad = $1 OR unidad_inventario = $1 UNION ALL SELECT 1 FROM core.receta_detalle WHERE unidad_receta = $1 LIMIT 1`,
   },
+  // Excel «PRESENTACION COMPRA»: saco x 50 kg, botella 900 ml… equivalencia = contenido en unidad base del insumo.
+  'presentaciones-compra': {
+    tabla: 'core.presentacion_compra',
+    campos: z.object({ ...base, equivalencia: z.number().positive().max(1_000_000) }),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', equivalencia: 'equivalencia' },
+    enUso: 'SELECT 1 FROM core.insumo WHERE presentacion_codigo = $1 LIMIT 1',
+  },
+  // Excel «PRESENTACION VENTA»: unidades del producto y el empaque que se descarga solo al vender (1 bolsa por paquete).
+  'presentaciones-venta': {
+    tabla: 'core.presentacion_venta',
+    campos: z.object({ ...base, equivalencia: z.number().positive().max(10_000),
+      insumoId: z.union([z.literal(''), z.string().uuid()]).nullable().default(null).transform((v) => v || null),
+      cantidadInsumo: z.number().positive().max(10_000).nullable().default(null) })
+      .refine((d) => (d.insumoId === null) === (d.cantidadInsumo === null), { message: 'Indica el insumo a descontar y su cantidad, o deja ambos vacíos.' }),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', equivalencia: 'equivalencia', insumoId: 'insumo_id', cantidadInsumo: 'cantidad_insumo' },
+    enUso: 'SELECT 1 FROM core.producto_presentacion WHERE presentacion_codigo = $1 UNION ALL SELECT 1 FROM core.venta_detalle WHERE presentacion_codigo = $1 LIMIT 1',
+  },
+  bancos: {
+    tabla: 'core.banco',
+    campos: z.object(base),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden' },
+    enUso: 'SELECT 1 FROM core.proveedor_cuenta WHERE banco = $1 LIMIT 1',
+  },
 } as const;
+const NUEVOS = new Set(['presentaciones-compra', 'presentaciones-venta', 'bancos']);
+const NUMERICOS = new Set(['factor_a_patron', 'equivalencia', 'cantidad_insumo']);
 type Catalogo = keyof typeof ESQUEMAS;
 
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, l: string) => l.toUpperCase());
@@ -56,10 +84,11 @@ const camel = (s: string) => s.replace(/_([a-z])/g, (_, l: string) => l.toUpperC
 export async function leerCatalogos(todos = false) {
   const filtro = todos ? '' : 'WHERE activo';
   const leer = async (tabla: string) => (await q<Record<string, unknown>>(`SELECT * FROM ${tabla} ${filtro} ORDER BY orden, codigo`))
-    .map((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => [camel(k), k === 'factor_a_patron' ? num(v as string) : v])));
+    .map((f) => Object.fromEntries(Object.entries(f).map(([k, v]) => [camel(k), NUMERICOS.has(k) && v !== null ? num(v as string) : v])));
   return {
     tiposDocumento: await leer('core.tipo_documento_compra'), mediosPago: await leer('core.medio_pago'),
     tiposInsumo: await leer('core.tipo_insumo'), unidades: await leer('core.unidad_medida'),
+    presentacionesCompra: await leer('core.presentacion_compra'), presentacionesVenta: await leer('core.presentacion_venta'), bancos: await leer('core.banco'),
   };
 }
 
@@ -102,11 +131,15 @@ export async function rutasCatalogos(app: FastifyInstance) {
     const def = ESQUEMAS[catalogo as Catalogo];
     if (!def) return reply.code(404).send(error(404, 'CATALOGO_NO_EXISTE', 'Ese catálogo no existe.'));
     const p = def.campos.safeParse(req.body);
-    const c = crear ? codigo.safeParse((req.body as { codigo?: unknown } | null)?.codigo) : codigo.safeParse(cod);
+    const crudo = crear ? (req.body as { codigo?: unknown } | null)?.codigo : cod;
+    const c = (NUEVOS.has(catalogo) ? codigo : codigo.pipe(conLetra)).safeParse(typeof crudo === 'string' ? crudo.trim().toUpperCase() : crudo);
     if (!p.success || !c.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', (p.success ? c.error?.issues[0]?.message : p.error.issues[0]?.message) ?? 'Datos inválidos.'));
     const d = p.data as Record<string, unknown>;
     const cols = Object.entries(def.columnas) as Array<[string, string]>;
     return responder(reply, 'CATALOGO_INVALIDO', async () => {
+      if (catalogo === 'presentaciones-venta' && d.insumoId && !(await uno('SELECT 1 FROM core.insumo WHERE id = $1 AND activo', [d.insumoId]))) {
+        throw fallo(422, 'El insumo a descontar no existe o está inactivo.');
+      }
       if (!crear && catalogo === 'unidades') {
         // Familia y factor no cambian si la unidad ya se usa: el stock y las recetas quedarían en otra escala.
         const actual = await uno<{ familia: string; factor: string }>('SELECT familia, factor_a_patron factor FROM core.unidad_medida WHERE codigo = $1', [c.data]);

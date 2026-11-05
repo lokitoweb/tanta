@@ -15,15 +15,21 @@ export interface Producto {
   mermaPct: number; estado: string; imagenUrl?: string | null;
   /** Sub-receta: insumo que produce (masa madre). No se vende. */
   insumoId?: string | null;
+  /** SKU de la unidad y presentaciones de venta adicionales (paquete x 6) con su precio. */
+  sku?: string; presentaciones?: PresentacionProducto[];
+  pesoMasaG?: number | null; pesoFinalG?: number | null; unidadesLote?: number | null; horasHornoLote?: number; vidaUtilDias?: number | null;
 }
+export interface PresentacionProducto { presentacion: string; nombre: string; equivalencia: number; sku: string; precioConIgv: number; activo: boolean }
 export interface Insumo {
   id: string; codigo?: string; nombre: string; unidad: string; cpp: number; stock: number;
   minimo: number; proveedor: string; estado: string; valorizado: number;
   /** Compra de insumos: presentación, contenido en unidad base, unidad de inventario y factor (F2). */
   presentacion?: string; contenido?: number | null; unidadInventario?: string; factor?: number;
+  activo?: boolean; tipo?: string; manejaStock?: boolean; presentacionCodigo?: string; costoFormulas?: number; costoManual?: boolean;
+  precioCompra?: number | null; cantPresentacion?: number | null; equivKg?: number;
 }
 export interface Categoria {
-  id: string; nombre: string; ventas: number; costo: number; utilidad: number;
+  id: string; codigo?: string; nombre: string; orden?: number; ventas: number; costo: number; utilidad: number;
   margen: number; margenObjetivo: number; participacion: number;
 }
 export interface Dia { fecha: string; ventasNetas: number; costo: number; utilidad: number; margen: number; tickets: number }

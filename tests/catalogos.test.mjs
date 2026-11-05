@@ -64,10 +64,10 @@ test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.°
   assert.ok(!(await api(vendedor, 'GET', '/catalogos')).b.mediosPago.some((m) => m.codigo === nuevo.medio), 'ni se ofrece');
   assert.equal((await api(admin, 'POST', '/catalogos/medios-pago', { codigo: `QA_MAL_${sufijo}`, nombre: 'Crédito raro', esCredito: true, enCompras: true })).s, 422,
     'el crédito no paga proveedores');
-  // Un medio sin uso en compras no se acepta al pagar a un proveedor (TARJETA viene así del catálogo inicial).
+  // Un medio sin uso en compras no se acepta al pagar a un proveedor (el crédito nunca paga proveedores).
   const deuda = await registrar(prov, [{ insumoId: sql(`SELECT id FROM core.insumo WHERE codigo = 'T-${sufijo}-IGV'`), cantidad: 1, precioUnitario: 10 }]);
   await verificar(deuda.b);
-  const pago = await api(admin, 'POST', `/compras/${deuda.b.codigo}/pagos`, { caja: 'GRANDE', medio: 'TARJETA', monto: 10, nroOperacion: 'POS-1' });
+  const pago = await api(admin, 'POST', `/compras/${deuda.b.codigo}/pagos`, { caja: 'GRANDE', medio: 'CREDITO', monto: 10, nroOperacion: 'POS-1' });
   assert.equal(pago.s, 422);
   assert.match(pago.b.detail, /no está habilitado para compras/);
 });

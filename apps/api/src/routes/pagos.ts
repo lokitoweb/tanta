@@ -7,6 +7,7 @@ import { auditar } from '../auditoria.js';
 import { notificar } from './notificaciones.js';
 import { actor, fallo, responder } from './almacen.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
+import { guardarImagen } from './sistema.js';
 
 /**
  * Deudas por pagar y cajas (informe de compra de insumos v1.1, secciones 3.2, 5.5 y RN-10 a RN-13).
@@ -14,10 +15,9 @@ import { medioPago, exigirOperacion } from './catalogos.js';
  * monto inicial − pagos vigentes contra esa apertura.
  */
 
-/** Saldo disponible de una apertura de caja chica. */
+/** Saldo disponible de una apertura de caja chica (pagos a proveedores y pagos de costos: core.saldo_caja). */
 const saldoCaja = async (c: PoolClient | null, aperturaId: string) => {
-  const sql = `SELECT a.monto_inicial - coalesce((SELECT sum(p.monto) FROM core.pago_compra p WHERE p.apertura_id = a.id AND p.estado = 'VIGENTE'), 0) saldo
-    FROM core.caja_apertura a WHERE a.id = $1`;
+  const sql = 'SELECT core.saldo_caja($1) saldo';
   return num((c ? (await c.query<{ saldo: string }>(sql, [aperturaId])).rows[0] : await uno<{ saldo: string }>(sql, [aperturaId]))?.saldo ?? '0');
 };
 
@@ -42,10 +42,12 @@ export async function rutasPagos(app: FastifyInstance) {
     const filas = await q<Record<string, string>>(`
       SELECT a.id, a.codigo, a.estado, a.monto_inicial, a.abierta_en::text abierta_en, a.cerrada_en::text cerrada_en, a.monto_contado, a.observacion,
              ua.nombre abierta_por, uc.nombre cerrada_por,
-             coalesce((SELECT sum(p.monto) FROM core.pago_compra p WHERE p.apertura_id = a.id AND p.estado = 'VIGENTE'), 0) pagado,
-             coalesce((SELECT json_agg(json_build_object('codigo', p.codigo, 'compra', k.codigo, 'proveedor', pr.razon_social, 'monto', p.monto,
-               'fecha', p.fecha_pago, 'estado', p.estado) ORDER BY p.fecha_pago DESC)
-               FROM core.pago_compra p JOIN core.compra k ON k.id = p.compra_id JOIN core.proveedor pr ON pr.id = k.proveedor_id WHERE p.apertura_id = a.id), '[]') pagos
+             a.monto_inicial - core.saldo_caja(a.id) pagado,
+             coalesce((SELECT json_agg(x ORDER BY x.fecha DESC) FROM (
+               SELECT p.codigo, k.codigo compra, pr.razon_social proveedor, p.monto, p.fecha_pago fecha, p.estado
+               FROM core.pago_compra p JOIN core.compra k ON k.id = p.compra_id JOIN core.proveedor pr ON pr.id = k.proveedor_id WHERE p.apertura_id = a.id
+               UNION ALL
+               SELECT g.codigo, NULL, g.concepto, g.monto, g.creado_en, g.estado FROM core.pago_costo g WHERE g.apertura_id = a.id) x), '[]') pagos
       FROM core.caja_apertura a JOIN core.usuario ua ON ua.id = a.abierta_por LEFT JOIN core.usuario uc ON uc.id = a.cerrada_por
       ORDER BY a.abierta_en DESC LIMIT 30`);
     const lista = filas.map((f) => ({
@@ -101,18 +103,21 @@ export async function rutasPagos(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Filtro inválido.'));
     const filas = await q<Record<string, unknown>>(`
       SELECT k.codigo, k.estado_pago, k.doc_tipo, k.serie, k.nro, k.fecha_compra::text fecha, k.vence_pago::text vence_pago, k.total,
-             pr.razon_social proveedor, pr.banco, pr.cci,
+             pr.razon_social proveedor, coalesce(pr.ruc, '') ruc,
+             coalesce((SELECT json_agg(json_build_object('banco', b.nombre, 'numero', x.numero) ORDER BY x.orden)
+               FROM core.proveedor_cuenta x JOIN core.banco b ON b.codigo = x.banco WHERE x.proveedor_id = pr.id), '[]') cuentas,
              coalesce((SELECT sum(monto) FROM core.pago_compra WHERE compra_id = k.id AND estado = 'VIGENTE'), 0) pagado,
              CASE WHEN k.vence_pago IS NULL THEN NULL ELSE k.vence_pago - (now() AT TIME ZONE 'America/Lima')::date END dias,
              coalesce((SELECT json_agg(json_build_object('codigo', g.codigo, 'fecha', g.fecha_pago, 'caja', g.caja, 'medio', g.medio_pago, 'monto', g.monto,
-               'nroOperacion', g.nro_operacion, 'estado', g.estado, 'autoriza', u.nombre, 'motivoAnulacion', g.motivo_anulacion, 'apertura', a.codigo) ORDER BY g.fecha_pago)
+               'nroOperacion', g.nro_operacion, 'estado', g.estado, 'autoriza', u.nombre, 'motivoAnulacion', g.motivo_anulacion, 'apertura', a.codigo,
+               'comprobanteUrl', CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || g.comprobante_id END) ORDER BY g.fecha_pago)
                FROM core.pago_compra g JOIN core.usuario u ON u.id = g.usuario_autoriza LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id WHERE g.compra_id = k.id), '[]') pagos
       FROM core.compra k JOIN core.proveedor pr ON pr.id = k.proveedor_id
       WHERE k.estado = 'VERIFICADA' AND ($1::text IS NULL OR k.estado_pago = $1)
       ORDER BY (k.estado_pago = 'PAGADO'), k.vence_pago NULLS LAST, k.fecha_compra LIMIT 300`, [p.data.estadoPago ?? null]);
     return filas.map((f) => ({
-      codigo: f.codigo, estadoPago: f.estado_pago, documento: `${String(f.doc_tipo).replace('_', ' ')} ${f.serie}-${f.nro}`, fecha: f.fecha, vencePago: f.vence_pago,
-      dias: f.dias === null ? null : num(f.dias as string), proveedor: f.proveedor, banco: f.banco ?? '', cci: f.cci ?? '',
+      codigo: f.codigo, estadoPago: f.estado_pago, documento: `${String(f.doc_tipo).replace('_', ' ')} ${f.serie ? `${f.serie}-` : ''}${f.nro}`, fecha: f.fecha, vencePago: f.vence_pago,
+      dias: f.dias === null ? null : num(f.dias as string), proveedor: f.proveedor, ruc: f.ruc, cuentas: f.cuentas,
       total: num(f.total as string), pagado: num(f.pagado as string), saldo: Math.round((num(f.total as string) - num(f.pagado as string)) * 100) / 100,
       pagos: (f.pagos as Array<Record<string, string>>).map((g) => ({ ...g, monto: num(g.monto) })),
     }));
@@ -124,7 +129,11 @@ export async function rutasPagos(app: FastifyInstance) {
     medio: z.string().trim().toUpperCase().max(20),
     monto: z.number().positive().max(10_000_000),
     nroOperacion: z.string().trim().toUpperCase().max(30).default(''),
+    // Excel: imagen del comprobante (voucher, captura de Yape…), opcional. Data URL PNG/JPEG/WebP.
+    comprobante: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
   });
+  /** Guarda el comprobante (si llega) antes de la transacción: una imagen inválida no deja el pago a medias. */
+  const comprobante = async (img: string | null, usuarioId: string) => (img ? guardarImagen(img, usuarioId) : null);
 
   // RN-10 a RN-13: Administración decide caja y medio; varios pagos por compra; nunca más que el saldo.
   app.post('/compras/:codigo/pagos', { preHandler: autenticar }, async (req, reply) => {
@@ -139,6 +148,7 @@ export async function rutasPagos(app: FastifyInstance) {
       if (previo) return reply.code(201).send({ codigo: previo.codigo, repetido: true });
     }
     return responder(reply, 'PAGO_INVALIDO', async () => {
+      const comprobanteId = await comprobante(d.comprobante, req.usuario!.id);
       const r = await tx(async (c) => {
         // Catálogo: medio habilitado para compras; RN-12 n.° de operación si el medio lo exige; caja chica solo con medios de caja.
         const medio = await medioPago(c, d.medio, 'compras');
@@ -161,13 +171,13 @@ export async function rutasPagos(app: FastifyInstance) {
           aperturaId = a.id;
         }
         const cod = `PAG-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.pago_compra WHERE codigo ~ '^PAG-[0-9]+$'`)).rows[0].n)).padStart(6, '0')}`;
-        await c.query(`INSERT INTO core.pago_compra (codigo, compra_id, caja, medio_pago, monto, nro_operacion, apertura_id, usuario_autoriza, idempotency_key)
-          VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9)`, [cod, k.id, d.caja, d.medio, d.monto.toFixed(2), d.nroOperacion, aperturaId, req.usuario!.id, clave]);
+        await c.query(`INSERT INTO core.pago_compra (codigo, compra_id, caja, medio_pago, monto, nro_operacion, apertura_id, usuario_autoriza, idempotency_key, comprobante_id)
+          VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10)`, [cod, k.id, d.caja, d.medio, d.monto.toFixed(2), d.nroOperacion, aperturaId, req.usuario!.id, clave, comprobanteId]);
         await actualizarEstadoPago(c, k.id);
         const estado = (await c.query<{ estado_pago: string }>('SELECT estado_pago FROM core.compra WHERE id = $1', [k.id])).rows[0].estado_pago;
         return { codigo: cod, estadoPago: estado, saldo: Math.round((saldo - d.monto) * 100) / 100 };
       });
-      await auditar({ ...actor(req), accion: 'PAGO_COMPRA_REGISTRADO', entidad: 'pago_compra', entidadId: r.codigo, detalle: { compra: codigo, ...d } });
+      await auditar({ ...actor(req), accion: 'PAGO_COMPRA_REGISTRADO', entidad: 'pago_compra', entidadId: r.codigo, detalle: { compra: codigo, ...d, comprobante: comprobanteId ? 'adjunto' : null } });
       return reply.code(201).send({ ...r, compra: codigo });
     });
   });
@@ -189,6 +199,99 @@ export async function rutasPagos(app: FastifyInstance) {
       await auditar({ ...actor(req), accion: 'PAGO_COMPRA_ANULADO', entidad: 'pago_compra', entidadId: codigo, detalle: { compra, motivo: p.data.motivo } });
       return { codigo, estado: 'ANULADO', compra };
     });
+  });
+}
+
+/**
+ * Excel «REGISTRAR PAGOS - COSTOS»: pago de un costo indirecto (alquiler, luz, gas…) o de otro concepto, por período
+ * (mes y año), desde caja grande o caja chica (con apertura vigente y sin superar su saldo), con medio, n.° de
+ * operación y comprobante. Un pago mal registrado se anula con motivo; el dinero vuelve a su caja.
+ */
+export async function rutasPagosCostos(app: FastifyInstance) {
+  const PagoCosto = z.object({
+    costoIndirectoId: z.union([z.literal(''), z.string().uuid()]).nullable().default(null).transform((v) => v || null),
+    concepto: z.string().trim().max(120).default(''),
+    fechaOperacion: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    periodoMes: z.number().int().min(1).max(12),
+    periodoAnio: z.number().int().min(2000).max(2100),
+    monto: z.number().positive().max(10_000_000),
+    caja: z.enum(['CHICA', 'GRANDE']),
+    medio: z.string().trim().toUpperCase().max(20),
+    nroOperacion: z.string().trim().toUpperCase().max(30).default(''),
+    comprobante: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
+  }).refine((d) => d.costoIndirectoId || d.concepto.length >= 2, { message: 'Elige el costo indirecto o escribe el concepto.', path: ['concepto'] });
+
+  app.get('/pagos-costos', { preHandler: autenticar }, async (req, reply) => {
+    if (!['compras.pagar', 'costos.ver'].some((x) => req.usuario!.permisos.has(x))) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso compras.pagar.'));
+    const p = z.object({ anio: z.coerce.number().int().min(2000).max(2100).optional(), mes: z.coerce.number().int().min(1).max(12).optional() }).safeParse(req.query);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Período inválido.'));
+    const filas = await q<Record<string, unknown>>(`
+      SELECT g.codigo, g.concepto, k.codigo cif, g.fecha_operacion::text fecha, g.periodo_mes, g.periodo_anio, g.monto, g.caja, a.codigo apertura,
+             g.medio_pago, g.nro_operacion, g.estado, g.motivo_anulacion, u.nombre usuario, g.creado_en::text creado_en,
+             CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || g.comprobante_id END comprobante_url
+      FROM core.pago_costo g JOIN core.usuario u ON u.id = g.usuario_id LEFT JOIN core.costo_indirecto k ON k.id = g.costo_indirecto_id
+      LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id
+      WHERE ($1::int IS NULL OR g.periodo_anio = $1) AND ($2::int IS NULL OR g.periodo_mes = $2)
+      ORDER BY g.fecha_operacion DESC, g.creado_en DESC LIMIT 500`, [p.data.anio ?? null, p.data.mes ?? null]);
+    return filas.map((f) => ({ codigo: f.codigo, concepto: f.concepto, cif: f.cif, fecha: f.fecha, periodoMes: f.periodo_mes, periodoAnio: f.periodo_anio,
+      monto: num(f.monto as string), caja: f.caja, apertura: f.apertura, medio: f.medio_pago, nroOperacion: f.nro_operacion, estado: f.estado,
+      motivoAnulacion: f.motivo_anulacion, usuario: f.usuario, creadoEn: f.creado_en, comprobanteUrl: f.comprobante_url }));
+  });
+
+  app.post('/pagos-costos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'compras.pagar')) return;
+    const p = PagoCosto.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pago inválido.'));
+    const d = p.data;
+    const clave = (req.headers['idempotency-key'] as string | undefined) ?? null;
+    if (clave) {
+      const previo = await uno<{ codigo: string }>('SELECT codigo FROM core.pago_costo WHERE idempotency_key = $1', [clave]);
+      if (previo) return reply.code(201).send({ codigo: previo.codigo, repetido: true });
+    }
+    return responder(reply, 'PAGO_INVALIDO', async () => {
+      const comprobanteId = d.comprobante ? await guardarImagen(d.comprobante, req.usuario!.id) : null;
+      const r = await tx(async (c) => {
+        const medio = await medioPago(c, d.medio, 'compras');
+        exigirOperacion(medio, d.nroOperacion);
+        if (d.caja === 'CHICA' && !medio.caja_chica) throw fallo(422, `La caja chica no paga con ${medio.nombre.toLowerCase()}.`);
+        let concepto = d.concepto;
+        if (d.costoIndirectoId) {
+          const k = (await c.query<{ concepto: string }>('SELECT concepto FROM core.costo_indirecto WHERE id = $1', [d.costoIndirectoId])).rows[0];
+          if (!k) throw fallo(422, 'El costo indirecto no existe.');
+          concepto = concepto || k.concepto;
+        }
+        let aperturaId: string | null = null;
+        if (d.caja === 'CHICA') {
+          const a = (await c.query<{ id: string; codigo: string }>(`SELECT id, codigo FROM core.caja_apertura WHERE tipo = 'CHICA' AND estado = 'ABIERTA' FOR UPDATE`)).rows[0];
+          if (!a) throw fallo(409, 'No hay una caja chica abierta: paga desde caja grande o pide que se abra la caja.');
+          const disponible = await saldoCaja(c, a.id);
+          if (d.monto > disponible + 0.005) throw fallo(422, `La caja chica ${a.codigo} solo tiene S/ ${disponible.toFixed(2)} disponibles.`);
+          aperturaId = a.id;
+        }
+        const cod = `PGC-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.pago_costo WHERE codigo ~ '^PGC-[0-9]+$'`)).rows[0].n)).padStart(6, '0')}`;
+        await c.query(`INSERT INTO core.pago_costo (codigo, costo_indirecto_id, concepto, fecha_operacion, periodo_mes, periodo_anio, monto, caja, apertura_id,
+            medio_pago, nro_operacion, comprobante_id, usuario_id, idempotency_key)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14)`,
+          [cod, d.costoIndirectoId, concepto, d.fechaOperacion, d.periodoMes, d.periodoAnio, d.monto.toFixed(2), d.caja, aperturaId, d.medio, d.nroOperacion,
+            comprobanteId, req.usuario!.id, clave]);
+        return { codigo: cod, concepto };
+      });
+      await auditar({ ...actor(req), accion: 'PAGO_COSTO_REGISTRADO', entidad: 'pago_costo', entidadId: r.codigo,
+        detalle: { ...d, concepto: r.concepto, comprobante: comprobanteId ? 'adjunto' : null } });
+      return reply.code(201).send({ codigo: r.codigo });
+    });
+  });
+
+  app.post('/pagos-costos/:codigo/anular', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'compras.pagar')) return;
+    const { codigo } = req.params as { codigo: string };
+    const p = z.object({ motivo: z.string().trim().min(5).max(300) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo (mínimo 5 caracteres).'));
+    const r = await uno(`UPDATE core.pago_costo SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
+      WHERE codigo = $1 AND estado = 'VIGENTE' RETURNING codigo`, [codigo, req.usuario!.id, p.data.motivo]);
+    if (!r) return reply.code(409).send(error(409, 'PAGO_INVALIDO', 'El pago no existe o ya está anulado.'));
+    await auditar({ ...actor(req), accion: 'PAGO_COSTO_ANULADO', entidad: 'pago_costo', entidadId: codigo, detalle: { motivo: p.data.motivo } });
+    return { codigo, estado: 'ANULADO' };
   });
 }
 

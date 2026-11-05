@@ -76,7 +76,7 @@ export async function rutasDatos(app: FastifyInstance) {
         ORDER BY f.fecha`)),
 
       recordar('cat:categorias', CATALOGO_MS, () => q<Record<string, string>>(`
-        SELECT c.id, c.nombre, c.margen_objetivo, c.orden,
+        SELECT c.id, c.codigo, c.nombre, c.margen_objetivo, c.orden,
                coalesce(x.ventas,0)   AS ventas,
                coalesce(x.costo,0)    AS costo,
                coalesce(x.utilidad,0) AS utilidad
@@ -100,7 +100,10 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
                p.precio_con_igv, p.costo_unitario, p.merma_pct, p.vendidos_30d, p.stock, p.estado,
-               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, p.anticipacion_horas, p.imagen_id, p.insumo_id, p.peso_final_g, p.unidades_lote, p.vida_util_dias,
+               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, p.anticipacion_horas, p.imagen_id, p.insumo_id, p.peso_final_g, p.unidades_lote, p.vida_util_dias, p.sku,
+               coalesce((SELECT json_agg(json_build_object('presentacion', pp.presentacion_codigo, 'nombre', v.nombre, 'equivalencia', v.equivalencia,
+                 'sku', coalesce(pp.sku, ''), 'precioConIgv', pp.precio_con_igv, 'activo', pp.activo) ORDER BY pp.orden)
+                 FROM core.producto_presentacion pp JOIN core.presentacion_venta v ON v.codigo = pp.presentacion_codigo WHERE pp.producto_id = p.id), '[]') presentaciones,
                p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) AS precio_neto,
                CASE WHEN p.precio_con_igv > 0
                     THEN (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')) - p.costo_unitario) / (p.precio_con_igv / (1 + (SELECT valor::numeric FROM core.parametro WHERE clave = 'igv')))
@@ -126,6 +129,7 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:insumos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT id, codigo, nombre, unidad, cpp, stock, minimo, proveedor, estado,
                tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, activo, unidad_inventario, core.factor_inventario(id) factor,
+               maneja_stock, presentacion_codigo, costo_formula,
                (cpp * stock) AS valorizado
         FROM core.insumo ORDER BY estado DESC, nombre`)),
 
@@ -265,7 +269,7 @@ export async function rutasDatos(app: FastifyInstance) {
         const v = num(c.ventas);
         const u2 = num(c.utilidad);
         return {
-          id: c.id, nombre: c.nombre, orden: Number(c.orden ?? 0),
+          id: c.id, codigo: c.codigo, nombre: c.nombre, orden: Number(c.orden ?? 0),
           ventas: v, costo: num(c.costo), utilidad: u2,
           margen: v > 0 ? u2 / v : 0,
           margenObjetivo: num(c.margen_objetivo),
@@ -287,6 +291,8 @@ export async function rutasDatos(app: FastifyInstance) {
           pesoFinalG: pr.peso_final_g === null ? null : num(pr.peso_final_g),
           unidadesLote: pr.unidades_lote === null ? null : Number(pr.unidades_lote),
           vidaUtilDias: pr.vida_util_dias === null ? null : Number(pr.vida_util_dias),
+          sku: pr.sku ?? '',
+          presentaciones: (pr.presentaciones as unknown as Array<Record<string, unknown>>).map((x) => ({ ...x, equivalencia: num(x.equivalencia as string), precioConIgv: num(x.precioConIgv as string) })),
         };
         if (!verCosto) return base;
         return { ...base, costoUnitario: num(pr.costo_unitario), margen: num(pr.margen) };
@@ -306,9 +312,12 @@ export async function rutasDatos(app: FastifyInstance) {
           stock: num(i.stock), minimo: num(i.minimo), proveedor: i.proveedor, estado: i.estado,
           tipo: i.tipo, presentacion: i.presentacion, equivKg: num(i.equiv_kg), activo: Boolean(i.activo),
           unidadInventario: i.unidad_inventario, factor: num(i.factor), contenido: i.cant_presentacion === null ? null : num(i.cant_presentacion),
+          manejaStock: i.maneja_stock !== (false as unknown), presentacionCodigo: i.presentacion_codigo ?? '',
         };
         if (!verCosto && !u.permisos.has('inventario.mover')) return base;
         return { ...base, cpp: num(i.cpp), valorizado: num(i.valorizado),
+          // Costo con que las fórmulas calculan el precio (manual si se ajustó, si no el del kárdex).
+          costoFormulas: i.costo_formula === null ? num(i.cpp) : num(i.costo_formula), costoManual: i.costo_formula !== null,
           precioCompra: i.precio_compra === null ? null : num(i.precio_compra), cantPresentacion: i.cant_presentacion === null ? null : num(i.cant_presentacion) };
       }),
       ops: ops.map((o) => ({

@@ -3,7 +3,11 @@ import { Buscador } from './primitives';
 import { useMemo, useState } from 'react';
 import { money, num2, pct } from '@/core/format';
 import { Insignia } from './primitives';
-import { Icon } from './icons';
+import { Icon, type NombreIcono } from './icons';
+
+/** Botón de una fila (Anular, Ajustar precio…): no abre la edición. visible decide si aplica a esa fila. */
+export interface AccionFila { etiqueta: string | ((f: Fila) => string); icono: NombreIcono | ((f: Fila) => NombreIcono); onClick: (f: Fila) => void; visible?: (f: Fila) => boolean; peligro?: boolean | ((f: Fila) => boolean) }
+const valorDe = <T,>(v: T | ((f: Fila) => T), f: Fila): T => (typeof v === 'function' ? (v as (f: Fila) => T)(f) : v);
 
 export interface ColRep { key: string; label: string; tipo?: 'dinero' | 'pct' | 'num' | 'texto' | 'fecha' | 'semaforo' }
 type Fila = Record<string, unknown>;
@@ -15,7 +19,8 @@ const SEMAFORO: Record<string, { tono: 'ok' | 'warn' | 'danger'; txt: string }> 
 export function formatear(v: unknown, tipo?: ColRep['tipo'], fila?: Fila): React.ReactNode {
   if (v === null || v === undefined || v === '') return <span className="t-muted">—</span>;
   if (typeof v === 'boolean') return <Insignia tono={v ? 'ok' : 'neutral'} punto>{v ? 'Sí' : 'No'}</Insignia>;
-  const t = (fila?.tipo && tipo === 'dinero') ? fila.tipo as ColRep['tipo'] : tipo; // filas que traen su propio tipo (G-01, G-09)
+  // Filas de reporte que traen su propio formato (G-01, G-09); un campo «tipo» de negocio (tipo de insumo) no cuenta.
+  const t = (tipo === 'dinero' && ['dinero', 'pct', 'num'].includes(String(fila?.tipo))) ? fila!.tipo as ColRep['tipo'] : tipo;
   if (t === 'dinero') return money(v as number);
   if (t === 'pct') return pct(v as number);
   if (t === 'num') return Number.isInteger(v) ? (v as number).toLocaleString('es-PE') : num2(v as number);
@@ -25,7 +30,7 @@ export function formatear(v: unknown, tipo?: ColRep['tipo'], fila?: Fila): React
 }
 
 /** Tabla de reporte: columnas tipadas, orden por clic, buscador, paginación y totales de columnas de dinero. */
-export function TablaReporte({ columnas, filas, onFila, onEliminar }: { columnas: ColRep[]; filas: Fila[]; onFila?: (f: Fila) => void;
+export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [] }: { columnas: ColRep[]; filas: Fila[]; onFila?: (f: Fila) => void; acciones?: AccionFila[];
   /** Si existe, cada fila muestra un botón de eliminar (no abre la edición). */
   onEliminar?: (f: Fila) => void }) {
   const [orden, setOrden] = useState<{ key: string; asc: boolean } | null>(null);
@@ -57,7 +62,7 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar }: { columnas
                   {c.label}{activo ? (orden!.asc ? ' ↑' : ' ↓') : ''}
                 </button>
               </th>);
-          })}{onEliminar && <th className="t-right"><span className="sr-only">Acciones</span></th>}</tr>
+          })}{(onEliminar || acciones.length > 0) && <th className="t-right"><span className="sr-only">Acciones</span></th>}</tr>
         </thead>
         <tbody>
           {pag.visibles.map((f, i) => (
@@ -66,10 +71,18 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar }: { columnas
                 <td key={c.key} className={`${['dinero', 'pct', 'num'].includes(c.tipo ?? '') ? 't-right' : ''} ${c.tipo === 'pct' && typeof f[c.key] === 'number' && (f[c.key] as number) < 0 ? 't-neg' : ''}`}>
                   {formatear(f[c.key], c.tipo, f)}
                 </td>))}
-              {onEliminar && (
-                <td className="t-right">
+              {(onEliminar || acciones.length > 0) && (
+                <td className="t-right t-acciones">
+                  {acciones.filter((a) => !a.visible || a.visible(f)).map((a) => {
+                    const etiqueta = valorDe(a.etiqueta, f);
+                    return (
+                      <button key={etiqueta} type="button" className={`btn-icono ${valorDe(a.peligro ?? false, f) ? 'btn-icono--peligro' : ''}`} title={etiqueta}
+                        aria-label={`${etiqueta} ${String(f[columnas[1]?.key] ?? f[columnas[0]?.key] ?? '')}`}
+                        onClick={(e) => { e.stopPropagation(); a.onClick(f); }}><Icon name={valorDe(a.icono, f)} size={16} /></button>);
+                  })}
+                  {onEliminar && (
                   <button type="button" className="btn-icono btn-icono--peligro" title="Eliminar" aria-label={`Eliminar ${String(f[columnas[0]?.key] ?? '')}`}
-                    onClick={(e) => { e.stopPropagation(); onEliminar(f); }}><Icon name="trash" size={16} /></button>
+                    onClick={(e) => { e.stopPropagation(); onEliminar(f); }}><Icon name="trash" size={16} /></button>)}
                 </td>)}
             </tr>
           ))}

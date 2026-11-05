@@ -15,6 +15,10 @@ import { invalidar } from '../cache.js';
 const texto = (min: number, max: number) => z.string().trim().min(min).max(max);
 const dinero = z.number().min(0).max(1_000_000);
 const pct = z.number().min(0).max(0.95);
+/** Código del negocio escrito a mano (opcional): "" = lo genera el sistema. */
+export const codigoPropio = z.string().trim().toUpperCase()
+  .regex(/^([A-Z0-9][A-Z0-9-]{0,19})?$/, 'El código lleva hasta 20 letras, números o guiones').default('');
+const sku = z.string().trim().regex(/^([A-Za-z0-9-]{3,30})?$/, 'El SKU lleva de 3 a 30 letras, números o guiones').default('');
 
 function invalido(reply: FastifyReply, e: z.ZodError) {
   const i = e.issues[0];
@@ -43,7 +47,12 @@ export async function rutasMaestros(app: FastifyInstance) {
 
   /* ------------------------------------------------------------ categorías */
   // El margen objetivo se administra en Rentabilidad/Parámetros, no al crear la categoría: si no llega, nace con el margen global y al editar se conserva.
-  const Categoria = z.object({ nombre: texto(2, 60), margenObjetivo: pct.optional(), orden: z.number().int().min(0).max(999).nullable().default(0) });
+  // Código propio (Excel «INTERFACES TANTA»): se escribe o, vacío, la base asigna CAT-01, CAT-02…
+  const Categoria = z.object({ nombre: texto(2, 60), margenObjetivo: pct.optional(), orden: z.number().int().min(0).max(999).nullable().default(0), codigo: codigoPropio });
+  const duplicado = (reply: FastifyReply, e: unknown, que: string) => {
+    if ((e as { code?: string }).code !== '23505') throw e;
+    return reply.code(409).send(error(409, 'DUPLICADO', `Ya existe ${que}.`));
+  };
 
   app.post('/categorias', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'maestros.editar')) return;
@@ -51,12 +60,15 @@ export async function rutasMaestros(app: FastifyInstance) {
     if (!p.success) return invalido(reply, p.error);
     const id = p.data.nombre.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]+/g, '_').slice(0, 30);
     if (await uno('SELECT 1 FROM core.categoria WHERE id = $1', [id])) return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe esa categoría.'));
-    await q(`INSERT INTO core.categoria (id, nombre, margen_objetivo, orden)
-      VALUES ($1, $2, coalesce($3::numeric, (SELECT valor::numeric FROM core.parametro WHERE clave = 'margen_objetivo_global'), 0.45), $4)`,
-      [id, p.data.nombre, p.data.margenObjetivo ?? null, p.data.orden ?? 0]);
+    let codigo: string;
+    try {
+      codigo = (await uno<{ codigo: string }>(`INSERT INTO core.categoria (id, nombre, margen_objetivo, orden, codigo)
+        VALUES ($1, $2, coalesce($3::numeric, (SELECT valor::numeric FROM core.parametro WHERE clave = 'margen_objetivo_global'), 0.45), $4, NULLIF($5,'')) RETURNING codigo`,
+        [id, p.data.nombre, p.data.margenObjetivo ?? null, p.data.orden ?? 0, p.data.codigo]))!.codigo;
+    } catch (e) { return duplicado(reply, e, 'una categoría con ese código'); }
     invalidar('cat:');
-    await auditar({ ...actor(req), accion: 'CATEGORIA_CREADA', entidad: 'categoria', entidadId: id, detalle: p.data, ip: req.ip });
-    return reply.code(201).send({ id, ...p.data });
+    await auditar({ ...actor(req), accion: 'CATEGORIA_CREADA', entidad: 'categoria', entidadId: id, detalle: { ...p.data, codigo }, ip: req.ip });
+    return reply.code(201).send({ id, ...p.data, codigo });
   });
 
   app.patch('/categorias/:id', { preHandler: autenticar }, async (req, reply) => {
@@ -64,11 +76,15 @@ export async function rutasMaestros(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const p = Categoria.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
-    const r = await q('UPDATE core.categoria SET nombre = $2, margen_objetivo = coalesce($3::numeric, margen_objetivo), orden = $4 WHERE id = $1 RETURNING id', [id, p.data.nombre, p.data.margenObjetivo ?? null, p.data.orden ?? 0]);
+    let r: Array<{ codigo: string }>;
+    try {
+      r = await q<{ codigo: string }>(`UPDATE core.categoria SET nombre = $2, margen_objetivo = coalesce($3::numeric, margen_objetivo), orden = $4,
+        codigo = coalesce(NULLIF($5,''), codigo) WHERE id = $1 RETURNING codigo`, [id, p.data.nombre, p.data.margenObjetivo ?? null, p.data.orden ?? 0, p.data.codigo]);
+    } catch (e) { return duplicado(reply, e, 'una categoría con ese código'); }
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La categoría no existe.'));
     invalidar('cat:');
     await auditar({ ...actor(req), accion: 'CATEGORIA_EDITADA', entidad: 'categoria', entidadId: id, detalle: p.data, ip: req.ip });
-    return { id, ...p.data };
+    return { id, ...p.data, codigo: r[0].codigo };
   });
 
   // Solo se elimina una categoría sin productos (activos o no): sus ventas y recetas dependen de ella.
@@ -91,6 +107,10 @@ export async function rutasMaestros(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------------------- productos */
+  const Presentacion = z.object({
+    presentacion: z.string().trim().toUpperCase().min(2).max(20), sku,
+    precioConIgv: z.number().positive().max(1_000_000), activo: z.boolean().default(true),
+  });
   // Datos de producción de la hoja 'pan' (MAE-03): con ellos el motor calcula unidades, MO y CIF.
   const Producto = z.object({
     nombre: texto(2, 120), categoriaId: texto(1, 40), unidad: z.string().trim().toUpperCase().max(20),
@@ -109,6 +129,86 @@ export async function rutasMaestros(app: FastifyInstance) {
     vidaUtilDias: z.number().int().min(0).max(3650).nullable().optional(),
     // MAE-06: insumo que produce este producto (sub-receta). "" o null = producto de venta normal.
     insumoId: z.union([z.literal(''), z.string().uuid()]).nullable().optional(),
+    // SKU #1: código de barras de la presentación unitaria (la del precio del producto).
+    sku: sku.optional(),
+    // SKU #2…: otras presentaciones de venta (paquete x 6…) con su SKU y su precio. Ausente = no se tocan.
+    presentaciones: z.array(Presentacion).max(20).optional(),
+  });
+
+  /** Valida y reemplaza las presentaciones del producto; el SKU no se repite en ningún producto ni presentación. */
+  async function guardarPresentaciones(c: import('../db.js').Cliente, productoId: string, skuUnitario: string | undefined,
+    lista: Array<z.infer<typeof Presentacion>> | undefined) {
+    const codigos = (lista ?? []).map((x) => x.presentacion);
+    if (new Set(codigos).size !== codigos.length) throw fallo(422, 'Una presentación aparece dos veces.');
+    const skus = [...(skuUnitario ? [skuUnitario] : []), ...(lista ?? []).map((x) => x.sku).filter(Boolean)];
+    if (new Set(skus.map((s) => s.toUpperCase())).size !== skus.length) throw fallo(422, 'Un SKU se repite en este producto.');
+    if (skus.length) {
+      const ajeno = (await c.query<{ sku: string; nombre: string }>(`SELECT x.sku, p.nombre FROM (
+          SELECT sku, id producto_id FROM core.producto WHERE sku IS NOT NULL
+          UNION ALL SELECT sku, producto_id FROM core.producto_presentacion WHERE sku IS NOT NULL) x
+        JOIN core.producto p ON p.id = x.producto_id WHERE upper(x.sku) = ANY($1) AND x.producto_id <> $2 LIMIT 1`,
+        [skus.map((s) => s.toUpperCase()), productoId])).rows[0];
+      if (ajeno) throw fallo(409, `El SKU ${ajeno.sku} ya lo usa «${ajeno.nombre}».`);
+    }
+    if (skuUnitario !== undefined) await c.query('UPDATE core.producto SET sku = NULLIF($2,\'\') WHERE id = $1', [productoId, skuUnitario]);
+    if (lista === undefined) return;
+    if (codigos.length) {
+      const ok = (await c.query<{ codigo: string; equivalencia: string }>('SELECT codigo, equivalencia FROM core.presentacion_venta WHERE codigo = ANY($1) AND activo', [codigos])).rows;
+      const falta = codigos.find((k) => !ok.some((o) => o.codigo === k));
+      if (falta) throw fallo(422, `La presentación ${falta} no existe o está inactiva (Maestros → Catálogos → Presentaciones de venta).`);
+    }
+    await c.query('DELETE FROM core.producto_presentacion WHERE producto_id = $1', [productoId]);
+    for (const [i, x] of lista.entries()) {
+      await c.query(`INSERT INTO core.producto_presentacion (producto_id, presentacion_codigo, sku, precio_con_igv, activo, orden)
+        VALUES ($1,$2,NULLIF($3,''),$4,$5,$6)`, [productoId, x.presentacion, x.sku, x.precioConIgv.toFixed(4), x.activo, i + 1]);
+    }
+  }
+  const fallo = (status: number, mensaje: string) => Object.assign(new Error(mensaje), { status });
+  const responderFallo = (reply: FastifyReply, e: unknown, codigo: string) => {
+    const x = e as { status?: number; code?: string; message: string };
+    if (x.code === '23505') return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un registro con ese código o SKU.'));
+    if (!x.status) throw e;
+    return reply.code(x.status).send(error(x.status, codigo, x.message));
+  };
+
+  // Anular (inactivar) o reactivar: el producto con ventas no se borra; inactivo no se vende ni sale en el catálogo.
+  app.patch('/productos/:id/estado', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const { id } = req.params as { id: string };
+    const p = z.object({ estado: z.enum(['ACTIVO', 'INACTIVO']) }).safeParse(req.body);
+    if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Estado inválido.'));
+    const r = await q<{ nombre: string }>('UPDATE core.producto SET estado = $2 WHERE id = $1 RETURNING nombre', [id, p.data.estado]);
+    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El producto no existe.'));
+    invalidar('cat:');
+    await auditar({ ...actor(req), accion: p.data.estado === 'INACTIVO' ? 'PRODUCTO_ANULADO' : 'PRODUCTO_REACTIVADO', entidad: 'producto', entidadId: id, detalle: { nombre: r[0].nombre }, ip: req.ip });
+    return { id, estado: p.data.estado };
+  });
+
+  // «Ajustar precio» (Excel): precio de la unidad y de cada presentación, con la ficha de costo a la vista.
+  app.patch('/productos/:id/precios', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const { id } = req.params as { id: string };
+    const p = z.object({
+      precioConIgv: z.number().positive().max(100_000),
+      presentaciones: z.array(z.object({ presentacion: z.string().trim().toUpperCase().max(20), precioConIgv: z.number().positive().max(1_000_000) })).max(20).default([]),
+    }).safeParse(req.body);
+    if (!p.success || !z.string().uuid().safeParse(id).success) return invalido(reply, p.error ?? new z.ZodError([]));
+    try {
+      const antes = await tx(async (c) => {
+        const prod = (await c.query<{ precio_con_igv: string; insumo_id: string | null }>('SELECT precio_con_igv, insumo_id FROM core.producto WHERE id = $1 FOR UPDATE', [id])).rows[0];
+        if (!prod) throw fallo(404, 'El producto no existe.');
+        if (prod.insumo_id) throw fallo(422, 'Un producto intermedio (sub-receta) no se vende: no tiene precio.');
+        await c.query('UPDATE core.producto SET precio_con_igv = $2 WHERE id = $1', [id, p.data.precioConIgv.toFixed(4)]);
+        for (const x of p.data.presentaciones) {
+          const r = await c.query('UPDATE core.producto_presentacion SET precio_con_igv = $3 WHERE producto_id = $1 AND presentacion_codigo = $2', [id, x.presentacion, x.precioConIgv.toFixed(4)]);
+          if (!r.rowCount) throw fallo(422, `El producto no tiene la presentación ${x.presentacion}.`);
+        }
+        return num(prod.precio_con_igv);
+      });
+      invalidar('cat:');
+      await auditar({ ...actor(req), accion: 'PRECIO_AJUSTADO', entidad: 'producto', entidadId: id, detalle: { antes, despues: p.data }, ip: req.ip });
+      return { id, ...p.data };
+    } catch (e) { return responderFallo(reply, e, 'PRECIO_INVALIDO'); }
   });
 
   app.patch('/productos/:id', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
@@ -144,7 +244,8 @@ export async function rutasMaestros(app: FastifyInstance) {
     if (!intermedio && p.data.precioConIgv <= 0) return reply.code(422).send(error(422, 'PRECIO_INVALIDO', 'precioConIgv: el precio debe ser mayor que cero.'));
     // La imagen primero: si es inválida (415/413) no se guarda nada a medias.
     try { await aplicarImagen(id, p.data.imagenUrl, req.usuario!.id); } catch (e) { return falloImagen(reply, e); }
-    await tx(async (c) => {
+    try { await tx(async (c) => {
+      await guardarPresentaciones(c, id, p.data.sku, p.data.presentaciones);
       await c.query(`UPDATE core.producto SET nombre=$2, categoria_id=$3, unidad=$4, precio_con_igv=$5, estado=$6,
           peso_masa_g = CASE WHEN $7::boolean THEN $8::numeric ELSE peso_masa_g END,
           perdida_coccion = coalesce($9::numeric, perdida_coccion),
@@ -160,7 +261,7 @@ export async function rutasMaestros(app: FastifyInstance) {
           p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, perdida, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null, p.data.anticipacionHoras ?? null, insumoId !== undefined, insumoId ?? null,
           p.data.pesoFinalG !== undefined, p.data.pesoFinalG ?? null, p.data.unidadesLote !== undefined, p.data.unidadesLote ?? null, codigo ?? null, p.data.vidaUtilDias !== undefined, p.data.vidaUtilDias ?? null]);
       await c.query('SELECT core.recalcular_costos()');
-    });
+    }); } catch (e) { return responderFallo(reply, e, 'PRODUCTO_INVALIDO'); }
     invalidar('cat:'); // el catálogo (web y app) ve el cambio al instante, no tras el TTL
     const { imagenUrl: _imagen, ...cambios } = p.data;
     await auditar({ ...actor(req), accion: 'PRODUCTO_EDITADO', entidad: 'producto', entidadId: id,
@@ -180,7 +281,24 @@ export async function rutasMaestros(app: FastifyInstance) {
     cantPresentacion: z.number().positive().max(1_000_000).nullable().default(null),
     // Densidad (kg por unidad base): obligatoria si la unidad de inventario es de otra familia (RN-03).
     equivKg: z.number().positive().max(1000).nullable().default(null),
-  }).refine((d) => d.precioCompra === null || d.cantPresentacion !== null, { message: 'Indica la cantidad por presentación', path: ['cantPresentacion'] });
+    // Excel: código propio (HAR-01) o automático (INS-001), presentación del catálogo y si se controla su stock.
+    codigo: codigoPropio,
+    presentacionCodigo: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
+    // «Maneja stock = N»: insumos menores (p. ej. agua) que no se cuentan: sin alertas de mínimo ni bloqueo por falta de stock.
+    manejaStock: z.boolean().default(true),
+  });
+  type DatosInsumo = z.infer<typeof Insumo>;
+  /** Presentación de compra del catálogo: su nombre queda en el insumo y su equivalencia es el contenido por defecto. */
+  const conPresentacion = async (d: DatosInsumo): Promise<DatosInsumo | { error: string }> => {
+    // Con precio hace falta saber cuánto trae la presentación (la escrita o la del catálogo).
+    const sinCantidad = { error: 'cantPresentacion: Indica la cantidad por presentación' };
+    if (!d.presentacionCodigo) return d.precioCompra !== null && d.cantPresentacion === null ? sinCantidad : d;
+    const pr = await uno<{ nombre: string; equivalencia: string }>('SELECT nombre, equivalencia FROM core.presentacion_compra WHERE codigo = $1 AND activo', [d.presentacionCodigo]);
+    if (!pr) return { error: `La presentación ${d.presentacionCodigo} no existe o está inactiva.` };
+    return { ...d, presentacion: pr.nombre, cantPresentacion: d.cantPresentacion ?? num(pr.equivalencia) };
+  };
+  const codigoInsumoLibre = async (codigo: string, id: string | null) =>
+    !codigo || !(await uno('SELECT 1 FROM core.insumo WHERE upper(codigo) = $1 AND id IS DISTINCT FROM $2', [codigo, id]));
   // RN-01: costo por unidad base = precio ÷ cantidad por presentación. Solo fija el costo mientras
   // no haya compras: después manda el costo promedio ponderado del kárdex (RN-02).
   const costoReferencia = (d: { precioCompra: number | null; cantPresentacion: number | null }) =>
@@ -207,21 +325,113 @@ export async function rutasMaestros(app: FastifyInstance) {
     return { unidadInventario, densidad, factor };
   };
 
+  /** Alta de un insumo ya validado (formulario e importación comparten la misma escritura). */
+  const insertarInsumo = (d: DatosInsumo, u: { densidad: number; unidadInventario: string; factor: number }) => uno<{ id: string; codigo: string }>(
+    `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, unidad_inventario,
+                              maneja_stock, presentacion_codigo)
+     VALUES (coalesce(NULLIF($13,''), 'INS-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.insumo WHERE codigo ~ '^INS-[0-9]+$')::text, 3, '0')),
+             $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11, $14, $15) RETURNING id, codigo`,
+    [d.nombre, d.unidad, d.minimo, d.proveedor, d.tipo, d.presentacion, d.precioCompra, d.cantPresentacion, costoReferencia(d),
+      u.densidad, u.unidadInventario, u.factor, d.codigo, d.manejaStock, d.presentacionCodigo]);
+
   app.post('/insumos', { preHandler: autenticar }, async (req, reply) => {
     if (!editaInsumos(req, reply)) return;
     const p = Insumo.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
-    const u = await unidades(p.data);
+    const d = await conPresentacion(p.data);
+    if ('error' in d) return reply.code(422).send(error(422, 'PRESENTACION_INVALIDA', d.error));
+    if (!(await codigoInsumoLibre(d.codigo, null))) return reply.code(409).send(error(409, 'CODIGO_DUPLICADO', `El código ${d.codigo} ya lo usa otro insumo.`));
+    const u = await unidades(d);
     if ('error' in u) return reply.code(422).send(error(422, 'SIN_DENSIDAD', u.error));
     // El costo inicial entra con la primera compra (Almacén → Registrar movimiento), que fija el CPP.
-    const f = await uno<{ id: string; codigo: string }>(
-      `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, unidad_inventario)
-       VALUES ('INS-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.insumo WHERE codigo ~ '^INS-[0-9]+$')::text, 3, '0'),
-               $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11) RETURNING id, codigo`,
-      [p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, costoReferencia(p.data),
-        u.densidad, u.unidadInventario, u.factor]);
-    await auditar({ ...actor(req), accion: 'INSUMO_CREADO', entidad: 'insumo', entidadId: f!.id, detalle: p.data, ip: req.ip });
-    return reply.code(201).send({ ...f, ...p.data });
+    const f = await insertarInsumo(d, u);
+    invalidar('cat:');
+    await auditar({ ...actor(req), accion: 'INSUMO_CREADO', entidad: 'insumo', entidadId: f!.id, detalle: d, ip: req.ip });
+    return reply.code(201).send({ ...d, ...f });
+  });
+
+  // Anular (inactivar) o reactivar el insumo; en una receta vigente no se inactiva.
+  app.patch('/insumos/:id/estado', { preHandler: autenticar }, async (req, reply) => {
+    if (!editaInsumos(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const p = z.object({ activo: z.boolean() }).safeParse(req.body);
+    if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Estado inválido.'));
+    if (!p.data.activo && await uno("SELECT 1 FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.insumo_id = $1 AND r.estado = 'VIGENTE'", [id])) {
+      return reply.code(409).send(error(409, 'INSUMO_EN_USO', 'El insumo está en una receta vigente: quítalo de la receta antes de anularlo.'));
+    }
+    const r = await q<{ nombre: string }>('UPDATE core.insumo SET activo = $2, actualizado_en = now() WHERE id = $1 RETURNING nombre', [id, p.data.activo]);
+    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El insumo no existe.'));
+    invalidar('cat:');
+    await auditar({ ...actor(req), accion: p.data.activo ? 'INSUMO_REACTIVADO' : 'INSUMO_ANULADO', entidad: 'insumo', entidadId: id, detalle: { nombre: r[0].nombre }, ip: req.ip });
+    return { id, activo: p.data.activo };
+  });
+
+  /**
+   * «Ajustar costos» (Excel): últimas 20 compras del insumo, el costo que usan las fórmulas y el de las compras.
+   * Todos los costos van por unidad de inventario (kg, L, unidad) y sin IGV cuando la factura da crédito fiscal.
+   */
+  app.get('/insumos/:id/costos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'costos.ver')) return;
+    const { id } = req.params as { id: string };
+    if (!z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Insumo inválido.'));
+    const ins = await uno<Record<string, string | null>>(`SELECT i.id, i.codigo, i.nombre, i.unidad_inventario, i.cpp, i.costo_formula, i.costo_formula_en::text costo_formula_en,
+        u.nombre costo_formula_por FROM core.insumo i LEFT JOIN core.usuario u ON u.id = i.costo_formula_por WHERE i.id = $1`, [id]);
+    if (!ins) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El insumo no existe.'));
+    const compras = await q<Record<string, string>>(`
+      SELECT c.codigo, c.fecha_compra::text fecha, p.razon_social proveedor, c.estado, d.cantidad_presentacion, coalesce(i.presentacion, '') presentacion,
+             d.cantidad_inventario, d.costo_unitario_inventario, d.precio_lote
+      FROM core.compra_detalle d JOIN core.compra c ON c.id = d.compra_id JOIN core.proveedor p ON p.id = c.proveedor_id JOIN core.insumo i ON i.id = d.insumo_id
+      WHERE d.insumo_id = $1 AND c.estado <> 'ANULADA' ORDER BY c.fecha_compra DESC, c.creado_en DESC LIMIT 20`, [id]);
+    const lista = compras.map((f) => ({ codigo: f.codigo, fecha: f.fecha, proveedor: f.proveedor, estado: f.estado, cantidad: num(f.cantidad_presentacion),
+      presentacion: f.presentacion, cantidadInventario: num(f.cantidad_inventario), costoUnitario: num(f.costo_unitario_inventario), subtotal: num(f.precio_lote) }));
+    const metodo = (await uno<{ valor: string }>("SELECT upper(valor) valor FROM core.parametro WHERE clave = 'costo_insumo_formulas'"))?.valor ?? 'MANUAL';
+    return {
+      id: ins.id, codigo: ins.codigo, nombre: ins.nombre, unidad: ins.unidad_inventario, metodo,
+      costoFormulas: num(ins.costo_formula ?? ins.cpp ?? '0'), costoKardex: num(ins.cpp ?? '0'), manual: ins.costo_formula !== null,
+      actualizadoEn: ins.costo_formula_en, actualizadoPor: ins.costo_formula_por,
+      // Excel: «P compra anterior» y «P compra actual» = las dos últimas compras.
+      precioAnterior: lista[1]?.costoUnitario ?? null, precioActual: lista[0]?.costoUnitario ?? null, compras: lista,
+    };
+  });
+
+  // «ACTUALIZAR»: fija a mano el costo con que las fórmulas calculan el precio (se sugiere manual). Recostea al instante.
+  app.post('/insumos/:id/costo', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'costos.ver') || !editaInsumos(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const p = z.object({ costo: z.number().min(0).max(1_000_000) }).safeParse(req.body);
+    if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el costo (S/ por unidad de inventario).'));
+    const r = await tx(async (c) => {
+      const i = (await c.query<{ nombre: string; antes: string }>('SELECT nombre, coalesce(costo_formula, cpp) antes FROM core.insumo WHERE id = $1 FOR UPDATE', [id])).rows[0];
+      if (!i) return null;
+      await c.query('UPDATE core.insumo SET costo_formula = $2, costo_formula_en = now(), costo_formula_por = $3 WHERE id = $1', [id, p.data.costo.toFixed(6), req.usuario!.id]);
+      await c.query('INSERT INTO core.ajuste_costo_insumo (insumo_id, costo_antes, costo_nuevo, usuario_id) VALUES ($1,$2,$3,$4)', [id, i.antes, p.data.costo.toFixed(6), req.usuario!.id]);
+      await c.query('SELECT core.recalcular_costos()');
+      return { nombre: i.nombre, antes: num(i.antes) };
+    });
+    if (!r) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El insumo no existe.'));
+    invalidar('cat:');
+    await auditar({ ...actor(req), accion: 'COSTO_INSUMO_AJUSTADO', entidad: 'insumo', entidadId: id, detalle: { insumo: r.nombre, antes: r.antes, despues: p.data.costo }, ip: req.ip });
+    return { id, costoFormulas: p.data.costo, antes: r.antes };
+  });
+
+  /**
+   * «Informe insumos para corregir costo» (Excel): solo los insumos cuyo costo de fórmulas difiere del de las
+   * compras (kárdex) más que el umbral de Parámetros. Costo sugerido = costo del kárdex (promedio o último, según Parámetros).
+   */
+  app.get('/insumos/variacion-costos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'costos.ver')) return;
+    const filas = await q<Record<string, string>>(`
+      SELECT i.id, i.codigo, i.nombre, i.unidad_inventario, i.costo_formula actual, i.cpp sugerido, i.costo_formula_en::text actualizado_en,
+             (SELECT max(c.fecha_compra)::text FROM core.compra_detalle d JOIN core.compra c ON c.id = d.compra_id WHERE d.insumo_id = i.id AND c.estado = 'VERIFICADA') ultima_compra
+      FROM core.insumo i
+      WHERE i.activo AND i.costo_formula IS NOT NULL AND i.cpp > 0
+        AND abs(i.cpp - i.costo_formula) > greatest(i.costo_formula, 0.000001) * coalesce((SELECT valor::numeric FROM core.parametro WHERE clave = 'umbral_variacion_costo'), 0)
+      ORDER BY abs(i.cpp - i.costo_formula) / greatest(i.costo_formula, 0.000001) DESC`);
+    return filas.map((f) => {
+      const actual = num(f.actual), sugerido = num(f.sugerido);
+      return { id: f.id, codigo: f.codigo, nombre: f.nombre, unidad: f.unidad_inventario, costoActual: actual, costoSugerido: sugerido,
+        variacion: actual > 0 ? (sugerido - actual) / actual : null, actualizadoEn: f.actualizado_en, ultimaCompra: f.ultima_compra };
+    });
   });
 
   /**
@@ -243,14 +453,12 @@ export async function rutasMaestros(app: FastifyInstance) {
       if (!p.success) { const x = p.error.issues[0]; errores.push({ fila, nombre, motivo: `${x?.path.join('.') || 'dato'}: ${x?.message}` }); continue; }
       const clave = p.data.nombre.toLowerCase();
       if (vistos.has(clave) || await uno('SELECT 1 FROM core.insumo WHERE lower(nombre) = $1', [clave])) { errores.push({ fila, nombre, motivo: 'Ya existe un insumo con ese nombre.' }); continue; }
-      const u = await unidades(p.data);
+      const d = await conPresentacion(p.data);
+      if ('error' in d) { errores.push({ fila, nombre, motivo: d.error }); continue; }
+      if (!(await codigoInsumoLibre(d.codigo, null))) { errores.push({ fila, nombre, motivo: `El código ${d.codigo} ya lo usa otro insumo.` }); continue; }
+      const u = await unidades(d);
       if ('error' in u) { errores.push({ fila, nombre, motivo: u.error }); continue; }
-      const f = await uno<{ id: string; codigo: string }>(
-        `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, unidad_inventario)
-         VALUES ('INS-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.insumo WHERE codigo ~ '^INS-[0-9]+$')::text, 3, '0'),
-                 $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11) RETURNING id, codigo`,
-        [p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, costoReferencia(p.data),
-          u.densidad, u.unidadInventario, u.factor]);
+      const f = await insertarInsumo(d, u);
       vistos.add(clave);
       creados.push({ fila, codigo: f!.codigo, nombre: p.data.nombre });
     }
@@ -313,8 +521,12 @@ export async function rutasMaestros(app: FastifyInstance) {
   app.patch('/insumos/:id', { preHandler: autenticar }, async (req, reply) => {
     if (!editaInsumos(req, reply)) return;
     const { id } = req.params as { id: string };
-    const p = Insumo.safeParse(req.body);
-    if (!p.success) return invalido(reply, p.error);
+    const p0 = Insumo.safeParse(req.body);
+    if (!p0.success) return invalido(reply, p0.error);
+    const d0 = await conPresentacion(p0.data);
+    if ('error' in d0) return reply.code(422).send(error(422, 'PRESENTACION_INVALIDA', d0.error));
+    if (!(await codigoInsumoLibre(d0.codigo, id))) return reply.code(409).send(error(409, 'CODIGO_DUPLICADO', `El código ${d0.codigo} ya lo usa otro insumo.`));
+    const p = { data: d0 };
     const u = await unidades(p.data);
     if ('error' in u) return reply.code(422).send(error(422, 'SIN_DENSIDAD', u.error));
     // La unidad del stock no cambia con stock o movimientos: el kárdex quedaría en dos unidades.
@@ -331,9 +543,11 @@ export async function rutasMaestros(app: FastifyInstance) {
                          tipo=$7, presentacion=$8, precio_compra=$9, cant_presentacion=$10, equiv_kg=$11, unidad_inventario=$13,
                          cpp = CASE WHEN $12::numeric IS NOT NULL AND NOT EXISTS (SELECT 1 FROM core.movimiento_inventario m WHERE m.insumo_id = $1 AND m.tipo = 'COMPRA')
                                     THEN $12::numeric / $14::numeric ELSE cpp END,
-                         estado = CASE WHEN stock < $4 THEN 'BAJO_MINIMO' ELSE 'OK' END, actualizado_en = now()
+                         estado = CASE WHEN $15 AND stock < $4 THEN 'BAJO_MINIMO' ELSE 'OK' END, actualizado_en = now(),
+                         maneja_stock = $15, presentacion_codigo = $16, codigo = coalesce(NULLIF($17,''), codigo)
                        WHERE id=$1 RETURNING id`, [id, p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.activo,
-                         p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, u.densidad, costoReferencia(p.data), u.unidadInventario, u.factor]);
+                         p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, u.densidad, costoReferencia(p.data), u.unidadInventario, u.factor,
+                         p.data.manejaStock, p.data.presentacionCodigo, p.data.codigo]);
       await c.query('SELECT core.recalcular_costos()');
       return f.rows;
     });
@@ -463,9 +677,15 @@ export async function rutasMaestros(app: FastifyInstance) {
 
   /* ---------------------------------------------------- costos indirectos */
   // MAE-11: categoría (CIF o gasto operativo, que no entra al costo del pan) y base de reparto (RN-13).
+  // Excel: clasificación costo de producción / operativo / de ventas. Solo el de producción (CIF) entra al costo del pan;
+  // la categoría que lee el motor se deriva de ella (la base lo garantiza con un CHECK).
   const Cif = z.object({
     concepto: texto(2, 80), tipo: z.enum(['FIJO', 'VARIABLE']), montoMensual: dinero, activo: z.boolean().default(true),
-    categoria: z.enum(['CIF', 'GASTO']).default('CIF'), baseReparto: z.enum(['HORAS_HORNO', 'KG_MASA', 'UNIDADES']).default('UNIDADES'),
+    categoria: z.enum(['CIF', 'GASTO']).optional(), clasificacion: z.enum(['PRODUCCION', 'OPERATIVO', 'VENTAS']).optional(),
+    baseReparto: z.enum(['HORAS_HORNO', 'KG_MASA', 'UNIDADES']).default('UNIDADES'), codigo: codigoPropio,
+  }).transform((d) => {
+    const clasificacion = d.clasificacion ?? (d.categoria === 'GASTO' ? 'OPERATIVO' : 'PRODUCCION');
+    return { ...d, clasificacion, categoria: clasificacion === 'PRODUCCION' ? 'CIF' as const : 'GASTO' as const };
   });
 
   // Tarifas del período abierto (W31): hora hombre, horno, kg de masa y por pan.
@@ -477,12 +697,12 @@ export async function rutasMaestros(app: FastifyInstance) {
 
   const resumenCif = async () => {
     const [items, base, unidades] = await Promise.all([
-      q<Record<string, string>>('SELECT id, concepto, tipo, monto_mensual, activo, categoria, base_reparto FROM core.costo_indirecto ORDER BY activo DESC, monto_mensual DESC'),
+      q<Record<string, string>>('SELECT id, codigo, concepto, tipo, monto_mensual, activo, categoria, clasificacion, base_reparto FROM core.costo_indirecto ORDER BY activo DESC, codigo'),
       uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'cif_base_prorrateo'"),
       uno<{ cif: string }>("SELECT coalesce(avg(cif_unitario),0) cif FROM core.receta WHERE estado = 'VIGENTE'"),
     ]);
     return {
-      items: items.map((i) => ({ id: i.id, concepto: i.concepto, tipo: i.tipo, montoMensual: num(i.monto_mensual), activo: Boolean(i.activo), categoria: i.categoria, baseReparto: i.base_reparto })),
+      items: items.map((i) => ({ id: i.id, codigo: i.codigo, clasificacion: i.clasificacion, concepto: i.concepto, tipo: i.tipo, montoMensual: num(i.monto_mensual), activo: Boolean(i.activo), categoria: i.categoria, baseReparto: i.base_reparto })),
       tarifas: await tarifasVigentes(),
       baseProrrateo: base?.valor ?? 'UNIDADES',
       cifPromedioPorUnidad: num(unidades?.cif),
@@ -502,9 +722,9 @@ export async function rutasMaestros(app: FastifyInstance) {
     const p = Cif.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
     try {
-      await conRecalculo(async (c) => { await c.query('INSERT INTO core.costo_indirecto (concepto, tipo, monto_mensual, activo, categoria, base_reparto) VALUES ($1,$2,$3,$4,$5,$6)', [p.data.concepto, p.data.tipo, p.data.montoMensual, p.data.activo, p.data.categoria, p.data.baseReparto]); });
+      await conRecalculo(async (c) => { await c.query(`INSERT INTO core.costo_indirecto (concepto, tipo, monto_mensual, activo, categoria, base_reparto, clasificacion, codigo) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''))`, [p.data.concepto, p.data.tipo, p.data.montoMensual, p.data.activo, p.data.categoria, p.data.baseReparto, p.data.clasificacion, p.data.codigo]); });
     } catch (e) {
-      if ((e as { code?: string }).code === '23505') return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un concepto activo con ese nombre.'));
+      if ((e as { code?: string }).code === '23505') return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un concepto activo con ese nombre o ese código.'));
       throw e;
     }
     await auditar({ ...actor(req), accion: 'CIF_CREADO', entidad: 'costo_indirecto', detalle: p.data, ip: req.ip });
@@ -517,10 +737,11 @@ export async function rutasMaestros(app: FastifyInstance) {
     const p = Cif.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
     let existe = false;
-    await conRecalculo(async (c) => {
-      existe = !!(await c.query('UPDATE core.costo_indirecto SET concepto=$2, tipo=$3, monto_mensual=$4, activo=$5, categoria=$6, base_reparto=$7, actualizado_en=now() WHERE id=$1 RETURNING id',
-        [id, p.data.concepto, p.data.tipo, p.data.montoMensual, p.data.activo, p.data.categoria, p.data.baseReparto])).rowCount;
-    });
+    try { await conRecalculo(async (c) => {
+      existe = !!(await c.query(`UPDATE core.costo_indirecto SET concepto=$2, tipo=$3, monto_mensual=$4, activo=$5, categoria=$6, base_reparto=$7, clasificacion=$8,
+          codigo = coalesce(NULLIF($9,''), codigo), actualizado_en=now() WHERE id=$1 RETURNING id`,
+        [id, p.data.concepto, p.data.tipo, p.data.montoMensual, p.data.activo, p.data.categoria, p.data.baseReparto, p.data.clasificacion, p.data.codigo])).rowCount;
+    }); } catch (e) { return duplicado(reply, e, 'un concepto con ese nombre o código'); }
     if (!existe) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El concepto no existe.'));
     await auditar({ ...actor(req), accion: 'CIF_EDITADO', entidad: 'costo_indirecto', entidadId: id, detalle: p.data, ip: req.ip });
     return resumenCif();
