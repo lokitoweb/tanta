@@ -196,16 +196,24 @@ export async function rutasPagos(app: FastifyInstance) {
 export async function despacharAvisosPago(): Promise<number> {
   const filas = await tx(async (c) => (await c.query<{ codigo: string; proveedor: string; saldo: string; dias: number }>(`
     UPDATE core.compra k SET alerta_pago_en = (now() AT TIME ZONE 'America/Lima')::date FROM core.proveedor pr
-    WHERE k.id IN (SELECT id FROM core.compra WHERE estado = 'VERIFICADA' AND estado_pago <> 'PAGADO' AND vence_pago IS NOT NULL
-        AND vence_pago <= (now() AT TIME ZONE 'America/Lima')::date + coalesce((SELECT valor::int FROM core.parametro WHERE clave = 'dias_alerta_pago'), 3)
+    WHERE k.id IN (SELECT id FROM core.compra WHERE estado = 'VERIFICADA' AND estado_pago <> 'PAGADO'
+        -- Informe de compras §8: toda compra con saldo pendiente; sin vencimiento = al contado (vence al comprar).
+        AND coalesce(vence_pago, fecha_compra) <= (now() AT TIME ZONE 'America/Lima')::date + coalesce((SELECT valor::int FROM core.parametro WHERE clave = 'dias_alerta_pago'), 3)
         AND (alerta_pago_en IS NULL OR alerta_pago_en < (now() AT TIME ZONE 'America/Lima')::date)
-      ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED) AND pr.id = k.proveedor_id
+      ORDER BY id LIMIT 500 FOR UPDATE SKIP LOCKED) AND pr.id = k.proveedor_id
     RETURNING k.codigo, pr.razon_social proveedor,
       k.total - coalesce((SELECT sum(monto) FROM core.pago_compra WHERE compra_id = k.id AND estado = 'VIGENTE'), 0) saldo,
-      k.vence_pago - (now() AT TIME ZONE 'America/Lima')::date dias`)).rows);
-  for (const f of filas) {
+      coalesce(k.vence_pago, k.fecha_compra) - (now() AT TIME ZONE 'America/Lima')::date dias`)).rows);
+  // Una sola deuda: aviso con su detalle; varias: un resumen (no se inunda la campana).
+  if (filas.length === 1) {
+    const f = filas[0];
     const cuando = f.dias < 0 ? `venció hace ${-f.dias} día(s)` : f.dias === 0 ? 'vence hoy' : `vence en ${f.dias} día(s)`;
     await notificar([{ permiso: 'compras.pagar' }], { tipo: 'compra', titulo: `Deuda ${f.codigo} por pagar`, cuerpo: `${f.proveedor}: S/ ${num(f.saldo).toFixed(2)} ${cuando}`, ruta: '/compras/deudas' });
+  } else if (filas.length > 1) {
+    const total = filas.reduce((t, x) => t + num(x.saldo), 0);
+    const provs = [...new Set(filas.map((x) => x.proveedor))];
+    await notificar([{ permiso: 'compras.pagar' }], { tipo: 'compra', titulo: `${filas.length} compras con saldo por pagar`,
+      cuerpo: `S/ ${total.toFixed(2)} · ${provs.slice(0, 3).join(', ')}${provs.length > 3 ? ` y ${provs.length - 3} más` : ''}`, ruta: '/compras/deudas' });
   }
   return filas.length;
 }

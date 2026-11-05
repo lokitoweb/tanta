@@ -102,6 +102,33 @@ export function versionMenor(a: string, b: string): boolean {
  * así el superadmin ve el dato al día y las apps instaladas reciben el aviso de actualización.
  * ponytail: consulta como máximo cada 5 min (límite de la API pública de GitHub: 60/h por IP).
  */
+/** Dominio público por el que llegó la petición (túnel, servidor nuevo, dominio propio); null si es local. */
+export function dominioPublico(hostCrudo: string | undefined): string | null {
+  const host = String(hostCrudo ?? '').toLowerCase().replace(/:\d+$/, '');
+  const publico = /^[a-z0-9.-]+\.[a-z]{2,}$/.test(host) && !/(^|\.)localhost$|\.local$|\.internal$/.test(host);
+  return publico ? `https://${host}` : null;
+}
+
+/**
+ * Dominio automático: el sistema usa SIEMPRE el dominio donde está instalado y por el que se entra.
+ * Nada queda fijo: al instalarlo en otro servidor, cambiar de túnel o de dominio, el valor guardado
+ * (lo que ven Configuración, la APK y las apps) se actualiza solo en la primera visita.
+ * Desde localhost o una IP privada no se cambia (no hay un dominio público que adoptar).
+ */
+let ultimoDominio = '';
+export async function seguirDominio(hostCrudo: string | undefined): Promise<void> {
+  const nuevo = dominioPublico(hostCrudo);
+  if (!nuevo || nuevo === ultimoDominio) return;
+  const movil = await leerConfig('movil') as { urlApi?: string };
+  const guardado = String(movil.urlApi ?? '').replace(/\/api\/v1$/, '').replace(/\/+$/, '');
+  ultimoDominio = nuevo;
+  if (guardado === nuevo) return;
+  await q(`UPDATE core.configuracion SET valor = valor || jsonb_build_object('urlApi', $1::text), actualizado_en = now() WHERE clave = 'movil'`, [nuevo]);
+  invalidar('cfg:movil');
+  await auditar({ actorId: null, actor: 'Sistema', rol: 'SISTEMA', accion: 'DOMINIO_ACTUALIZADO', entidad: 'configuracion', entidadId: 'movil',
+    detalle: { antes: guardado, despues: nuevo, motivo: 'el sistema se abrió desde otro dominio' } }).catch(() => {});
+}
+
 let ultimaRevision = 0;
 export async function sincronizarRelease(): Promise<void> {
   if (Date.now() - ultimaRevision < 5 * 60_000) return;
@@ -255,13 +282,15 @@ export async function rutasSistema(app: FastifyInstance) {
 
   /* --------------------------------------- configuración pública (sin sesión) */
   // Lo que la pantalla de login y la app necesitan antes de autenticarse. Nada secreto.
-  app.get('/config/publica', async (_req, reply) => {
+  app.get('/config/publica', async (req, reply) => {
     await sincronizarRelease();
+    await seguirDominio(req.hostname);
     const [marca, movil, legal, fb, negocio] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase'), leerNegocio()]);
     const f = fb as Record<string, unknown>;
     // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
     reply.header('Cache-Control', 'no-cache');
-    const dominio = String((movil as { urlApi?: string }).urlApi ?? '');
+    // El dominio por el que se entró manda; el guardado solo sirve si se entra desde localhost.
+    const dominio = dominioPublico(req.hostname) ?? String((movil as { urlApi?: string }).urlApi ?? '');
     const { textoPrivacidad: _p, textoTerminos: _t, ...legalPublico } = legal as Record<string, unknown>;
     return {
       marca, legal: legalPublico, negocio,

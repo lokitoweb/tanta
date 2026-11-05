@@ -27,7 +27,7 @@ const fecha = (dias) => new Date(Date.now() - 5 * 3_600_000 + dias * 86_400_000)
 const sufijo = randomUUID().slice(0, 6).toUpperCase();
 const insumo = () => sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo)
   VALUES ('T-${randomUUID().slice(0, 8).toUpperCase()}', 'Insumo prueba lotes', 'KG', 1, 0, 0) RETURNING id) SELECT id FROM i`);
-const proveedor = async () => (await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` })).b.id;
+const proveedor = async () => (await api(await login('lbermudez'), 'POST', '/proveedores', { ruc: '20' + String(Math.floor(Math.random() * 1e9)).padStart(9, '0'), razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` })).b.id;
 const saldos = (id) => sql(`SELECT string_agg(lote || '=' || saldo::numeric(10,2), ' ' ORDER BY id) FROM core.lote_insumo WHERE insumo_id = '${id}'`);
 
 test('AIN-11: cada línea de compra entra como lote; la salida consume primero el que vence antes', async () => {

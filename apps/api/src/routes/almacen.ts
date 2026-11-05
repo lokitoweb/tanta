@@ -29,7 +29,8 @@ export async function responder<T>(reply: { code: (n: number) => { send: (b: unk
 export async function rutasAlmacen(app: FastifyInstance) {
   /* ------------------------------------------------------------ proveedores */
   const Proveedor = z.object({
-    ruc: z.union([z.literal(''), z.string().trim().regex(/^(10|15|17|20)\d{9}$/, 'El RUC tiene 11 dígitos y empieza en 10, 15, 17 o 20')]).default(''),
+    // Informe de compras §5.2: RUC obligatorio, único y de 11 dígitos.
+    ruc: z.string({ required_error: 'El RUC es obligatorio.' }).trim().regex(/^(10|15|17|20)\d{9}$/, 'El RUC tiene 11 dígitos y empieza en 10, 15, 17 o 20'),
     razonSocial: z.string().trim().min(2).max(160),
     contacto: z.string().trim().max(120).default(''),
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido').default(''),

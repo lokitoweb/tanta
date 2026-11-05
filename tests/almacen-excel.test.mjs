@@ -101,7 +101,7 @@ test('CP-21: al bajar del mínimo hay una sola alerta hasta que el stock se recu
   assert.equal(alertas(), 1, 'cruzó el mínimo: una alerta');
   assert.equal((await baja(1)).s, 200);
   assert.equal(alertas(), 1, 'sigue bajo el mínimo: no se repite');
-  const p = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` });
+  const p = await api(await login('lbermudez'), 'POST', '/proveedores', { ruc: ruc(), razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` });
   const compra = await registrar(p.b.id, [{ insumoId: id, cantidad: 10, precioUnitario: 1 }]);
   assert.equal((await verificar(compra.b)).b.estado, 'VERIFICADA');
   assert.equal(sql(`SELECT estado FROM core.insumo WHERE id = '${id}'`), 'OK', 'la compra lo recupera');

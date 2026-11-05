@@ -143,3 +143,24 @@ test('sub-receta: el intermedio no se vende y su costo entra al del pan (MAE-06)
   const venta = await api(await login('cmedina'), 'POST', '/ventas', { items: [{ productoId: p.id, cantidad: 1 }], formaPago: 'EFECTIVO' });
   assert.ok(venta.s === 404 || venta.s === 409 || venta.s === 422, 'el intermedio no se vende');
 });
+
+test('merma del PDF del dueño: costo con merma = costo de insumos × (1 + merma), y es administrable', async () => {
+  const fila = () => sql(`SELECT costo_insumos || '|' || costo_con_merma || '|' || merma_estandar FROM core.receta WHERE estado = 'VIGENTE' AND merma_estandar > 0 AND costo_insumos > 0 ORDER BY id LIMIT 1`).split('|').map(Number);
+  const [ins, cm, m] = fila();
+  assert.ok(Math.abs(cm - ins * (1 + m)) < 1e-6, `${cm} = ${ins} × (1 + ${m})`);
+  const ger = await login('superadmin');
+  assert.equal((await api(ger, 'PATCH', '/parametros/formula_merma', { valor: 'OTRA' })).s, 422);
+  try {
+    assert.equal((await api(ger, 'PATCH', '/parametros/formula_merma', { valor: 'dividir' })).s, 200);
+    const [ins2, cm2, m2] = fila();
+    assert.ok(Math.abs(cm2 - ins2 / (1 - m2)) < 1e-6, 'con DIVIDIR rige la del Excel');
+  } finally {
+    await api(ger, 'PATCH', '/parametros/formula_merma', { valor: 'MULTIPLICAR' });
+  }
+  assert.equal((await api(ger, 'PATCH', '/parametros/metodo_costo_insumo', { valor: 'X' })).s, 422);
+});
+
+test('proveedor: el RUC es obligatorio (informe de compras §5.2)', async () => {
+  const r = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: 'Sin RUC ' + sufijo });
+  assert.equal(r.s, 422);
+});

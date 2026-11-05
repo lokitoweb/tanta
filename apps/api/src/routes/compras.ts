@@ -212,11 +212,13 @@ export async function rutasCompras(app: FastifyInstance) {
           return { estado: 'OBSERVADA' as const, resumen };
         }
         // RN-06: ingreso al inventario en unidad de inventario, al costo F3; RN-13: costo promedio ponderado.
+        const metodoCosto = (await c.query<{ v: string }>("SELECT upper(coalesce((SELECT valor FROM core.parametro WHERE clave = 'metodo_costo_insumo'), 'PROMEDIO')) v")).rows[0].v;
         for (const d of det) {
           const ins = (await c.query<{ stock: string; cpp: string }>('SELECT stock, cpp FROM core.insumo WHERE id = $1 FOR UPDATE', [d.insumo_id])).rows[0];
           const cant = num(d.cantidad_inventario), costo = num(d.costo_unitario_inventario);
           const saldo = Math.max(num(ins.stock), 0), cpp = num(ins.cpp);
-          const nuevoCpp = (saldo * cpp + cant * costo) / (saldo + cant);
+          // RN-14 (administrable en Parámetros → metodo_costo_insumo): promedio ponderado o último costo de compra.
+          const nuevoCpp = metodoCosto === 'ULTIMO' ? costo : (saldo * cpp + cant * costo) / (saldo + cant);
           const nuevoStock = num(ins.stock) + cant;
           const mov = (await c.query<{ id: string }>(`INSERT INTO core.movimiento_inventario
               (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por,lote,vence_en)
@@ -227,7 +229,8 @@ export async function rutasCompras(app: FastifyInstance) {
           await c.query('UPDATE core.compra_detalle SET movimiento_id = $3, cpp_anterior = $4, cpp_nuevo = $5 WHERE compra_id = $1 AND item = $2',
             [k.id, d.item, mov, cpp.toFixed(6), nuevoCpp.toFixed(6)]);
         }
-        await c.query(`UPDATE core.compra SET estado = 'VERIFICADA', observacion = NULL, verificado_por = $2, verificado_en = now() WHERE id = $1`, [k.id, req.usuario!.id]);
+        // El aviso de la deuda sale ahora (sección 8): la ronda periódica no lo repite hoy.
+        await c.query(`UPDATE core.compra SET estado = 'VERIFICADA', observacion = NULL, verificado_por = $2, verificado_en = now(), alerta_pago_en = (now() AT TIME ZONE 'America/Lima')::date WHERE id = $1`, [k.id, req.usuario!.id]);
         await c.query('SELECT core.recalcular_costos()');
         return { estado: 'VERIFICADA' as const, resumen: '' };
       });

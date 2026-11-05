@@ -65,14 +65,23 @@ export async function rutasAdmin(app: FastifyInstance) {
     if (clave === 'cif_base_prorrateo' && !['UNIDADES', 'COSTO_INSUMOS'].includes(nuevo.toUpperCase())) {
       return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa UNIDADES o COSTO_INSUMOS.'));
     }
+    // Parámetros de fórmula con valores cerrados: un error de tipeo no puede cambiar el costeo.
+    const OPCIONES: Record<string, string[]> = {
+      formula_merma: ['MULTIPLICAR', 'DIVIDIR'], metodo_costo_insumo: ['PROMEDIO', 'ULTIMO'],
+    };
+    if (OPCIONES[clave] && !OPCIONES[clave].includes(nuevo.toUpperCase())) {
+      return reply.code(422).send(error(422, 'VALOR_INVALIDO', `Usa ${OPCIONES[clave].join(' o ')}.`));
+    }
     if (actual.tipo === 'booleano' && !['true', 'false'].includes(nuevo.toLowerCase())) {
       return reply.code(422).send(error(422, 'BOOLEANO_INVALIDO', 'Usa true o false.'));
     }
 
+    const cerrado = clave === 'cif_base_prorrateo' || Boolean(OPCIONES[clave]);
+    // Parámetros que entran en la ficha de costo: se recostea en la misma transacción y el catálogo lo ve al instante.
+    const recostea = ['cif_base_prorrateo', 'formula_merma', 'sueldo_base', 'factor_beneficios', 'horas_mes'].includes(clave);
     await tx(async (c) => {
-      await c.query('UPDATE core.parametro SET valor = $1 WHERE clave = $2', [clave === 'cif_base_prorrateo' ? nuevo.toUpperCase() : nuevo, clave]);
-      // Cambiar la base de prorrateo cambia el costo de cada producto: se recostea en la misma transacción.
-      if (clave === 'cif_base_prorrateo') await c.query('SELECT core.recalcular_costos()');
+      await c.query('UPDATE core.parametro SET valor = $1 WHERE clave = $2', [cerrado ? nuevo.toUpperCase() : nuevo, clave]);
+      if (recostea) await c.query('SELECT core.recalcular_costos()');
       await c.query(
         'INSERT INTO audit.parametro_historial (clave, valor_antes, valor_nuevo, usuario_id) VALUES ($1,$2,$3,$4)',
         [clave, actual.valor, nuevo, req.usuario!.id],
@@ -83,7 +92,8 @@ export async function rutasAdmin(app: FastifyInstance) {
       accion: 'PARAMETRO_CAMBIADO', entidad: 'parametro', entidadId: clave,
       detalle: { antes: actual.valor, despues: nuevo }, ip: req.ip,
     });
-    return reply.send({ clave, valor: nuevo, tipo: actual.tipo });
+    invalidar('cat:');
+    return reply.send({ clave, valor: cerrado ? nuevo.toUpperCase() : nuevo, tipo: actual.tipo });
   });
 
   /* ---------------------------------------------------------- usuarios */

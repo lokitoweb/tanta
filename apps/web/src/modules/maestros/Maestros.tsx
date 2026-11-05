@@ -236,7 +236,7 @@ export function Proveedores() {
       ]}
       campos={[
         { key: 'razonSocial', label: 'Razón social', requerido: true, ancho: true },
-        { key: 'ruc', label: 'RUC', max: 11, ayuda: '11 dígitos; empieza en 10, 15, 17 o 20' },
+        { key: 'ruc', label: 'RUC', max: 11, requerido: true, ayuda: 'Obligatorio y único: 11 dígitos; empieza en 10, 15, 17 o 20' },
         { key: 'contacto', label: 'Contacto', max: 120 },
         { key: 'telefono', label: 'Teléfono', tipo: 'tel', max: 30 }, { key: 'email', label: 'Correo', tipo: 'email' },
         { key: 'direccion', label: 'Dirección', ancho: true, max: 200 },

@@ -5,12 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { sql } from './_sql.mjs';
 
 export const hoyLima = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+/** RUC válido y aleatorio (el RUC es obligatorio y único, informe de compras §5.2). */
+export const rucUnico = () => '20' + String(Math.floor(Math.random() * 1e9)).padStart(9, '0');
 export const nroUnico = () => String(Math.floor(Math.random() * 1e10)).padStart(10, '0');
 
 /** api(t, metodo, ruta, cuerpo) y login(usuario) son los de cada archivo de prueba. */
 export function flujoCompras(api, login) {
   const proveedor = async () => {
-    const r = await api(await login('lbermudez'), 'POST', '/proveedores', { razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` });
+    const r = await api(await login('lbermudez'), 'POST', '/proveedores', { ruc: rucUnico(), razonSocial: `Proveedor prueba ${randomUUID().slice(0, 8)}` });
     assert.equal(r.s, 201, JSON.stringify(r.b));
     return r.b.id;
   };
