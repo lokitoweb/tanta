@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, leerConfigPublica, urlApi } from '@/core/api';
 import { imagenABase64 } from '@/core/imagen';
 import { relativa } from '@/core/format';
-import { Boton, Encabezado, Insignia, Segmentado, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, PilaEsqueleto, Segmentado, Tarjeta, TablaEsqueleto, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { ActivacionApp, leerArchivoFirebase } from './Vinculos';
 
 type Seccion = 'marca' | 'movil' | 'legal' | 'correo' | 'integraciones';
@@ -31,7 +31,11 @@ export function Configuracion() {
   const [cfg, setCfg] = useState<Datos | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger' | 'info'; texto: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
-  const [dispositivos, setDispositivos] = useState<Dispositivo[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay dispositivos.
+  const [listaDisp, setDispositivos] = useState<Dispositivo[] | null>(null);
+  const [dispError, setDispError] = useState<string | null>(null);
+  const dispositivos = listaDisp ?? [];
+  const [cargaError, setCargaError] = useState<string | null>(null);
 
   const [negocio, setNegocio] = useState<Record<string, string> | null>(null);
   const cargar = async () => {
@@ -54,7 +58,9 @@ export function Configuracion() {
     catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo guardar.' }); }
     finally { setGuardando(false); }
   };
-  useEffect(() => { void cargar(); void api<Dispositivo[]>('/sistema/dispositivos').then(setDispositivos).catch(() => {}); }, []);
+  const cargaInicial = () => { setCargaError(null); cargar().catch((e) => setCargaError(e instanceof Error ? e.message : 'No se pudo cargar.')); };
+  const cargarDispositivos = () => { setDispError(null); setDispositivos(null); api<Dispositivo[]>('/sistema/dispositivos').then(setDispositivos).catch((e) => setDispError(e.message)); };
+  useEffect(() => { cargaInicial(); cargarDispositivos(); }, []);
 
   const campo = (s: string, k: string, v: unknown) => setCfg((c) => c && { ...c, [s]: { ...c[s], [k]: v } });
 
@@ -80,7 +86,12 @@ export function Configuracion() {
     catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'Falló la prueba.' }); }
   };
 
-  if (!cfg) return <div className="tabla-cargando">Cargando configuración…</div>;
+  if (!cfg) return (
+    <>
+      <Encabezado titulo="Configuración del sistema" />
+      <Tarjeta>{cargaError ? <Vacio titulo="No se pudo cargar la configuración" detalle={cargaError} onReintentar={cargaInicial} /> : <PilaEsqueleto lineas={8} />}</Tarjeta>
+    </>
+  );
   const { marca, movil, legal, firebase, webhook, correo } = cfg as Record<string, Record<string, never>>;
   const cargarFirebase = async (archivo?: File) => {
     if (!archivo) return;
@@ -184,7 +195,9 @@ export function Configuracion() {
               <div><h3 className="card__title">Dispositivos conectados</h3>
                 <p className="card__sub">{dispositivos.length} instalaciones · {desactualizados} por debajo de la versión mínima</p></div>
             </div>
-            {dispositivos.length === 0 ? <Vacio titulo="Aún no hay dispositivos" detalle="Aparecen cuando alguien abre la app móvil." icono="user" /> : (
+            {dispError ? <Vacio titulo="No se pudo cargar" detalle={dispError} onReintentar={cargarDispositivos} />
+              : listaDisp === null ? <TablaEsqueleto columnas={5} filas={3} />
+              : dispositivos.length === 0 ? <Vacio titulo="Aún no hay dispositivos" detalle="Aparecen cuando alguien abre la app móvil." icono="user" /> : (
               <div className="table-wrap"><table className="table">
                 <thead><tr><th>Usuario</th><th>Plataforma</th><th>Versión</th><th>Push</th><th className="t-right">Último uso</th></tr></thead>
                 <tbody>{dispositivos.map((d, i) => (

@@ -93,11 +93,14 @@ export async function rutasAuth(app: FastifyInstance) {
         `INSERT INTO core.intento_login (usuario, ip, fallos, bloqueado_hasta)
          VALUES (lower($1), $2, 1, NULL)
          ON CONFLICT (usuario) DO UPDATE SET
-           fallos = core.intento_login.fallos + 1,
+           -- Un bloqueo vencido empieza de cero: un solo fallo no vuelve a bloquear la cuenta.
+           fallos = CASE WHEN core.intento_login.bloqueado_hasta < now() THEN 1 ELSE core.intento_login.fallos + 1 END,
            ip = $2,
            actualizado_en = now(),
-           bloqueado_hasta = CASE WHEN core.intento_login.fallos + 1 >= 8
-                                  THEN now() + interval '15 minutes' ELSE core.intento_login.bloqueado_hasta END`,
+           -- SEG-01 / CP-02 del Excel: 5 intentos fallidos bloquean la cuenta 15 minutos.
+           bloqueado_hasta = CASE WHEN core.intento_login.bloqueado_hasta < now() THEN NULL
+                                  WHEN core.intento_login.fallos + 1 >= 5 THEN now() + interval '15 minutes'
+                                  ELSE core.intento_login.bloqueado_hasta END`,
         [usuario, req.ip],
       );
       return reply.code(401).send(error(401, 'CREDENCIALES_INVALIDAS', 'Usuario o contraseña incorrectos.'));
@@ -156,8 +159,10 @@ export async function rutasAuth(app: FastifyInstance) {
     const carga = await verificarTicket(parseo.data.ticket);
     if (!carga) return reply.code(401).send(error(401, 'TICKET_INVALIDO', 'Vuelve a ingresar.'));
 
+    // Con MFA ya activo el ticket solo sirve para verificar: enrolar de nuevo saltaría el segundo factor.
     const secreto = generarSecretoMfa();
-    await q('UPDATE core.usuario SET mfa_secreto = $1 WHERE id = $2', [secreto, carga.sub]);
+    const enrolado = await uno('UPDATE core.usuario SET mfa_secreto = $1 WHERE id = $2 AND NOT mfa_activo RETURNING id', [secreto, carga.sub]);
+    if (!enrolado) return reply.code(409).send(error(409, 'MFA_YA_ACTIVO', 'El segundo factor ya está activo. Ingresa el código de tu app autenticadora.'));
     const cuenta = await uno<{ usuario: string }>('SELECT usuario FROM core.usuario WHERE id = $1', [carga.sub]);
 
     return reply.send({
@@ -175,9 +180,10 @@ export async function rutasAuth(app: FastifyInstance) {
     const carga = await verificarTicket(parseo.data.ticket);
     if (!carga) return reply.code(401).send(error(401, 'TICKET_INVALIDO', 'Vuelve a ingresar.'));
 
-    const fila = await uno<{ mfa_secreto: string | null; nombre: string }>(
-      'SELECT mfa_secreto, nombre FROM core.usuario WHERE id = $1', [carga.sub],
+    const fila = await uno<{ mfa_secreto: string | null; nombre: string; mfa_activo: boolean }>(
+      'SELECT mfa_secreto, nombre, mfa_activo FROM core.usuario WHERE id = $1', [carga.sub],
     );
+    if (fila?.mfa_activo) return reply.code(409).send(error(409, 'MFA_YA_ACTIVO', 'El segundo factor ya está activo. Ingresa el código de tu app autenticadora.'));
     if (!fila?.mfa_secreto) return reply.code(409).send(error(409, 'MFA_NO_INICIADO', 'Primero solicita el código de enrolamiento.'));
     if (!verificarTotp(fila.mfa_secreto, parseo.data.codigo)) {
       return reply.code(422).send(error(422, 'CODIGO_INCORRECTO', 'El código no es válido. Revisa la hora de tu teléfono.'));
@@ -194,6 +200,12 @@ export async function rutasAuth(app: FastifyInstance) {
   /** POST /auth/mfa/recuperacion — regenera los códigos de respaldo (requiere sesión). */
   app.post('/auth/mfa/recuperacion', { preHandler: autenticar, ...ESTRICTO }, async (req, reply) => {
     const u = req.usuario!;
+    // Pide la contraseña: con solo un token robado no se reemplazan los códigos de respaldo del dueño.
+    const clave = String((req.body as { clave?: unknown } | undefined)?.clave ?? '').slice(0, 128);
+    const fila = await uno<{ clave_hash: string }>('SELECT clave_hash FROM core.usuario WHERE id = $1', [u.id]);
+    if (!clave || !fila || !verificarClaveDetalle(clave, fila.clave_hash).valida) {
+      return reply.code(403).send(error(403, 'CLAVE_ACTUAL_INCORRECTA', 'Escribe tu contraseña actual para generar códigos nuevos.'));
+    }
     const codigos = await generarCodigosRecuperacion(u.id);
     await auditar({ actorId: u.id, actor: u.nombre, rol: u.rol, accion: 'MFA_CODIGOS_REGENERADOS', entidad: 'usuario', entidadId: u.id, ip: req.ip });
     return reply.send({ codigos });

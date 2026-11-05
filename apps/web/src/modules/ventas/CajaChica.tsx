@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { money } from '@/core/format';
-import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Kpi, PilaEsqueleto, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 
 interface Apertura {
   codigo: string; estado: 'ABIERTA' | 'CERRADA'; montoInicial: number; pagado: number; saldo: number; abiertaEn: string; abiertaPor: string;
@@ -17,7 +17,8 @@ export function CajaChica() {
   const [contado, setContado] = useState('');
   const [obs, setObs] = useState('');
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
-  const cargar = () => api<{ abierta: Apertura | null; historial: Apertura[] }>('/cajas/chica').then(setDatos).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const cargar = () => api<{ abierta: Apertura | null; historial: Apertura[] }>('/cajas/chica').then((d) => { setDatos(d); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => { void cargar(); }, []);
   const accion = async (fn: () => Promise<string>) => {
     try { setAviso({ tono: 'ok', texto: await fn() }); await cargar(); } catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo completar.' }); }
@@ -28,6 +29,7 @@ export function CajaChica() {
     <>
       <Encabezado titulo="Caja chica" descripcion="Se abre con un monto inicial · Administración paga compras pequeñas desde aquí · al cerrar se cuenta el efectivo" />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
+      {datos === null && !cargaError && <Tarjeta><PilaEsqueleto lineas={3} /></Tarjeta>}
       {a ? (<>
         <div className="grid grid--auto">
           <Kpi label="Disponible" valor={money(a.saldo)} nota={`${a.codigo} · abierta por ${a.abiertaPor}`} icono="wallet" />
@@ -65,7 +67,9 @@ export function CajaChica() {
         </Tarjeta>
       )}
       <Tarjeta padding="none">
-        {!datos?.historial.length ? <Vacio titulo="Sin aperturas de caja" icono="wallet" /> : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setDatos(null); void cargar(); }} />
+          : datos === null ? <TablaEsqueleto columnas={7} />
+          : !datos.historial.length ? <Vacio titulo="Sin aperturas de caja" icono="wallet" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Caja</th><th>Abierta</th><th>Cerrada</th><th className="t-right">Inicial</th><th className="t-right">Pagado</th><th className="t-right">Contado</th><th>Estado</th></tr></thead>
             <tbody>{datos.historial.map((h) => (

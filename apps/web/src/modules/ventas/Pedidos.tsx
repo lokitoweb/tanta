@@ -5,7 +5,7 @@ import { useCatalogos } from '@/core/catalogos';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, num2 } from '@/core/format';
-import { Boton, Buscador, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 import { NuevoPedido } from './NuevoPedido';
 
@@ -25,12 +25,15 @@ interface Aprobacion { id: string; porcentaje: number; estado: string; vigente: 
 /** Pedidos: registro, avance por estados y despacho con venta vinculada (trazabilidad pedido → venta). */
 export function Pedidos() {
   const { puede, refrescarDatos } = useApp();
-  const [pedidos, setPedidos] = useState<Pedido[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay pedidos.
+  const [lista, setLista] = useState<Pedido[] | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const pedidos = lista ?? [];
   const [q, setQ] = useState('');
   const [estado, setEstado] = useState('todos');
   const [nuevo, setNuevo] = useState(false);
   const [sel, setSel] = useState<Pedido | null>(null);
-  const [pago, setPago] = useState({ formaPago: 'EFECTIVO', descuento: '0', referencia: '' });
+  const [pago, setPago] = useState({ formaPago: '', descuento: '0', referencia: '' });
   const medios = useCatalogos().mediosPago.filter((m) => m.enVentas);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -45,7 +48,7 @@ export function Pedidos() {
     return `Descuento de ${pago.descuento} % enviado al Gerente para aprobación`;
   });
   const conReferencia = !!medios.find((m) => m.codigo === pago.formaPago)?.requiereOperacion;
-  const cargar = () => api<Pedido[]>('/pedidos').then(setPedidos).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
+  const cargar = () => api<Pedido[]>('/pedidos').then((p) => { setLista(p); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => { void cargar(); }, []);
 
   const filas = useMemo(() => pedidos.filter((p) => (estado === 'todos' || p.estado === estado)
@@ -102,11 +105,13 @@ export function Pedidos() {
               <button key={k} className={`chipfilter ${estado === k ? 'is-active' : ''}`} onClick={() => setEstado(k)}>{v.label} <b>{porEstado(k)}</b></button>))}
           </div>
         </div>
-        {filas.length === 0 ? <Vacio titulo="Sin pedidos" detalle="No hay pedidos con este filtro." icono="clipboard" /> : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setLista(null); void cargar(); }} />
+          : lista === null ? <TablaEsqueleto columnas={6} />
+          : filas.length === 0 ? <Vacio titulo="Sin pedidos" detalle="No hay pedidos con este filtro." icono="clipboard" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Pedido</th><th>Cliente</th><th>Productos</th><th>Entrega</th><th className="t-right">Total</th><th className="t-right">Estado</th></tr></thead>
             <tbody>{pagPedidos.visibles.map((p) => (
-              <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: p.pagoEntrega ?? 'EFECTIVO', descuento: '0', referencia: '' }); setSel(p); }}>
+              <tr key={p.id} className="is-clickable" onClick={() => { setPago({ formaPago: medios.some((m) => m.codigo === p.pagoEntrega) ? p.pagoEntrega! : medios[0]?.codigo ?? '', descuento: '0', referencia: '' }); setSel(p); }}>
                 <td><strong className="mono">{p.codigo}</strong>{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
                 <td>{p.cliente}</td>
                 <td className="t-muted">{p.items.slice(0, 2).map((i) => `${num(i.cantidad)} ${i.producto}`).join(', ')}{p.items.length > 2 ? ` +${p.items.length - 2}` : ''}</td>

@@ -131,7 +131,7 @@ function mimeReal(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | null {
   return null;
 }
 
-async function guardarImagen(base64: string, usuarioId: string): Promise<string> {
+export async function guardarImagen(base64: string, usuarioId: string): Promise<string> {
   const datos = Buffer.from(base64.replace(/^data:[^,]+,/, ''), 'base64');
   const mime = mimeReal(datos);
   if (!mime) throw Object.assign(new Error('Solo imágenes PNG, JPEG o WebP.'), { status: 415, codigo: 'IMAGEN_INVALIDA' });
@@ -476,15 +476,23 @@ export async function rutasSistema(app: FastifyInstance) {
     nombre: z.string().trim().min(3).max(120),
     email: z.union([z.literal(''), z.string().trim().email().max(160)]),
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Solo números, espacios, +, ( ) y -'),
+    clave: z.string().max(128).optional(),
   });
 
-  app.patch('/perfil', { preHandler: autenticar }, async (req, reply) => {
+  app.patch('/perfil', { preHandler: autenticar, config: { rateLimit: { max: Number(process.env.LOGIN_RATE_MAX ?? 8), timeWindow: '1 minute' } } }, async (req, reply) => {
     const p = DatosPerfil.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
-    await q('UPDATE core.usuario SET nombre = $1, email = $2, telefono = $3 WHERE id = $4', [p.data.nombre, p.data.email, p.data.telefono, req.usuario!.id]);
+    const { clave, ...datos } = p.data;
+    const u = await uno<{ email: string | null; clave_hash: string }>('SELECT email, clave_hash FROM core.usuario WHERE id = $1', [req.usuario!.id]);
+    // El correo recupera la cuenta: con un token robado no debe poder cambiarse sin la contraseña.
+    if ((u?.email ?? '').toLowerCase() !== datos.email.toLowerCase() && (!clave || !u || !verificarClave(clave, u.clave_hash))) {
+      return reply.code(403).send(error(403, 'CLAVE_ACTUAL_INCORRECTA', 'Para cambiar el correo escribe tu contraseña actual.'));
+    }
+    await q('UPDATE core.usuario SET nombre = $1, email = $2, telefono = $3 WHERE id = $4', [datos.nombre, datos.email, datos.telefono, req.usuario!.id]);
     invalidar(`sesion:${req.usuario!.id}`);
-    await auditar({ actorId: req.usuario!.id, actor: p.data.nombre, rol: req.usuario!.rol, accion: 'PERFIL_ACTUALIZADO', entidad: 'usuario', entidadId: req.usuario!.id, ip: req.ip });
-    return p.data;
+    await auditar({ actorId: req.usuario!.id, actor: datos.nombre, rol: req.usuario!.rol, accion: 'PERFIL_ACTUALIZADO', entidad: 'usuario', entidadId: req.usuario!.id,
+      detalle: u?.email !== datos.email ? { emailAnterior: u?.email ?? '' } : undefined, ip: req.ip });
+    return datos;
   });
 
   app.post('/perfil/clave', {

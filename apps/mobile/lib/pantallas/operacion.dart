@@ -22,6 +22,7 @@ class Produccion extends StatelessWidget {
         const TituloSeccion('',
             subtitulo: 'Órdenes del día · el consumo de insumos se descuenta al cerrar'),
         const SizedBox(height: 16),
+        if (ops.isEmpty) const VacioMensaje('No hay órdenes de producción para hoy', icono: Icons.local_fire_department_outlined),
         _grupo(context, 'Pendientes', pendientes, Tono.neutral),
         _grupo(context, 'En proceso', enProceso, Tono.warn),
         _grupo(context, 'Terminadas', terminadas, Tono.ok),

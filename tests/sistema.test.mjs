@@ -63,7 +63,10 @@ test('perfil: datos, foto validada, cambio de clave y eliminación de cuenta', a
   assert.equal((await api(sa, 'POST', '/usuarios', { nombre: 'Temporal Prueba', usuario, clave: 'ClaveInicial1', rol: 'VENDEDOR' })).s, 201);
   const t = await login(usuario, 'ClaveInicial1');
 
-  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: 'temp@tanta.pe', telefono: '+51 999 111 222' })).s, 200);
+  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: 'temp@tanta.pe', telefono: '+51 999 111 222' })).s, 403, 'cambiar el correo pide la contraseña');
+  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: 'temp@tanta.pe', telefono: '+51 999 111 222', clave: 'ClaveInicial1' })).s, 200);
+  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Dos', email: 'temp@tanta.pe', telefono: '' })).s, 200, 'sin cambiar el correo no pide contraseña');
+  assert.equal((await api(t, 'POST', '/auth/mfa/recuperacion', {})).s, 403, 'regenerar códigos pide la contraseña');
   assert.equal((await api(t, 'GET', '/perfil')).b.email, 'temp@tanta.pe');
   assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'J', email: 'x', telefono: '<script>' })).s, 422);
 
@@ -93,6 +96,11 @@ test('escalada de privilegios bloqueada', async () => {
   const superId = (await api(sa, 'GET', '/perfil')).b.id;
   assert.equal((await api(admin, 'PATCH', `/usuarios/${superId}/clave`, { clave: 'robada12345' })).s, 403, 'admin no cambia la clave del superadmin');
   assert.equal((await api(admin, 'PATCH', `/usuarios/${superId}/estado`, { estado: 'BLOQUEADO' })).s, 403);
+  assert.equal((await api(admin, 'POST', '/usuarios', { nombre: 'Intruso', usuario: 'intruso' + Date.now(), clave: 'claveSegura1', rol: 'GERENTE' })).s, 403, 'admin no crea gerentes');
+  assert.equal((await api(admin, 'POST', '/usuarios', { nombre: 'Intruso', usuario: 'intruso' + Date.now(), clave: 'claveSegura1', rol: 'ADMINISTRADOR' })).s, 403, 'admin no crea pares');
+  const gerenteId = (await api(await login('osquilcate'), 'GET', '/perfil')).b.id;
+  assert.equal((await api(admin, 'PATCH', `/usuarios/${gerenteId}/clave`, { clave: 'robada12345' })).s, 403, 'admin no cambia la clave del gerente');
+  assert.ok(!(await api(admin, 'GET', '/roles-asignables')).b.some((r) => ['SUPERADMIN', 'GERENTE', 'ADMINISTRADOR'].includes(r.id)));
   assert.equal((await api(sa, 'PUT', '/sistema/roles/SUPERADMIN/permisos', { permisos: [] })).s, 409, 'superadmin no puede quedarse sin permisos');
   assert.ok(roles.b.roles.length >= 8);
 });

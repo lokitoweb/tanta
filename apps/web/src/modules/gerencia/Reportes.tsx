@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { money, pct } from '@/core/format';
-import { Boton, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, PilaEsqueleto, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { BarraFiltros, aQuery, rango, useEnVivo, type Filtros } from '@/ui/Filtros';
 import { TablaReporte, type ColRep } from '@/ui/TablaReporte';
 import { Dialogo } from '@/ui/Dialogo';
@@ -29,20 +29,23 @@ const RESUMEN: Record<string, (r: Record<string, unknown>) => Array<[string, str
 
 /** Catálogo de reportes del PDF (Tabla 4), calculados en vivo por el API. */
 export function Reportes() {
-  const [catalogo, setCatalogo] = useState<Catalogo[]>([]);
+  // null = cargando el catálogo (esqueleto).
+  const [catalogoCargado, setCatalogo] = useState<Catalogo[] | null>(null);
+  const catalogo = catalogoCargado ?? [];
   const [codigo, setCodigo] = useState<string>('');
   const [filtros, setFiltros] = useState<Filtros>(rango(30));
   const [res, setRes] = useState<Resultado | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
 
-  useEffect(() => {
+  const cargarCatalogo = () => {
     // ?r=A-02 abre un reporte concreto (enlaces desde Almacén, Panel…).
     const pedido = new URLSearchParams(window.location.search).get('r');
     api<Catalogo[]>('/reportes')
-      .then((c) => { setCatalogo(c); setCodigo((x) => x || (c.some((r) => r.codigo === pedido) ? pedido! : c[0]?.codigo) || ''); })
+      .then((c) => { setCatalogo(c); setError(null); setCodigo((x) => x || (c.some((r) => r.codigo === pedido) ? pedido! : c[0]?.codigo) || ''); })
       .catch((e) => setError(e instanceof Error ? e.message : 'No se pudo cargar el catálogo.'));
-  }, []);
+  };
+  useEffect(cargarCatalogo, []);
 
   const cargar = async () => {
     if (!codigo) return;
@@ -71,6 +74,8 @@ export function Reportes() {
   const actual = catalogo.find((c) => c.codigo === codigo);
   const grupos = [...new Set(catalogo.map((c) => c.codigo[0]))];
   const resumen = res?.resumen && RESUMEN[codigo]?.(res.resumen);
+  const faltaProducto = codigo === 'M-01' && !filtros.producto;
+  const reintentar = () => { setError(null); if (codigo) void cargar(); else cargarCatalogo(); };
 
   return (
     <>
@@ -82,6 +87,7 @@ export function Reportes() {
 
       <div className="reportes">
         <nav className="reportes__lista" aria-label="Catálogo de reportes">
+          {catalogoCargado === null && !error && <PilaEsqueleto lineas={8} />}
           {grupos.map((g) => (
             <div key={g} className="reportes__grupo">
               <p className="reportes__grupo-t">{GRUPOS[g] ?? g}</p>
@@ -106,9 +112,12 @@ export function Reportes() {
           </Tarjeta>
 
           <Tarjeta padding="none">
-            {error ? <Vacio titulo="Sin datos" detalle={error} icono="report" />
-              : res && res.filas.length === 0 ? <Vacio titulo="Sin resultados" detalle="No hay movimientos con estos filtros." icono="report" />
-                : res && <TablaReporte columnas={res.columnas} filas={res.filas}
+            {error ? (faltaProducto ? <Vacio titulo="Sin datos" detalle={error} icono="report" />
+              : <Vacio titulo="No se pudo cargar" detalle={error} icono="report" onReintentar={reintentar} />)
+              : catalogoCargado && !codigo ? <Vacio titulo="Sin reportes disponibles" detalle="Tu rol no tiene reportes asignados." icono="report" />
+              : !res ? <TablaEsqueleto />
+              : res.filas.length === 0 ? <Vacio titulo="Sin resultados" detalle="No hay movimientos con estos filtros." icono="report" />
+                : <TablaReporte columnas={res.columnas} filas={res.filas}
                   onFila={puedeAnular ? (f) => setAnular({ codigo: String(f.codigo), motivo: '' }) : undefined} />}
           </Tarjeta>
         </div>

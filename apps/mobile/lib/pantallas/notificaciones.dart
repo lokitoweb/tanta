@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/tokens.dart';
+import '../ui/comunes.dart';
 
 /// Cantidad de avisos sin leer; la campana la muestra y se refresca sola.
 final noLeidas = ValueNotifier<int>(0);
@@ -55,6 +56,7 @@ class Notificaciones extends StatefulWidget {
 
 class _NotificacionesState extends State<Notificaciones> {
   List<Map<String, dynamic>>? _avisos;
+  String? _error;
   bool _soloNoLeidas = false;
 
   static const _iconos = {
@@ -66,9 +68,11 @@ class _NotificacionesState extends State<Notificaciones> {
     try {
       final r = await Api.instancia.notificaciones();
       noLeidas.value = (r['noLeidas'] as num?)?.toInt() ?? 0;
-      if (mounted) setState(() => _avisos = ((r['avisos'] as List?) ?? const []).cast<Map<String, dynamic>>());
+      if (mounted) setState(() { _avisos = ((r['avisos'] as List?) ?? const []).cast<Map<String, dynamic>>(); _error = null; });
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
     } catch (_) {
-      if (mounted) setState(() => _avisos ??= const []);
+      if (mounted) setState(() => _error = 'Sin conexión: intenta de nuevo');
     }
   }
 
@@ -109,10 +113,13 @@ class _NotificacionesState extends State<Notificaciones> {
         ),
         Expanded(child: RefreshIndicator(
           onRefresh: _cargar,
-          child: _avisos == null
-              ? const Center(child: CircularProgressIndicator())
+          child: _error != null
+              ? ListView(children: [ErrorReintentar(mensaje: _error!, onReintentar: _cargar)])
+              : _avisos == null
+              ? ListView(children: const [Esqueleto()])
               : lista.isEmpty
-                  ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('No tienes notificaciones'))])
+                  ? ListView(children: [VacioMensaje(_soloNoLeidas ? 'No tienes notificaciones sin leer' : 'No tienes notificaciones',
+                      icono: Icons.notifications_none_outlined)])
                   : ListView.separated(
                       itemCount: lista.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),

@@ -203,3 +203,96 @@ class Avatar extends StatelessWidget {
     );
   }
 }
+
+/// Carga: paneles grises que laten mientras llegan los datos. Es una columna: dentro de un
+/// RefreshIndicator va como hijo de un ListView para que siga funcionando tirar para recargar.
+class Esqueleto extends StatefulWidget {
+  const Esqueleto({super.key, this.filas = 5, this.alto = 64});
+  final int filas;
+  final double alto;
+
+  @override
+  State<Esqueleto> createState() => _EsqueletoState();
+}
+
+class _EsqueletoState extends State<Esqueleto> with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 900), lowerBound: 0.45);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Con "reducir movimiento" activo los paneles quedan quietos.
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _anim.value = 1;
+    } else if (!_anim.isAnimating) {
+      _anim.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Cargando',
+      child: FadeTransition(
+        opacity: _anim,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (var i = 0; i < widget.filas; i++)
+              Container(
+                height: widget.alto,
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(color: TantaColors.cream300, borderRadius: BorderRadius.circular(12)),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Error de carga con botón para volver a intentar.
+class ErrorReintentar extends StatelessWidget {
+  const ErrorReintentar({super.key, required this.mensaje, required this.onReintentar});
+  final String mensaje;
+  final VoidCallback onReintentar;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.cloud_off_outlined, size: 40, color: TantaColors.textMuted),
+        const SizedBox(height: 12),
+        Text(mensaje, textAlign: TextAlign.center, style: const TextStyle(color: TantaColors.textSecondary)),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(onPressed: onReintentar, icon: const Icon(Icons.refresh), label: const Text('Reintentar')),
+      ]),
+    );
+  }
+}
+
+/// Estado vacío: icono y texto centrados.
+class VacioMensaje extends StatelessWidget {
+  const VacioMensaje(this.texto, {super.key, this.icono = Icons.inbox_outlined});
+  final String texto;
+  final IconData icono;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icono, size: 40, color: TantaColors.textMuted),
+        const SizedBox(height: 12),
+        Text(texto, textAlign: TextAlign.center, style: const TextStyle(color: TantaColors.textMuted)),
+      ]),
+    );
+  }
+}

@@ -3,7 +3,7 @@ import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { num2 } from '@/core/format';
 import { desdeIso } from '@/core/fecha';
-import { Boton, Encabezado, Insignia, Segmentado, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Segmentado, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 import { Paginador, usePaginado } from '@/ui/Paginador';
 
@@ -24,8 +24,10 @@ export function Requisiciones() {
   const [ocupado, setOcupado] = useState(false);
   const pag = usePaginado(lista ?? [], 15);
 
-  const cargar = () => api<Requisicion[]>(`/requisiciones?estado=${vista}`).then(setLista).catch((e) => { setLista([]); setAviso({ tono: 'danger', texto: e.message }); });
-  useEffect(() => { void cargar(); }, [vista]);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const cargar = () => api<Requisicion[]>(`/requisiciones?estado=${vista}`).then((l) => { setLista(l); setCargaError(null); }).catch((e) => setCargaError(e.message));
+  const reintentar = () => { setCargaError(null); setLista(null); void cargar(); };
+  useEffect(reintentar, [vista]);
 
   const abrir = (r: Requisicion) => setSel({ r, cant: Object.fromEntries(r.lineas.map((l) => [l.insumoId, String(Math.max(0, Math.round((l.solicitada - l.entregada) * 1000) / 1000))])) });
   const entregar = async () => {
@@ -48,7 +50,8 @@ export function Requisiciones() {
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
       <Segmentado valor={vista} onChange={setVista} opciones={[{ id: 'PENDIENTES', etiqueta: 'Por atender' }, { id: 'TODAS', etiqueta: 'Todas' }]} />
       <Tarjeta padding="none">
-        {lista === null ? <div className="tabla-cargando">Cargando requisiciones…</div>
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={reintentar} />
+          : lista === null ? <TablaEsqueleto />
           : lista.length === 0 ? <Vacio titulo="Sin requisiciones por atender" detalle="Aparecen cuando Producción crea una orden." icono="clipboard" />
             : (
               <div className="table-wrap"><table className="table">

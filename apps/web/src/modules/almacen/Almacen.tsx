@@ -7,6 +7,7 @@ import { Dialogo } from '@/ui/Dialogo';
 import { money, num, num2, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Buscador, Tarjeta, Vacio } from '@/ui/primitives';
 import { Tabla, type Columna } from '@/ui/Tabla';
+import { Importar } from '@/ui/Importar';
 import type { Insumo } from '@/core/types';
 
 export function Almacen() {
@@ -53,7 +54,13 @@ export function Almacen() {
       <Encabezado
         titulo="Almacén e inventario"
         descripcion="Stock de insumos y productos terminados, valorizado al costo promedio ponderado"
-        acciones={<><Boton icono="download" onClick={() => exportarExcel('inventario', insumos.map((i) => ({ codigo: i.codigo ?? i.id, insumo: i.nombre, unidad: i.unidad, stock: i.stock, minimo: i.minimo, ...(verValor ? { cpp: i.cpp, valorizado: i.valorizado } : {}), estado: i.estado })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{puede('inventario.mover') && <Boton variant="primary" icono="plus" onClick={() => setRegistrar(true)}>Registrar baja</Boton>}</>}
+        acciones={<><Boton icono="download" onClick={() => exportarExcel('inventario', insumos.map((i) => ({ codigo: i.codigo ?? i.id, insumo: i.nombre, unidad: i.unidad, stock: i.stock, minimo: i.minimo, ...(verValor ? { cpp: i.cpp, valorizado: i.valorizado } : {}), estado: i.estado })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{(puede('inventario.mover') || puede('maestros.editar')) && (
+          <Importar titulo="Inventario inicial" descripcion="Stock inicial valorizado de insumos y productos terminados (tipo INSUMO o PRODUCTO, con su código). Cada fila genera un movimiento «Saldo inicial»; solo se aplica a ítems sin movimientos."
+            plantilla={{ tipo: 'INSUMO', codigo: 'INS-001', cantidad: 50, costoUnitario: 2.4, lote: '', venceEn: '' }}
+            numericas={['cantidad', 'costoUnitario']}
+            enviar={async (filas) => { const r = await api<{ aplicados: unknown[]; errores: Array<{ fila: number; codigo: string; motivo: string }> }>('/inventario/inicial', { method: 'POST', body: { filas } }); return { ok: r.aplicados.length, errores: r.errores }; }}
+            onListo={() => void refrescarDatos()} />
+        )}{puede('inventario.mover') && <Boton variant="primary" icono="plus" onClick={() => setRegistrar(true)}>Registrar baja</Boton>}</>}
       />
 
       <div className="grid grid--auto">
@@ -187,15 +194,18 @@ interface Lote { id: number; insumo: string; unidad: string; lote: string; vence
 function LotesPorVencer() {
   const { dataset } = useApp();
   const [lotes, setLotes] = useState<Lote[] | null>(null);
-  useEffect(() => { api<Lote[]>('/lotes?dias=30').then(setLotes).catch(() => setLotes([])); }, [dataset]);
-  if (!lotes?.length) return null;
+  const [error, setError] = useState<string | null>(null);
+  const cargar = () => { setError(null); api<Lote[]>('/lotes?dias=30').then(setLotes).catch((e) => setError(e.message)); };
+  useEffect(cargar, [dataset]);
+  // ponytail: la tarjeta solo aparece si hay lotes por vencer; mientras carga no se reserva espacio.
+  if (!error && !lotes?.length) return null;
   return (
     <Tarjeta padding="none">
       <div className="card__head card__head--padded"><div>
         <h3 className="card__title">Lotes por vencer</h3>
         <p className="card__sub">Próximos 30 días · las salidas consumen primero el lote que vence antes</p>
       </div></div>
-      <div className="table-wrap"><table className="table table--compacta">
+      {error || !lotes ? <Vacio titulo="No se pudo cargar" detalle={error ?? ''} onReintentar={cargar} /> : <div className="table-wrap"><table className="table table--compacta">
         <thead><tr><th>Insumo</th><th>Lote</th><th>Vence</th><th className="t-right">Saldo</th><th>Estado</th></tr></thead>
         <tbody>{lotes.map((l) => (
           <tr key={l.id}><td>{l.insumo}</td><td className="mono">{l.lote}</td><td>{l.vence}</td>
@@ -203,7 +213,7 @@ function LotesPorVencer() {
             <td>{l.estado === 'VENCIDO' ? <Insignia tono="danger" punto>Vencido hace {-(l.dias ?? 0)} d</Insignia>
               : <Insignia tono={(l.dias ?? 99) <= 7 ? 'warn' : 'neutral'} punto>{l.dias === 0 ? 'Vence hoy' : `En ${l.dias} d`}</Insignia>}</td></tr>
         ))}</tbody>
-      </table></div>
+      </table></div>}
     </Tarjeta>
   );
 }

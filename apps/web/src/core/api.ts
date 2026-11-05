@@ -195,8 +195,8 @@ export async function activarMfa(ticket: string, codigo: string): Promise<Sesion
 }
 
 /** Regenera los códigos de respaldo. Invalida los anteriores. */
-export async function regenerarRecuperacion(): Promise<string[]> {
-  const r = await api<{ codigos: string[] }>('/auth/mfa/recuperacion', { method: 'POST', body: {} });
+export async function regenerarRecuperacion(clave: string): Promise<string[]> {
+  const r = await api<{ codigos: string[] }>('/auth/mfa/recuperacion', { method: 'POST', body: { clave } });
   return r.codigos;
 }
 

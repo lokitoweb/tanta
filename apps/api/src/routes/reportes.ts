@@ -59,7 +59,8 @@ async function agrupar(f: F, dim: string, extra = '') {
     [k, ['nombre', 'canal', 'categoria', 'vendedor'].includes(k) ? v : num(v)])) as Record<string, string | number>);
 }
 
-const semaforo = (margen: number, objetivo: number) => (margen >= objetivo ? 'verde' : margen >= objetivo - 0.1 ? 'ambar' : 'rojo');
+/** RN-37: rojo bajo el objetivo; ámbar hasta 5 puntos sobre el objetivo; verde por encima. */
+const semaforo = (margen: number, objetivo: number) => (margen < objetivo ? 'rojo' : margen <= objetivo + 0.05 ? 'ambar' : 'verde');
 
 const REPORTES: Record<string, Reporte> = {
   'G-01': {
@@ -140,20 +141,30 @@ const REPORTES: Record<string, Reporte> = {
     titulo: 'Estructura de costos', permiso: 'dashboard.ver',
     columnas: [{ key: 'concepto', label: 'Concepto' }, { key: 'tipo', label: 'Tipo' }, { key: 'monto', label: 'Monto', tipo: 'dinero' }, { key: 'sobreVentas', label: '% sobre ventas', tipo: 'pct' }],
     async calcular(f) {
-      // Lo vendido descompuesto con la ficha vigente: insumos, merma y CIF (por concepto).
+      // REP-02: el costo CONGELADO de cada venta se reparte según la composición de su ficha
+      // (insumos sin merma, merma, mano de obra y CIF): la suma de participaciones = costo de ventas.
+      // Insumos sin merma = costo del lote ÷ unidades teóricas; merma = lo que cuesta producir de más.
       const r = await uno<Record<string, string>>(`${LINEAS}
-        SELECT coalesce(sum(l.neto),0) netas, coalesce(sum(l.cantidad * re.costo_insumos),0) insumos,
-               coalesce(sum(l.cantidad * (re.costo_con_merma - re.costo_insumos)),0) merma, coalesce(sum(l.cantidad * re.cif_unitario),0) cif
-        FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id AND re.estado = 'VIGENTE'`, params(f));
+        SELECT coalesce(sum(l.neto),0) netas, coalesce(sum(l.costo),0) costo,
+               coalesce(sum(l.costo * coalesce(k.ins / t.tot, 1)),0) insumos,
+               coalesce(sum(l.costo * coalesce((k.cm - k.ins) / t.tot, 0)),0) merma,
+               coalesce(sum(l.costo * coalesce(k.mo / t.tot, 0)),0) mo,
+               coalesce(sum(l.costo * coalesce(k.cif / t.tot, 0)),0) cif
+        FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id AND re.estado = 'VIGENTE'
+        CROSS JOIN LATERAL (SELECT coalesce(CASE WHEN re.unidades_teoricas > 0 THEN re.costo_lote / re.unidades_teoricas ELSE re.costo_con_merma END, 0) ins,
+                                   coalesce(re.costo_con_merma, 0) cm, coalesce(re.mo_unitario, 0) mo, coalesce(re.cif_unitario, 0) cif) k
+        CROSS JOIN LATERAL (SELECT nullif(k.cm + k.mo + k.cif, 0) tot) t`, params(f));
       const netas = num(r?.netas), cif = num(r?.cif);
       const conceptos = await q<Record<string, string>>('SELECT concepto, tipo, monto_mensual FROM core.costo_indirecto WHERE activo ORDER BY monto_mensual DESC');
       const totalMes = conceptos.reduce((s, c) => s + num(c.monto_mensual), 0);
       const filas = [
         { concepto: 'Insumos directos', tipo: 'Variable', monto: num(r?.insumos) },
         { concepto: 'Merma', tipo: 'Variable', monto: num(r?.merma) },
-        ...conceptos.map((c) => ({ concepto: `CIF · ${c.concepto}`, tipo: c.tipo === 'FIJO' ? 'Fijo' : 'Variable', monto: totalMes ? cif * num(c.monto_mensual) / totalMes : 0 })),
+        { concepto: 'Mano de obra', tipo: 'Variable', monto: num(r?.mo) },
+        ...(totalMes ? conceptos.map((c) => ({ concepto: `CIF · ${c.concepto}`, tipo: c.tipo === 'FIJO' ? 'Fijo' : 'Variable', monto: cif * num(c.monto_mensual) / totalMes }))
+          : [{ concepto: 'CIF', tipo: 'Variable', monto: cif }]),
       ].map((x) => ({ ...x, sobreVentas: netas ? x.monto / netas : 0 }));
-      return { filas, resumen: { ventasNetas: netas } };
+      return { filas, resumen: { ventasNetas: netas, costoVentas: num(r?.costo) } };
     },
   },
   'G-08': {
@@ -180,7 +191,7 @@ const REPORTES: Record<string, Reporte> = {
     columnas: [{ key: 'indicador', label: 'Indicador' }, { key: 'valor', label: 'Valor', tipo: 'dinero' }],
     async calcular(f) {
       const r = await uno<Record<string, string>>(`${LINEAS}
-        SELECT coalesce(sum(l.neto),0) netas, coalesce(sum(l.cantidad * re.costo_con_merma),0) variables
+        SELECT coalesce(sum(l.neto),0) netas, coalesce(sum(l.cantidad * (re.costo_con_merma + re.mo_unitario)),0) variables
         FROM l LEFT JOIN core.receta re ON re.producto_id = l.producto_id AND re.estado = 'VIGENTE'`, params(f));
       const cif = await uno<Record<string, string>>(`SELECT coalesce(sum(monto_mensual) FILTER (WHERE tipo='FIJO'),0) fijos, coalesce(sum(monto_mensual) FILTER (WHERE tipo='VARIABLE'),0) varcif FROM core.costo_indirecto WHERE activo`);
       const dias = Math.max(1, Math.round((Date.parse(f.hasta) - Date.parse(f.desde)) / 86_400_000) + 1);
@@ -191,7 +202,7 @@ const REPORTES: Record<string, Reporte> = {
       return {
         filas: [
           { indicador: 'Ventas netas del período', valor: netas },
-          { indicador: 'Costos variables (insumos, merma, CIF variable)', valor: variables },
+          { indicador: 'Costos variables (insumos, merma, mano de obra, CIF variable)', valor: variables },
           { indicador: 'Costos fijos del período', valor: fijos },
           { indicador: 'Margen de contribución %', valor: mc, tipo: 'pct' },
           { indicador: 'Punto de equilibrio (ventas mínimas)', valor: pe },
@@ -210,9 +221,11 @@ const REPORTES: Record<string, Reporte> = {
         FROM core.movimiento_inventario m LEFT JOIN core.insumo i ON i.id = m.insumo_id LEFT JOIN core.producto p ON p.id = m.producto_id
         WHERE m.tipo = 'MERMA' AND m.creado_en >= $1::date AND m.creado_en < $2::date + 1
         UNION ALL
-        SELECT o.producto, 'Producción', 'Merma real de ' || o.codigo, o.cantidad * o.merma_real, o.cantidad * o.merma_real * coalesce(p.costo_unitario, 0)
+        -- RN-24 / G-10: unidades de merma registradas al cerrar la OP × costo unitario real de la OP.
+        SELECT o.producto, 'Producción', 'Merma de ' || o.codigo || coalesce(' · ' || nullif(o.motivo_merma_tipo, ''), ''),
+               o.unidades_merma, o.unidades_merma * coalesce(o.costo_unitario_real, p.costo_unitario, 0)
         FROM core.orden_produccion o JOIN core.producto p ON p.id = o.producto_id
-        WHERE o.estado = 'TERMINADA' AND o.merma_real > 0 AND o.terminada_en >= $1::date AND o.terminada_en < $2::date + 1
+        WHERE o.estado = 'TERMINADA' AND o.unidades_merma > 0 AND o.terminada_en >= $1::date AND o.terminada_en < $2::date + 1
         ORDER BY valor DESC`, [f.desde, f.hasta]);
       const prod = await uno<{ v: string }>(`SELECT coalesce(sum(coalesce(o.cantidad_producida, o.cantidad) * p.costo_unitario), 0) v FROM core.orden_produccion o JOIN core.producto p ON p.id = o.producto_id
         WHERE o.estado = 'TERMINADA' AND o.terminada_en >= $1::date AND o.terminada_en < $2::date + 1`, [f.desde, f.hasta]);
@@ -230,7 +243,7 @@ const REPORTES: Record<string, Reporte> = {
         LEFT JOIN core.cuenta_por_cobrar x ON x.estado IN ('PENDIENTE','PARCIAL') AND (current_date - x.vence_en) BETWEEN t.a AND t.b
         GROUP BY t.tramo ORDER BY o`);
       const extra = await uno<Record<string, string>>(`SELECT coalesce(sum(saldo) FILTER (WHERE vence_en < current_date),0) vencido,
-        coalesce((SELECT avg(c.creado_en::date - x.creado_en::date) FROM core.cobranza c JOIN core.cuenta_por_cobrar x ON x.id = c.cxc_id WHERE c.creado_en >= now() - interval '90 days'),0) dias
+        coalesce(sum(saldo * (current_date - creado_en::date)) / nullif(sum(saldo), 0), 0) dias -- G-11: Σ(saldo × días) ÷ Σ saldo
         FROM core.cuenta_por_cobrar WHERE estado IN ('PENDIENTE','PARCIAL')`);
       const total = filas.reduce((s, r) => s + num(r.saldo), 0);
       return { filas: filas.map((r) => ({ tramo: r.tramo, documentos: num(r.documentos), saldo: num(r.saldo), participacion: total ? num(r.saldo) / total : 0 })),
@@ -243,14 +256,20 @@ const REPORTES: Record<string, Reporte> = {
     async calcular() {
       const filas = await q<Record<string, string>>(`
         SELECT 'Insumo' tipo, i.nombre item, i.stock, i.stock * i.cpp valor,
-               CASE WHEN i.stock > 0 THEN coalesce((SELECT -sum(m.cantidad) FROM core.movimiento_inventario m WHERE m.insumo_id = i.id AND m.cantidad < 0 AND m.creado_en >= now() - interval '30 days'),0) / i.stock ELSE 0 END rotacion,
+               coalesce(mi.salidas / nullif((2 * i.stock - mi.neto) / 2, 0), 0) rotacion, -- G-12: salidas ÷ inventario promedio
                CASE WHEN i.stock < i.minimo THEN 'Crítico' ELSE '' END critico
-        FROM core.insumo i WHERE i.activo
+        FROM core.insumo i
+        CROSS JOIN LATERAL (SELECT coalesce(-sum(m.cantidad) FILTER (WHERE m.cantidad < 0), 0) salidas, coalesce(sum(m.cantidad), 0) neto
+                            FROM core.movimiento_inventario m WHERE m.insumo_id = i.id AND m.creado_en >= now() - interval '30 days') mi
+        WHERE i.activo
         UNION ALL
         SELECT 'Producto', p.nombre, p.stock, p.stock * p.costo_unitario,
-               CASE WHEN p.stock > 0 THEN coalesce((SELECT sum(d.cantidad) FROM core.venta_detalle d JOIN core.venta v ON v.id = d.venta_id WHERE d.producto_id = p.id AND v.creado_en >= now() - interval '30 days'),0) / p.stock ELSE 0 END,
+               coalesce(mp.salidas / nullif((2 * p.stock - mp.neto) / 2, 0), 0),
                CASE WHEN p.stock <= 0 THEN 'Sin stock' ELSE '' END
-        FROM core.producto p WHERE p.estado = 'ACTIVO' ORDER BY 4 DESC`);
+        FROM core.producto p
+        CROSS JOIN LATERAL (SELECT coalesce(-sum(m.cantidad) FILTER (WHERE m.cantidad < 0), 0) salidas, coalesce(sum(m.cantidad), 0) neto
+                            FROM core.movimiento_inventario m WHERE m.producto_id = p.id AND m.creado_en >= now() - interval '30 days') mp
+        WHERE p.estado = 'ACTIVO' ORDER BY 4 DESC`);
       const out = filas.map((r) => ({ tipo: r.tipo, item: r.item, stock: num(r.stock), valor: num(r.valor), rotacion: Math.round(num(r.rotacion) * 10) / 10, critico: r.critico }));
       return { filas: out, resumen: { valorTotal: out.reduce((s, r) => s + r.valor, 0), criticos: out.filter((r) => r.critico).length } };
     },
@@ -266,7 +285,7 @@ const REPORTES: Record<string, Reporte> = {
                coalesce((SELECT sum(d.cantidad) FROM core.venta_detalle d JOIN core.venta v ON v.id = d.venta_id WHERE d.producto_id = p.id AND v.estado = 'CONFIRMADA' AND v.creado_en >= $1::date AND v.creado_en < $2::date + 1),0) vendido
         FROM core.producto p WHERE p.estado = 'ACTIVO' ORDER BY vendido DESC`, [f.desde, f.hasta]);
       const ped = await uno<Record<string, string>>(`SELECT count(*) FILTER (WHERE fecha_entrega <= current_date AND estado <> 'CANCELADO') vencidos,
-        count(*) FILTER (WHERE fecha_entrega <= current_date AND estado = 'ENTREGADO') entregados FROM core.pedido WHERE fecha_entrega BETWEEN $1::date AND $2::date`, [f.desde, f.hasta]);
+        count(*) FILTER (WHERE fecha_entrega <= current_date AND estado = 'ENTREGADO' AND (entregado_en AT TIME ZONE 'America/Lima')::date <= fecha_entrega) entregados FROM core.pedido WHERE fecha_entrega BETWEEN $1::date AND $2::date`, [f.desde, f.hasta]);
       return { filas: filas.map((r) => ({ producto: r.producto, planificado: num(r.planificado), producido: num(r.producido), cumplimiento: num(r.planificado) ? num(r.producido) / num(r.planificado) : 0, vendido: num(r.vendido) })),
         resumen: { cumplimientoPedidos: num(ped?.vencidos) ? num(ped?.entregados) / num(ped?.vencidos) : 0 } };
     },
@@ -431,12 +450,15 @@ export async function rutasReportes(app: FastifyInstance) {
   });
 
   /** Opciones de los filtros (categorías, productos, clientes, vendedores). */
-  app.get('/reportes-filtros', { preHandler: autenticar }, async () => {
+  app.get('/reportes-filtros', { preHandler: autenticar }, async (req) => {
+    // La lista de clientes y vendedores es dato personal (Ley 29733): solo para personal interno, nunca para un cliente.
+    const p = req.usuario!.permisos;
+    const interno = ['reportes.ver', 'dashboard.ver', 'ventas.registrar', 'pedidos.gestionar', 'clientes.gestionar', 'usuarios.gestionar'].some((x) => p.has(x));
     const [categorias, productos, clientes, vendedores] = await Promise.all([
       q('SELECT id, nombre FROM core.categoria ORDER BY orden, nombre'),
       q("SELECT id, nombre FROM core.producto WHERE estado = 'ACTIVO' ORDER BY nombre"),
-      q("SELECT id, nombre FROM core.cliente WHERE estado = 'ACTIVO' ORDER BY nombre"),
-      q("SELECT DISTINCT vendedor AS nombre FROM core.venta WHERE vendedor <> '' ORDER BY 1"),
+      interno ? q("SELECT id, nombre FROM core.cliente WHERE estado = 'ACTIVO' ORDER BY nombre") : [],
+      interno ? q("SELECT DISTINCT vendedor AS nombre FROM core.venta WHERE vendedor <> '' ORDER BY 1") : [],
     ]);
     return { categorias, productos, clientes, vendedores: vendedores.map((v) => (v as { nombre: string }).nombre) };
   });

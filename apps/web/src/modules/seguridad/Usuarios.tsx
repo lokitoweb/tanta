@@ -20,11 +20,15 @@ export function Usuarios() {
   const [roles, setRoles] = useState<Array<{ id: string; nombre: string }>>([]);
   const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
   const [cambio, setCambio] = useState<{ u: Usuario; rol: string; clienteId: string } | null>(null);
-  useEffect(() => {
+  const [opcionesError, setOpcionesError] = useState<string | null>(null);
+  const cargarOpciones = () => {
     if (!gestiona) return;
-    api<Array<{ id: string; nombre: string }>>('/roles-asignables').then(setRoles).catch(() => {});
-    api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => setClientes(r.clientes)).catch(() => {});
-  }, []);
+    setOpcionesError(null);
+    const falla = (que: string) => (e: Error) => setOpcionesError(`No se pudieron cargar ${que}: ${e.message}`);
+    api<Array<{ id: string; nombre: string }>>('/roles-asignables').then(setRoles).catch(falla('los roles'));
+    api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => setClientes(r.clientes)).catch(falla('los clientes'));
+  };
+  useEffect(cargarOpciones, []);
   const cambiarRol = async () => {
     if (!cambio) return;
     setGuardando(true);
@@ -113,6 +117,8 @@ export function Usuarios() {
       />
 
       {error && <div className="aviso aviso--danger"><span className="aviso__icono">!</span><div><strong>Error</strong><p>{error}</p></div></div>}
+      {opcionesError && <div className="aviso aviso--danger" role="status"><span className="aviso__icono">!</span><div><p>{opcionesError}. No podrás asignar roles hasta que carguen.</p></div>
+        <Boton size="sm" onClick={cargarOpciones}>Reintentar</Boton></div>}
 
       <div className="grid grid--12">
         <Tarjeta className="col-8" padding="none">

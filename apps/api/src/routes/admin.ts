@@ -10,13 +10,19 @@ import { invalidar } from '../cache.js';
  * Todo lo que el cliente puede cambiar sin tocar código: parámetros de negocio,
  * usuarios, precios y cierre de períodos de costo.
  */
-/** Solo un Superadmin crea, bloquea o cambia la clave de otro Superadmin (evita autoelevarse). */
-async function protegeSuperadmin(req: FastifyRequest, reply: FastifyReply, objetivo: { rol?: string; usuarioId?: string }) {
+/**
+ * Jerarquía por core.rol.orden (0 = Superadmin, 1 = Gerente, 2 = Administrador…): solo se crea, asigna,
+ * bloquea o restablece la clave de un rol de MENOR privilegio que el propio. El Superadmin gestiona todo.
+ * Evita que un Administrador se fabrique un Gerente o tome la cuenta de uno.
+ */
+async function protegeJerarquia(req: FastifyRequest, reply: FastifyReply, objetivo: { rol?: string; usuarioId?: string }) {
   if (req.usuario!.rol === 'SUPERADMIN') return true;
-  const esSuper = objetivo.rol === 'SUPERADMIN' || (objetivo.usuarioId && await uno(
-    "SELECT 1 FROM core.usuario_rol WHERE usuario_id = $1 AND rol_id = 'SUPERADMIN'", [objetivo.usuarioId]));
-  if (!esSuper) return true;
-  reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo el Superadministrador gestiona cuentas de Superadministrador.'));
+  const fila = await uno<{ ok: boolean }>(
+    `SELECT coalesce((SELECT orden FROM core.rol WHERE id = coalesce($2, (SELECT rol_id FROM core.usuario_rol WHERE usuario_id::text = $3))), 2147483647)
+           > (SELECT orden FROM core.rol WHERE id = $1) AS ok`,
+    [req.usuario!.rol, objetivo.rol ?? null, objetivo.usuarioId ?? null]);
+  if (fila?.ok) return true;
+  reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo puedes gestionar cuentas de un rol de menor nivel que el tuyo.'));
   return false;
 }
 
@@ -98,7 +104,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     }
     const d = parseo.data;
 
-    if (!(await protegeSuperadmin(req, reply, { rol: d.rol }))) return;
+    if (!(await protegeJerarquia(req, reply, { rol: d.rol }))) return;
     if (d.rol === 'CLIENTE' && !d.clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige la ficha de cliente de este usuario.'));
     const rolExiste = await uno('SELECT 1 FROM core.rol WHERE id = $1', [d.rol]);
     if (!rolExiste) return reply.code(422).send(error(422, 'ROL_INEXISTENTE', 'El rol indicado no existe.'));
@@ -131,7 +137,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     const parseo = Estado.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Estado inválido.'));
 
-    if (!(await protegeSuperadmin(req, reply, { usuarioId: id }))) return;
+    if (!(await protegeJerarquia(req, reply, { usuarioId: id }))) return;
     if (id === req.usuario!.id && parseo.data.estado === 'BLOQUEADO') {
       return reply.code(409).send(error(409, 'NO_PUEDES_BLOQUEARTE', 'No puedes bloquear tu propia cuenta.'));
     }
@@ -154,7 +160,7 @@ export async function rutasAdmin(app: FastifyInstance) {
   // Roles que puede asignar quien gestiona usuarios (el Superadmin solo lo asigna otro Superadmin).
   app.get('/roles-asignables', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'usuarios.gestionar')) return;
-    return q("SELECT id, nombre FROM core.rol WHERE id <> 'SUPERADMIN' OR $1 ORDER BY orden", [req.usuario!.rol === 'SUPERADMIN']);
+    return q('SELECT id, nombre FROM core.rol WHERE $1 OR orden > (SELECT orden FROM core.rol WHERE id = $2) ORDER BY orden', [req.usuario!.rol === 'SUPERADMIN', req.usuario!.rol]);
   });
 
   const CambioRol = z.object({ rol: z.string().min(1).max(40), clienteId: z.string().uuid().optional() });
@@ -164,7 +170,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     const p = CambioRol.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Rol inválido.'));
     if (id === req.usuario!.id) return reply.code(409).send(error(409, 'NO_PUEDES_CAMBIARTE', 'No puedes cambiar tu propio rol.'));
-    if (!(await protegeSuperadmin(req, reply, { usuarioId: id })) || !(await protegeSuperadmin(req, reply, { rol: p.data.rol }))) return;
+    if (!(await protegeJerarquia(req, reply, { usuarioId: id })) || !(await protegeJerarquia(req, reply, { rol: p.data.rol }))) return;
     if (!(await uno('SELECT 1 FROM core.rol WHERE id = $1', [p.data.rol]))) return reply.code(422).send(error(422, 'ROL_INEXISTENTE', 'El rol no existe.'));
     if (p.data.rol === 'CLIENTE' && !p.data.clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige la ficha de cliente de este usuario.'));
     const antes = await uno<{ rol_id: string }>('SELECT rol_id FROM core.usuario_rol WHERE usuario_id = $1', [id]);
@@ -187,7 +193,7 @@ export async function rutasAdmin(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const parseo = NuevaClave.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'CLAVE_CORTA', 'La contraseña debe tener al menos 8 caracteres.'));
-    if (!(await protegeSuperadmin(req, reply, { usuarioId: id }))) return;
+    if (!(await protegeJerarquia(req, reply, { usuarioId: id }))) return;
 
     await q('UPDATE core.usuario SET clave_hash = $1 WHERE id = $2', [hashClave(parseo.data.clave), id]);
     await q('UPDATE core.refresh_token SET revocado_en = now() WHERE usuario_id = $1 AND revocado_en IS NULL', [id]);
@@ -224,8 +230,9 @@ export async function rutasAdmin(app: FastifyInstance) {
 
   /* ------------------------------------------------------- períodos */
   app.get('/periodos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'periodos.cerrar')) return; // ventas netas por mes: no para cualquier sesión
     const filas = await q<Record<string, string>>(`
-      SELECT p.id, p.anio, p.mes, p.estado, p.cif_total, p.cerrado_en::text AS cerrado_en,
+      SELECT p.id, p.anio, p.mes, p.estado, p.cif_total, p.cif_estimado, p.tarifa_hora_horno, p.tarifa_kg_masa, p.tarifa_unidad, p.cerrado_en::text AS cerrado_en,
              (SELECT count(*) FROM core.venta v
                WHERE v.creado_en >= make_date(p.anio, p.mes, 1) AND v.creado_en < make_date(p.anio, p.mes, 1) + interval '1 month') AS ventas,
              (SELECT coalesce(sum(v.ventas_netas),0) FROM core.venta v
@@ -235,7 +242,8 @@ export async function rutasAdmin(app: FastifyInstance) {
       ORDER BY p.anio DESC, p.mes DESC`);
     return reply.send(filas.map((f) => ({
       id: f.id, anio: num(f.anio), mes: num(f.mes), estado: f.estado,
-      cifTotal: num(f.cif_total), cerradoEn: f.cerrado_en, ventas: num(f.ventas), netas: num(f.netas),
+      cifTotal: num(f.cif_total), cifEstimado: f.cif_estimado === null ? null : num(f.cif_estimado), cerradoEn: f.cerrado_en, ventas: num(f.ventas), netas: num(f.netas),
+      tarifas: { horaHorno: num(f.tarifa_hora_horno), kgMasa: num(f.tarifa_kg_masa), unidad: num(f.tarifa_unidad) },
     })));
   });
 
@@ -247,43 +255,29 @@ export async function rutasAdmin(app: FastifyInstance) {
     if (!exigir(req, reply, 'periodos.cerrar')) return;
     const { id } = req.params as { id: string };
 
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return reply.code(404).send(error(404, 'PERIODO_NO_EXISTE', 'El período no existe.'));
     try {
-      const res = await tx(async (c) => {
-        const r = await c.query<{ estado: string; anio: number; mes: number }>(
-          'SELECT estado, anio, mes FROM core.periodo_costos WHERE id = $1 FOR UPDATE', [id],
-        );
-        const p = r.rows[0];
-        if (!p) throw Object.assign(new Error('PERIODO_NO_EXISTE'), { status: 404 });
-        if (p.estado === 'CERRADO') throw Object.assign(new Error('PERIODO_YA_CERRADO'), { status: 409 });
-
-        const ventas = await c.query<{ netas: string; costo: string }>(
-          `SELECT coalesce(sum(ventas_netas),0) AS netas, coalesce(sum(costo_ventas),0) AS costo
-           FROM core.venta
-           WHERE estado = 'CONFIRMADA'
-             AND date_trunc('month', creado_en) = make_date($1, $2, 1)`,
-          [p.anio, p.mes],
-        );
-        const netas = num(ventas.rows[0]?.netas);
-        const costo = num(ventas.rows[0]?.costo);
-
-        await c.query(
-          `UPDATE core.periodo_costos SET estado = 'CERRADO', cerrado_en = now() WHERE id = $1`, [id],
-        );
-        return { id, anio: p.anio, mes: p.mes, estado: 'CERRADO', ventasNetas: netas, costo, margen: netas > 0 ? (netas - costo) / netas : 0 };
-      });
-
+      // RN-38 / COS-09: tarifas reales del mes (CIF registrado ÷ actividad producida), estimado vs real y estado CERRADO.
+      const p = await uno<Record<string, string>>('SELECT * FROM core.cerrar_periodo($1, $2)', [id, req.usuario!.id]);
+      const netas = num(p!.ventas_netas), costo = num(p!.costo_ventas);
+      const res = {
+        id, anio: num(p!.anio), mes: num(p!.mes), estado: 'CERRADO', ventasNetas: netas, costo, margen: netas > 0 ? (netas - costo) / netas : 0,
+        cifReal: num(p!.cif_total), cifEstimado: num(p!.cif_estimado),
+        tarifas: { horaHorno: num(p!.tarifa_hora_horno), kgMasa: num(p!.tarifa_kg_masa), unidad: num(p!.tarifa_unidad) },
+        actividad: { horasHorno: num(p!.horas_horno_mes), kgMasa: num(p!.kg_masa_mes), unidades: num(p!.unidades_mes) },
+      };
       await auditar({
         actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
         accion: 'PERIODO_CERRADO', entidad: 'periodo_costos', entidadId: id,
-        detalle: { anio: res.anio, mes: res.mes, margen: res.margen }, ip: req.ip,
+        detalle: { anio: res.anio, mes: res.mes, margen: res.margen, cifReal: res.cifReal, cifEstimado: res.cifEstimado, tarifas: res.tarifas }, ip: req.ip,
       });
       return reply.send(res);
     } catch (e) {
-      const err = e as Error & { status?: number };
-      // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
-      if (!err.status) throw e;
-      const status = err.status;
-      return reply.code(status).send(error(status, err.message, err.message));
+      const m = (e as Error).message;
+      if (m === 'PERIODO_NO_EXISTE') return reply.code(404).send(error(404, m, 'El período no existe.'));
+      if (m === 'PERIODO_YA_CERRADO') return reply.code(409).send(error(409, m, 'El período ya está cerrado.'));
+      if (m === 'PERIODO_ANTERIOR_ABIERTO') return reply.code(409).send(error(409, m, 'Primero cierra los meses anteriores.'));
+      throw e;
     }
   });
 

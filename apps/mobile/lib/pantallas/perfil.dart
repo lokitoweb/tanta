@@ -19,6 +19,7 @@ class Perfil extends StatefulWidget {
 
 class _PerfilState extends State<Perfil> {
   Map<String, dynamic>? _p;
+  String? _error;
   String _version = '';
   bool _ocupado = false;
 
@@ -32,9 +33,15 @@ class _PerfilState extends State<Perfil> {
   Future<void> _cargar() async {
     try {
       final p = await Api.instancia.perfil();
-      if (mounted) setState(() => _p = p);
+      if (mounted) setState(() { _p = p; _error = null; });
     } catch (e) {
-      _aviso('$e', error: true);
+      final texto = e is SinConexion ? 'Sin conexión. Intenta cuando vuelva la red.' : '$e';
+      // Sin perfil cargado se muestra el error con Reintentar; si ya había uno, basta el aviso.
+      if (_p == null) {
+        if (mounted) setState(() => _error = texto);
+      } else {
+        _aviso(texto, error: true);
+      }
     }
   }
 
@@ -88,16 +95,20 @@ class _PerfilState extends State<Perfil> {
     final nombre = TextEditingController(text: '${p['nombre']}');
     final email = TextEditingController(text: '${p['email'] ?? ''}');
     final tel = TextEditingController(text: '${p['telefono'] ?? ''}');
+    final clave = TextEditingController();
     final ok = await _dialogo('Mis datos', [
       TextField(controller: nombre, decoration: const InputDecoration(labelText: 'Nombre completo'), textCapitalization: TextCapitalization.words),
       const SizedBox(height: 12),
       TextField(controller: email, decoration: const InputDecoration(labelText: 'Correo'), keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email]),
       const SizedBox(height: 12),
       TextField(controller: tel, decoration: const InputDecoration(labelText: 'Teléfono'), keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber]),
+      const SizedBox(height: 12),
+      TextField(controller: clave, obscureText: true, autofillHints: const [AutofillHints.password],
+          decoration: const InputDecoration(labelText: 'Contraseña actual', helperText: 'Solo si cambias el correo')),
     ], 'Guardar');
     if (ok != true) return;
     await _accion(() async {
-      await Api.instancia.actualizarPerfil(nombre: nombre.text.trim(), email: email.text.trim(), telefono: tel.text.trim());
+      await Api.instancia.actualizarPerfil(nombre: nombre.text.trim(), email: email.text.trim(), telefono: tel.text.trim(), clave: clave.text);
       await _cargar();
     }, 'Datos actualizados');
   }
@@ -166,7 +177,19 @@ class _PerfilState extends State<Perfil> {
   @override
   Widget build(BuildContext context) {
     final p = _p;
-    if (p == null) return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    if (p == null) {
+      return RefreshIndicator(
+        onRefresh: _cargar,
+        child: ListView(children: [
+          // Cerrar sesión sigue a mano aunque el perfil no cargue.
+          if (_error != null) ...[
+            ErrorReintentar(mensaje: _error!, onReintentar: _cargar),
+            Center(child: TextButton.icon(onPressed: widget.onSalir, icon: const Icon(Icons.logout), label: const Text('Cerrar sesión'))),
+          ] else
+            const Esqueleto(filas: 4),
+        ]),
+      );
+    }
     final legal = (Api.instancia.config['legal'] as Map?) ?? const {};
     final foto = p['fotoUrl'] as String?;
 

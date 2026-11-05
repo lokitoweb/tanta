@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
-import { Boton, Encabezado, Insignia, Tarjeta } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, PilaEsqueleto, Tarjeta, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 
 const BASE = new Set(['SUPERADMIN', 'GERENTE', 'ADMINISTRADOR', 'PRODUCCION', 'ALMACEN', 'VENDEDOR', 'CLIENTE', 'SOPORTE']);
@@ -44,7 +44,10 @@ export function Roles() {
     setAsignados(new Set(d.asignados));
     setRolId((r) => r || d.roles.find((x) => x.id !== 'SUPERADMIN')?.id || '');
   };
-  useEffect(() => { void cargar(); }, []);
+  const [cargado, setCargado] = useState(false);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const cargaInicial = () => { setCargaError(null); cargar().then(() => setCargado(true)).catch((e) => setCargaError(e instanceof Error ? e.message : 'No se pudo cargar.')); };
+  useEffect(cargaInicial, []);
 
   const grupos = useMemo(() => {
     const m = new Map<string, Permiso[]>();
@@ -97,6 +100,13 @@ export function Roles() {
       </Dialogo>
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
 
+      {cargaError ? <Tarjeta><Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={cargaInicial} /></Tarjeta>
+        : !cargado ? (
+          <div className="grid grid--12">
+            <Tarjeta className="col-4"><PilaEsqueleto lineas={6} /></Tarjeta>
+            <Tarjeta className="col-8"><PilaEsqueleto lineas={8} /></Tarjeta>
+          </div>
+        ) : (
       <div className="grid grid--12">
         <Tarjeta className="col-4" padding="none">
           <div className="card__head card__head--padded"><div><h3 className="card__title">Roles</h3><p className="card__sub">{roles.length} perfiles</p></div></div>
@@ -134,6 +144,7 @@ export function Roles() {
           </div>
         </Tarjeta>
       </div>
+      )}
     </>
   );
 }

@@ -3,6 +3,7 @@ import '../core/api.dart';
 import '../core/catalogos.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
+import '../ui/comunes.dart';
 
 /// Carrito del cliente (PED-02): compartido por el catálogo, "Mis pedidos" (Repetir) y la confirmación.
 /// productoId → cantidad. Vive mientras la app está abierta.
@@ -46,7 +47,9 @@ class _CatalogoState extends State<Catalogo> {
   String _buscar = '';
 
   List<Map<String, dynamic>> get _productos => (widget.datos['productos'] as List? ?? const [])
-      .cast<Map<String, dynamic>>().where((p) => p['estado'] == null || p['estado'] == 'ACTIVO').toList();
+      .cast<Map<String, dynamic>>()
+      // Los intermedios (masa madre) no se venden.
+      .where((p) => (p['estado'] == null || p['estado'] == 'ACTIVO') && p['insumoId'] == null).toList();
 
   /// A05: detalle con selector de cantidad.
   Future<void> _detalle(Map<String, dynamic> p) async {
@@ -127,7 +130,9 @@ class _CatalogoState extends State<Catalogo> {
           ),
           Expanded(
             child: filtrados.isEmpty
-                ? const Center(child: Text('No hay panes con ese nombre'))
+                ? SingleChildScrollView(child: productos.isEmpty
+                    ? const VacioMensaje('Todavía no hay panes a la venta. Vuelve más tarde.', icono: Icons.bakery_dining_outlined)
+                    : VacioMensaje(_buscar.trim().isEmpty ? 'No hay panes en esta categoría' : 'No hay panes con ese nombre', icono: Icons.search_off))
                 : GridView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
                     gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 230, mainAxisSpacing: 14, crossAxisSpacing: 14, childAspectRatio: 0.78),
@@ -269,7 +274,9 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   DateTime _fecha = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _hora = const TimeOfDay(hour: 9, minute: 0);
   String _tipo = 'RECOJO';
-  String _pago = 'EFECTIVO';
+  // El primer medio de pago contra entrega habilitado; si no queda ninguno sin crédito, el primero de ventas.
+  String _pago = '${(_mediosEntrega.firstOrNull ?? mediosPago('enVentas').first)['codigo']}';
+  static List<Map<String, dynamic>> get _mediosEntrega => mediosPago('enVentas').where((m) => m['esCredito'] != true).toList();
   final _dir = TextEditingController();
   final _obs = TextEditingController();
   bool _enviando = false;
@@ -350,7 +357,7 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
         const SizedBox(height: 8),
         Wrap(spacing: 8, children: [
           // Medios de ventas del catálogo; el crédito no es pago contra entrega.
-          for (final m in mediosPago('enVentas').where((m) => m['esCredito'] != true))
+          for (final m in _mediosEntrega)
             ChoiceChip(label: Text('${m['nombre']}'), selected: _pago == m['codigo'], onSelected: (_) => setState(() => _pago = '${m['codigo']}')),
         ]),
         const SizedBox(height: 16),
@@ -375,6 +382,9 @@ class _Producto extends StatelessWidget {
   final VoidCallback onAgregar;
   final VoidCallback onAbrir;
 
+  Widget _inicial() => Text('${p['nombre']}'.substring(0, 1),
+      style: const TextStyle(fontFamily: 'Fraunces', fontSize: 44, fontWeight: FontWeight.w600, color: Color(0x552E1F18)));
+
   @override
   Widget build(BuildContext context) {
     return InkWell(
@@ -389,8 +399,10 @@ class _Producto extends StatelessWidget {
               width: double.infinity,
               decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFE8D9C3), Color(0xFFD8C0A0)])),
               alignment: Alignment.center,
-              child: Text('${p['nombre']}'.substring(0, 1),
-                  style: const TextStyle(fontFamily: 'Fraunces', fontSize: 44, fontWeight: FontWeight.w600, color: Color(0x552E1F18))),
+              child: p['imagenUrl'] != null
+                  ? Image.network('${Api.base}${p['imagenUrl']}', fit: BoxFit.cover, width: double.infinity, height: double.infinity,
+                      errorBuilder: (_, __, ___) => _inicial())
+                  : _inicial(),
             ),
           ),
           Padding(

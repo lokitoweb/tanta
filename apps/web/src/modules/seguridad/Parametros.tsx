@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
-import { Boton, Encabezado, Insignia, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
 
 interface Parametro { clave: string; valor: string; tipo: string; descripcion: string }
@@ -15,22 +15,24 @@ const ETIQUETAS: Record<string, string> = {
 
 export function Parametros() {
   const { refrescarDatos } = useApp();
-  const [filas, setFilas] = useState<Parametro[]>([]);
+  // null = cargando (esqueleto).
+  const [lista, setFilas] = useState<Parametro[] | null>(null);
+  const filas = lista ?? [];
   const [editando, setEditando] = useState<string | null>(null);
   const [valor, setValor] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
-  const [cargando, setCargando] = useState(true);
 
   const cargar = async () => {
     try {
       setFilas(await api<Parametro[]>('/parametros'));
+      setCargaError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron cargar los parámetros.');
-    } finally {
-      setCargando(false);
+      setCargaError(e instanceof Error ? e.message : 'No se pudieron cargar los parámetros.');
     }
   };
+  const recargar = () => { setCargaError(null); setFilas(null); void cargar(); };
 
   useEffect(() => { void cargar(); }, []);
 
@@ -78,12 +80,13 @@ export function Parametros() {
               <h3 className="card__title">Valores vigentes</h3>
               <p className="card__sub">{filas.length} parámetros · el IGV se aplica a toda venta nueva</p>
             </div>
-            <Boton variant="ghost" icono="sync" onClick={() => void cargar()}>Recargar</Boton>
+            <Boton variant="ghost" icono="sync" onClick={recargar}>Recargar</Boton>
           </div>
 
-          {cargando ? (
-            <div className="tabla-cargando">Cargando parámetros…</div>
-          ) : (
+          {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={recargar} />
+            : lista === null ? <TablaEsqueleto filas={4} columnas={4} />
+            : filas.length === 0 ? <Vacio titulo="Sin parámetros" icono="settings" />
+            : (
             <div className="table-wrap">
               <table className="table">
                 <thead>
@@ -174,10 +177,12 @@ export function Parametros() {
 
 /** MAE-14: series de nota de venta y recibo. Una serie nueva reemplaza a la activa; los números nunca se reutilizan. */
 function Series() {
-  const [series, setSeries] = useState<Array<{ tipo: string; serie: string; correlativoActual: number; activo: boolean }>>([]);
+  // null = cargando (esqueleto).
+  const [series, setSeries] = useState<Array<{ tipo: string; serie: string; correlativoActual: number; activo: boolean }> | null>(null);
   const [nueva, setNueva] = useState({ tipo: 'NOTA_VENTA', serie: '' });
   const [mensaje, setMensaje] = useState('');
-  const cargar = () => api<typeof series>('/series').then(setSeries).catch((e) => setMensaje(e.message));
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const cargar = () => api<NonNullable<typeof series>>('/series').then((s) => { setSeries(s); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => { void cargar(); }, []);
   const crear = async () => {
     try { await api('/series', { method: 'POST', body: nueva }); setMensaje(`Serie ${nueva.serie.toUpperCase()} activa.`); setNueva({ ...nueva, serie: '' }); await cargar(); }
@@ -186,11 +191,13 @@ function Series() {
   return (
     <Tarjeta>
       <TarjetaTitulo titulo="Series de comprobantes" subtitulo="Nota de venta y recibo de cobranza · correlativo único" />
-      <div className="table-wrap"><table className="table table--compacta">
+      {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setSeries(null); void cargar(); }} />
+        : series === null ? <TablaEsqueleto filas={2} columnas={4} />
+        : <div className="table-wrap"><table className="table table--compacta">
         <thead><tr><th>Tipo</th><th>Serie</th><th className="t-right">Último número</th><th>Estado</th></tr></thead>
         <tbody>{series.map((s) => <tr key={s.tipo + s.serie}><td>{s.tipo === 'RECIBO' ? 'Recibo' : 'Nota de venta'}</td><td>{s.serie}</td><td className="t-right">{s.correlativoActual}</td>
           <td><Insignia tono={s.activo ? 'ok' : 'neutral'} punto>{s.activo ? 'Activa' : 'Histórica'}</Insignia></td></tr>)}</tbody>
-      </table></div>
+      </table></div>}
       <div className="form form--2col">
         <label className="field"><span className="field__label">Tipo</span>
           <select className="field__input" value={nueva.tipo} onChange={(e) => setNueva({ ...nueva, tipo: e.target.value })}><option value="NOTA_VENTA">Nota de venta</option><option value="RECIBO">Recibo</option></select></label>

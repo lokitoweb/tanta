@@ -4,6 +4,7 @@ import '../core/catalogos.dart';
 import 'catalogo.dart';
 import '../core/tokens.dart';
 import '../core/comprobante.dart';
+import '../ui/comunes.dart';
 
 /// Acciones de registro del PDF §3.2–3.3 que se hacen desde el teléfono o la tablet:
 /// venta a terceros (vendedor), baja de inventario (almacén) y orden de producción.
@@ -23,7 +24,8 @@ class NuevaVenta extends StatefulWidget {
 
 class _NuevaVentaState extends State<NuevaVenta> {
   final Map<String, int> _cant = {};
-  String _forma = 'EFECTIVO';
+  // El primer medio habilitado: si el admin desactiva uno, el desplegable no queda con un valor inexistente.
+  String _forma = '${mediosPago('enVentas').first['codigo']}';
   String? _cliente;
   final _descuento = TextEditingController(text: '0');
   final _referencia = TextEditingController();
@@ -332,9 +334,14 @@ class _RequisicionesState extends State<Requisiciones> {
     ));
     if (ok != true || !mounted) return;
     final aviso = ScaffoldMessenger.of(context);
+    final cantidades = {for (final l in lineas) l['insumoId']: double.tryParse(ctrls[l['insumoId']]!.text.trim().replaceAll(',', '.'))};
+    if (cantidades.values.any((c) => c == null || c < 0) || cantidades.values.every((c) => c == 0)) {
+      aviso.showSnackBar(const SnackBar(content: Text('Revisa las cantidades: deben ser números y al menos una mayor que cero')));
+      return;
+    }
     try {
       final res = await Api.instancia.atenderRequisicion('${r['codigo']}', [
-        for (final l in lineas) {'insumoId': l['insumoId'], 'cantidad': double.tryParse(ctrls[l['insumoId']]!.text.replaceAll(',', '.')) ?? 0},
+        for (final e in cantidades.entries) {'insumoId': e.key, 'cantidad': e.value},
       ]);
       aviso.showSnackBar(SnackBar(content: Text('${r['codigo']}: ${res['estado'] == 'ATENDIDA' ? 'atendida' : 'atendida en parte'}')));
       _cargar();
@@ -351,11 +358,11 @@ class _RequisicionesState extends State<Requisiciones> {
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: _error != null
-            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            ? ListView(children: [ErrorReintentar(mensaje: _error!, onReintentar: _cargar)])
             : _lista == null
-                ? const Center(child: CircularProgressIndicator())
+                ? ListView(children: const [Esqueleto()])
                 : lista.isEmpty
-                    ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('Sin requisiciones por atender'))])
+                    ? ListView(children: const [VacioMensaje('Sin requisiciones por atender', icono: Icons.assignment_turned_in_outlined)])
                     : ListView.separated(
                         itemCount: lista.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
@@ -396,7 +403,9 @@ class _LineaCompra {
 class _NuevaCompraState extends State<NuevaCompra> {
   List<Map<String, dynamic>> _proveedores = const [];
   String? _proveedor;
-  String _docTipo = 'FACTURA';
+  String? _errorProveedores;
+  // El primer tipo del catálogo (tiposDocumento() nunca viene vacío): no se fija 'FACTURA' por si el admin lo desactiva.
+  String _docTipo = '${tiposDocumento().first['codigo']}';
   final _serie = TextEditingController();
   final _docNumero = TextEditingController();
   final _lineas = [_LineaCompra()];
@@ -405,10 +414,18 @@ class _NuevaCompraState extends State<NuevaCompra> {
   @override
   void initState() {
     super.initState();
-    Api.instancia.proveedores().then((l) {
+    _cargarProveedores();
+  }
+
+  Future<void> _cargarProveedores() async {
+    if (_errorProveedores != null) setState(() => _errorProveedores = null);
+    try {
+      final l = await Api.instancia.proveedores();
       final activos = l.cast<Map<String, dynamic>>().where((p) => p['estado'] == 'ACTIVO').toList();
       if (mounted) setState(() { _proveedores = activos; _proveedor = activos.isEmpty ? null : '${activos.first['id']}'; });
-    }).catchError((_) {});
+    } catch (e) {
+      if (mounted) setState(() => _errorProveedores = 'No se pudieron cargar los proveedores. ${_mensaje(e)}');
+    }
   }
 
   double get _total => _lineas.fold(0, (s, l) => s + l.c * l.p);
@@ -457,7 +474,10 @@ class _NuevaCompraState extends State<NuevaCompra> {
     return Scaffold(
       appBar: AppBar(title: const Text('Registrar compra')),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 120), children: [
-        DropdownButtonFormField<String>(
+        if (_errorProveedores != null) ErrorReintentar(mensaje: _errorProveedores!, onReintentar: _cargarProveedores)
+        else DropdownButtonFormField<String>(
+          // La lista llega después del primer build: la clave rehace el campo con el proveedor elegido.
+          key: ValueKey(_proveedores.length),
           initialValue: _proveedor, isExpanded: true,
           decoration: const InputDecoration(labelText: 'Proveedor'),
           items: [for (final p in _proveedores) DropdownMenuItem(value: '${p['id']}', child: Text('${p['razonSocial']}', overflow: TextOverflow.ellipsis))],
@@ -581,9 +601,14 @@ class _VerificarComprasState extends State<VerificarCompras> {
     ));
     if (ok != true || !mounted) return;
     final aviso = ScaffoldMessenger.of(context);
+    final contadas = {for (final i in items) i['item'] as int: double.tryParse(cant[i['item']]!.text.trim().replaceAll(',', '.'))};
+    if (contadas.values.any((v) => v == null || v < 0)) {
+      aviso.showSnackBar(const SnackBar(content: Text('Revisa las cantidades contadas: deben ser números de 0 en adelante')));
+      return;
+    }
     try {
       final r = await Api.instancia.verificarCompra('${c['codigo']}', [
-        for (final i in items) {'item': i['item'], 'cantidadVerificada': double.tryParse(cant[i['item']]!.text.replaceAll(',', '.')) ?? -1, 'observacion': obs[i['item']]!.text.trim()},
+        for (final i in items) {'item': i['item'], 'cantidadVerificada': contadas[i['item']], 'observacion': obs[i['item']]!.text.trim()},
       ]);
       aviso.showSnackBar(SnackBar(content: Text(r['estado'] == 'VERIFICADA'
           ? '${c['codigo']} verificada: el stock ya ingresó'
@@ -602,11 +627,11 @@ class _VerificarComprasState extends State<VerificarCompras> {
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: _error != null
-            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            ? ListView(children: [ErrorReintentar(mensaje: _error!, onReintentar: _cargar)])
             : _compras == null
-                ? const Center(child: CircularProgressIndicator())
+                ? ListView(children: const [Esqueleto()])
                 : lista.isEmpty
-                    ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('No hay compras por verificar'))])
+                    ? ListView(children: const [VacioMensaje('No hay compras por verificar', icono: Icons.fact_check_outlined)])
                     : ListView.separated(
                         itemCount: lista.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
@@ -678,8 +703,8 @@ class _CajaChicaState extends State<CajaChica> {
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: ListView(padding: const EdgeInsets.all(16), children: [
-          if (_error != null) Text(_error!)
-          else if (_datos == null) const Center(child: CircularProgressIndicator())
+          if (_error != null) ErrorReintentar(mensaje: _error!, onReintentar: _cargar)
+          else if (_datos == null) const Esqueleto(filas: 3)
           else if (a == null) ...[
             const Text('No hay caja chica abierta. Sin ella, Administración solo paga desde caja grande.'),
             const SizedBox(height: 12),
@@ -762,9 +787,9 @@ class _EstadoCuentaState extends State<EstadoCuenta> {
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: _error != null
-            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            ? ListView(children: [ErrorReintentar(mensaje: _error!, onReintentar: _cargar)])
             : ec == null
-                ? const Center(child: CircularProgressIndicator())
+                ? ListView(children: const [Esqueleto(filas: 4)])
                 : ListView(padding: const EdgeInsets.all(16), children: [
                     Text('Saldo ${dinero((ec['saldo'] as num).toDouble())}', style: Theme.of(context).textTheme.headlineSmall),
                     Text('Vencido ${dinero((ec['vencido'] as num).toDouble())}'),
@@ -891,11 +916,11 @@ class _ConteosState extends State<Conteos> {
       body: RefreshIndicator(
         onRefresh: _cargar,
         child: _error != null
-            ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(_error!))])
+            ? ListView(children: [ErrorReintentar(mensaje: _error!, onReintentar: _cargar)])
             : _conteos == null
-                ? const Center(child: CircularProgressIndicator())
+                ? ListView(children: const [Esqueleto()])
                 : lista.isEmpty
-                    ? ListView(children: const [Padding(padding: EdgeInsets.all(24), child: Text('Sin conteos registrados'))])
+                    ? ListView(children: const [VacioMensaje('Sin conteos registrados', icono: Icons.fact_check_outlined)])
                     : ListView.separated(
                         itemCount: lista.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
@@ -929,9 +954,15 @@ const _etiquetaPedido = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmad
 
 class _MisPedidosState extends State<MisPedidos> {
   List<dynamic>? _lista;
+  String? _error;
 
   Future<void> _cargar() async {
-    try { final l = await Api.instancia.misPedidos(); if (mounted) setState(() => _lista = l); } catch (_) { if (mounted) setState(() => _lista = const []); }
+    try {
+      final l = await Api.instancia.misPedidos();
+      if (mounted) setState(() { _lista = l; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _mensaje(e));
+    }
   }
 
   @override
@@ -1012,7 +1043,7 @@ class _MisPedidosState extends State<MisPedidos> {
   Widget _lista_(List<Map<String, dynamic>> l, String vacio) => RefreshIndicator(
     onRefresh: _cargar,
     child: l.isEmpty
-        ? ListView(children: [Padding(padding: const EdgeInsets.all(24), child: Text(vacio))])
+        ? ListView(children: [VacioMensaje(vacio, icono: Icons.receipt_long_outlined)])
         : ListView.separated(
             itemCount: l.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
@@ -1036,8 +1067,11 @@ class _MisPedidosState extends State<MisPedidos> {
       length: 3,
       child: Scaffold(
         appBar: AppBar(title: const Text('Mis pedidos'), bottom: const TabBar(tabs: [Tab(text: 'En curso'), Tab(text: 'Entregados'), Tab(text: 'Cancelados')])),
-        body: _lista == null
-            ? const Center(child: CircularProgressIndicator())
+        // Un error ya no se muestra como "sin pedidos": se ofrece reintentar.
+        body: _error != null
+            ? RefreshIndicator(onRefresh: _cargar, child: ListView(children: [ErrorReintentar(mensaje: _error!, onReintentar: _cargar)]))
+            : _lista == null
+            ? const Esqueleto()
             : TabBarView(children: [
                 _lista_(l.where((p) => en(p, ['REGISTRADO', 'CONFIRMADO', 'EN_PRODUCCION', 'LISTO', 'DESPACHADO'])).toList(), 'No tienes pedidos en curso'),
                 _lista_(l.where((p) => en(p, ['ENTREGADO'])).toList(), 'Aún no tienes pedidos entregados'),

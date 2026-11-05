@@ -4,7 +4,7 @@ import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
-import { Boton, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import type { Insumo } from '@/core/types';
 
 interface Proveedor { id: string; razonSocial: string; ruc: string; estado: string }
@@ -37,7 +37,10 @@ const u = (x: string) => x.toLowerCase();
  */
 export function Compras() {
   const { dataset, puede, refrescarDatos } = useApp();
-  const [compras, setCompras] = useState<Compra[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay compras.
+  const [lista, setLista] = useState<Compra[] | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const compras = lista ?? [];
   const [filtro, setFiltro] = useState<Estado | 'todas'>('todas');
   const [proveedores, setProveedores] = useState<Proveedor[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -49,10 +52,11 @@ export function Compras() {
 
   const registra = puede('compras.registrar');
   const docs = useCatalogos().tiposDocumento;
-  const cargar = () => api<Compra[]>('/compras').then(setCompras).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
+  const cargar = () => api<Compra[]>('/compras').then((c) => { setLista(c); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => {
     void cargar();
-    if (registra) api<Proveedor[]>('/proveedores').then((p) => setProveedores(p.filter((x) => x.estado === 'ACTIVO'))).catch(() => {});
+    if (registra) api<Proveedor[]>('/proveedores').then((p) => setProveedores(p.filter((x) => x.estado === 'ACTIVO')))
+      .catch((e) => setAviso({ tono: 'danger', texto: `No se pudieron cargar los proveedores: ${e.message}` }));
   }, []);
 
   const insumos = useMemo(() => dataset.insumos.filter((i) => (i as Insumo & { activo?: boolean }).activo !== false), [dataset.insumos]);
@@ -235,7 +239,9 @@ export function Compras() {
       </Dialogo>
 
       <Tarjeta padding="none">
-        {!filas.length ? <Vacio titulo="Sin compras en este estado" icono="sack" /> : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setLista(null); void cargar(); }} />
+          : lista === null ? <TablaEsqueleto columnas={7} />
+          : !filas.length ? <Vacio titulo="Sin compras en este estado" icono="sack" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Código</th><th>Fecha</th><th>Proveedor</th><th>Documento</th><th className="t-right">Insumos</th><th className="t-right">Total</th><th>Estado</th></tr></thead>
             <tbody>{filas.map((c) => (

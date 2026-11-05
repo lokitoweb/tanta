@@ -4,6 +4,7 @@ import { money } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
 import { NuevoPedido } from '@/modules/ventas/NuevoPedido';
+import { urlApi } from '@/core/api';
 
 export function Catalogo() {
   const { dataset, puede, refrescarDatos } = useApp();
@@ -13,7 +14,7 @@ export function Catalogo() {
   const [registrado, setRegistrado] = useState<string | null>(null);
 
   const productos = dataset.categorias.flatMap((c) =>
-    dataset.productos.filter((p) => p.categoriaId === c.id && p.estado === 'ACTIVO').map((p) => ({ ...p, categoria: c.nombre })),
+    dataset.productos.filter((p) => p.categoriaId === c.id && p.estado === 'ACTIVO' && !p.insumoId).map((p) => ({ ...p, categoria: c.nombre })),
   );
 
   const lista = cat === 'todas' ? productos : productos.filter((p) => p.categoriaId === cat);
@@ -47,7 +48,7 @@ export function Catalogo() {
         {lista.map((p) => (
           <article className="prod" key={p.id}>
             <div className={`prod__tile prod__tile--${p.categoriaId}`}>
-              <span className="prod__inicial">{p.nombre.charAt(0)}</span>
+              {p.imagenUrl ? <img className="prod__img" src={urlApi(p.imagenUrl)} alt={p.nombre} loading="lazy" /> : <span className="prod__inicial">{p.nombre.charAt(0)}</span>}
               <Insignia tono="neutral">{p.categoria}</Insignia>
             </div>
             <div className="prod__body">

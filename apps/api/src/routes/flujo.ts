@@ -87,11 +87,11 @@ export async function rutasFlujo(app: FastifyInstance) {
         const cli = (await c.query<{ nombre: string; estado: string; limite_credito: string; deuda: string; condicion_pago: string }>(
           `SELECT c.nombre, c.estado, c.limite_credito, c.condicion_pago,
                   coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) deuda
-           FROM core.cliente c WHERE c.id = $1`, [clienteId])).rows[0];
+           FROM core.cliente c WHERE c.id = $1 FOR UPDATE`, [clienteId])).rows[0];
         if (!cli || cli.estado !== 'ACTIVO') throw Object.assign(new Error('El cliente no existe o está inactivo.'), { status: 422 });
         const ids = [...new Set(d.items.map((i) => i.productoId))];
         const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; anticipacion_horas: number }>(
-          "SELECT id, nombre, precio_con_igv, anticipacion_horas FROM core.producto WHERE id = ANY($1::uuid[]) AND estado = 'ACTIVO'", [ids]);
+          "SELECT id, nombre, precio_con_igv, anticipacion_horas FROM core.producto WHERE id = ANY($1::uuid[]) AND estado = 'ACTIVO' AND insumo_id IS NULL", [ids]);
         if (prods.rowCount !== ids.length) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
         const mapa = new Map(prods.rows.map((x) => [x.id, x]));
         const total = d.items.reduce((s, i) => s + num(mapa.get(i.productoId)!.precio_con_igv) * i.cantidad, 0);
@@ -105,7 +105,8 @@ export async function rutasFlujo(app: FastifyInstance) {
         if (pago.es_credito && cli.condicion_pago !== 'CREDITO') throw Object.assign(new Error('Tu cuenta compra al contado: elige cómo pagarás al recibir.'), { status: 422 });
         // PED-04 / RN-35: con línea de crédito, el pedido no puede superar el saldo disponible.
         // Solo si paga al crédito: un pedido contra entrega no consume línea.
-        if (pago.es_credito && num(cli.limite_credito) > 0 && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
+        if (pago.es_credito && num(cli.limite_credito) <= 0) throw Object.assign(new Error('Tu cuenta no tiene línea de crédito definida: elige cómo pagarás al recibir.'), { status: 409 });
+        if (pago.es_credito && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
           throw Object.assign(new Error(`Supera la línea de crédito: debe S/ ${num(cli.deuda).toFixed(2)} de S/ ${num(cli.limite_credito).toFixed(2)}.`), { status: 409 });
         }
         // PED-09: el pedido que registra el vendedor ya queda confirmado; el del cliente espera confirmación (PED-08).

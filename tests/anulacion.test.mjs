@@ -18,8 +18,8 @@ const productoConStock = () => sql("SELECT id FROM core.producto WHERE stock >= 
 // Cliente propio con crédito sin límite: no depende de la deuda que traigan los datos de ejemplo.
 // (Dentro de un WITH: psql no agrega la línea "INSERT 0 1" a la salida.)
 const clientePrueba = () => sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago)
-  VALUES ('CLI-ANUL', 'Cliente prueba anulación', 30, 0, 'CREDITO')
-  ON CONFLICT (codigo) DO UPDATE SET limite_credito = 0, condicion_pago = 'CREDITO' RETURNING id) SELECT id FROM c`);
+  VALUES ('CLI-ANUL', 'Cliente prueba anulación', 30, 100000, 'CREDITO')
+  ON CONFLICT (codigo) DO UPDATE SET limite_credito = 100000, condicion_pago = 'CREDITO' RETURNING id) SELECT id FROM c`);
 const stock = (id) => Number(sql(`SELECT stock FROM core.producto WHERE id = '${id}'`));
 
 test('anular una venta al crédito devuelve el stock y cancela la deuda', async () => {

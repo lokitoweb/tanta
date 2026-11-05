@@ -3,7 +3,7 @@ import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { money, moneyShort, num, pct } from '@/core/format';
 import { AreaSerie, BarrasH, Dona } from '@/ui/charts';
-import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Esqueleto, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 import { BarraFiltros, aQuery, rango, useEnVivo, type Filtros } from '@/ui/Filtros';
 import { TablaReporte, type ColRep } from '@/ui/TablaReporte';
@@ -29,10 +29,11 @@ export function Dashboard() {
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [lista, setLista] = useState<'top' | 'bottom'>('top');
 
-  const hace = useEnVivo(async () => {
+  const cargar = async () => {
     try { setD(await api<Datos>(`/dashboard${aQuery(filtros)}`)); setError(null); }
     catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cargar.'); }
-  }, [JSON.stringify(filtros)], 30);
+  };
+  const hace = useEnVivo(cargar, [JSON.stringify(filtros)], 30);
 
   const abrirFicha = async (nombre: string) => {
     const op = await api<{ productos: Array<{ id: string; nombre: string }> }>('/reportes-filtros');
@@ -40,8 +41,18 @@ export function Dashboard() {
     if (id) setFicha(await api<Ficha>(`/reportes/M-01?producto=${id}`));
   };
 
-  if (error && !d) return <Vacio titulo="No se pudo cargar el dashboard" detalle={error} icono="chart" />;
-  if (!d) return <div className="tabla-cargando">Calculando indicadores…</div>;
+  if (error && !d) return <Vacio titulo="No se pudo cargar el dashboard" detalle={error} icono="chart" onReintentar={() => { setError(null); void cargar(); }} />;
+  // Mientras calcula: la misma grilla de KPI y gráficos, en gris.
+  if (!d) return (
+    <>
+      <Encabezado titulo="Costos, rentabilidad y márgenes" descripcion="Calculando indicadores…" />
+      <div className="grid grid--auto" aria-busy="true">{[0, 1, 2, 3].map((i) => <Esqueleto key={i} variante="kpi" />)}</div>
+      <div className="grid grid--12" aria-busy="true">
+        <div className="col-8"><Esqueleto variante="bloque" /></div>
+        <div className="col-4"><Esqueleto variante="bloque" /></div>
+      </div>
+    </>
+  );
 
   const k = Object.fromEntries(d.kpis.map((x) => [x.indicador, x]));
   const delta = (x?: { variacion: number }, esPuntos = false) => x && ({

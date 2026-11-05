@@ -17,7 +17,7 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
   inicial?: ItemPedido[]; elegirCliente: boolean; onCerrar: (codigo?: string) => void;
 }) {
   const { dataset } = useApp();
-  const productos = dataset.productos.filter((p) => p.estado === 'ACTIVO');
+  const productos = dataset.productos.filter((p) => p.estado === 'ACTIVO' && !p.insumoId); // los intermedios no se venden
   const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
   const [clienteId, setClienteId] = useState('');
   const [items, setItems] = useState<Array<{ productoId: string; cantidad: string }>>(
@@ -31,7 +31,7 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
   const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
-    if (elegirCliente) api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => { setClientes(r.clientes); setClienteId(r.clientes[0]?.id ?? ''); }).catch(() => {});
+    if (elegirCliente) api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => { setClientes(r.clientes); setClienteId(r.clientes[0]?.id ?? ''); }).catch((e) => setError(`No se pudieron cargar los clientes: ${e.message}`));
   }, [elegirCliente]);
 
   const precio = (id: string) => productos.find((p) => p.id === id)?.precioConIgv ?? 0;

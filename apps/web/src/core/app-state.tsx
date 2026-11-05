@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, borrarAcceso, leerAcceso, logout as logoutApi, refrescar } from './api';
+import { api, ApiError, borrarAcceso, leerAcceso, logout as logoutApi, refrescar } from './api';
 import type { Dataset, NavGrupo, Rol } from './types';
 import { Acceso } from '@/modules/auth/Acceso';
+import { Boton } from '@/ui/primitives';
 
 interface Yo {
   usuario: { id: string; nombre: string; fotoUrl?: string | null };
@@ -29,6 +30,7 @@ const Ctx = createContext<Estado | null>(null);
 type Fase =
   | { tipo: 'cargando' }
   | { tipo: 'sin-sesion' }
+  | { tipo: 'error'; mensaje: string }
   | { tipo: 'listo'; yo: Yo; dataset: Dataset };
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -59,15 +61,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setFase({ tipo: 'sin-sesion' });
       return;
     }
+    setFase({ tipo: 'cargando' });
     try {
       const [yo, dataset] = await Promise.all([
         api<Yo>('/auth/yo'),
         api<Dataset>('/datos'),
       ]);
       setFase({ tipo: 'listo', yo, dataset });
-    } catch {
-      borrarAcceso();
-      setFase({ tipo: 'sin-sesion' });
+    } catch (e) {
+      // Solo una sesión rechazada lleva al login; una caída de red o del servidor se reintenta.
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        borrarAcceso();
+        setFase({ tipo: 'sin-sesion' });
+      } else {
+        setFase({ tipo: 'error', mensaje: e instanceof ApiError ? e.message : 'Revisa tu conexión a internet.' });
+      }
     }
   }, []);
 
@@ -117,6 +125,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           <span className="brandmark__pill">PAN DE CASA</span>
         </div>
         <p>Conectando con el sistema…</p>
+      </div>
+    );
+  }
+
+  if (fase.tipo === 'error') {
+    return (
+      <div className="arranque" role="alert">
+        <div className="arranque__marca">
+          <span className="brandmark__word">TANTA</span>
+          <span className="brandmark__pill">PAN DE CASA</span>
+        </div>
+        <p>No se pudo conectar con el sistema · {fase.mensaje}</p>
+        <Boton variant="primary" onClick={() => void cargar()}>Reintentar</Boton>
       </div>
     );
   }

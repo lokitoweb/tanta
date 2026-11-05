@@ -4,7 +4,7 @@ import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
-import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 
 interface Pago { codigo: string; fecha: string; caja: string; medio: string; monto: number; nroOperacion: string | null; estado: string; autoriza: string; motivoAnulacion: string | null; apertura: string | null }
 interface Deuda { codigo: string; estadoPago: 'PENDIENTE' | 'PARCIAL' | 'PAGADO'; documento: string; fecha: string; vencePago: string | null; dias: number | null;
@@ -19,7 +19,10 @@ const TONO = { PENDIENTE: 'warn', PARCIAL: 'info', PAGADO: 'ok' } as const;
  */
 export function Deudas() {
   const { puede } = useApp();
-  const [deudas, setDeudas] = useState<Deuda[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay deudas.
+  const [lista, setLista] = useState<Deuda[] | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const deudas = lista ?? [];
   const [filtro, setFiltro] = useState<'abiertas' | 'PAGADO'>('abiertas');
   const [caja, setCaja] = useState<Caja | null>(null);
   const [ver, setVer] = useState<Deuda | null>(null);
@@ -32,10 +35,13 @@ export function Deudas() {
   const mediosCaja = (caja: string) => medios.filter((m) => caja !== 'CHICA' || m.cajaChica);
 
   const cargar = async () => {
-    const l = await api<Deuda[]>('/deudas-compra').catch((e) => { setAviso({ tono: 'danger', texto: e.message }); return [] as Deuda[]; });
-    setDeudas(l);
+    if (paga) api<{ abierta: Caja | null }>('/cajas/chica').then((r) => setCaja(r.abierta))
+      .catch((e) => { setCaja(null); setAviso({ tono: 'danger', texto: `No se pudo leer la caja chica: ${e.message}` }); });
+    const l = await api<Deuda[]>('/deudas-compra').catch((e) => { setCargaError(e.message); return null; });
+    if (!l) return;
+    setLista(l);
+    setCargaError(null);
     setVer((v) => (v ? l.find((x) => x.codigo === v.codigo) ?? null : v));
-    if (paga) api<{ abierta: Caja | null }>('/cajas/chica').then((r) => setCaja(r.abierta)).catch(() => setCaja(null));
   };
   useEffect(() => { void cargar(); }, []);
 
@@ -94,7 +100,7 @@ export function Deudas() {
         acciones={ver && (pago
           ? <><Boton onClick={() => setPago(null)}>Volver</Boton><Boton variant="primary" disabled={!!errorPago || ocupado} onClick={() => void registrar()}>{ocupado ? 'Registrando…' : `Pagar ${money(monto || 0)}`}</Boton></>
           : anular ? <><Boton onClick={() => setAnular(null)}>Volver</Boton><Boton variant="primary" disabled={anular.motivo.trim().length < 5 || ocupado} onClick={() => void anularPago()}>Anular pago</Boton></>
-            : <>{paga && ver.saldo > 0 && <Boton variant="primary" onClick={() => setPago({ caja: 'GRANDE', medio: 'TRANSFERENCIA', monto: ver.saldo.toFixed(2), nroOperacion: '' })}>Registrar pago</Boton>}
+            : <>{paga && ver.saldo > 0 && <Boton variant="primary" onClick={() => setPago({ caja: 'GRANDE', medio: mediosCaja('GRANDE')[0]?.codigo ?? '', monto: ver.saldo.toFixed(2), nroOperacion: '' })}>Registrar pago</Boton>}
               <Boton onClick={() => setVer(null)}>Cerrar</Boton></>)}>
         {ver && (<>
           <p className="dialogo__nota">Total {money(ver.total)} · pagado {money(ver.pagado)} · <b>saldo {money(ver.saldo)}</b></p>
@@ -136,7 +142,9 @@ export function Deudas() {
       </Dialogo>
 
       <Tarjeta padding="none">
-        {!filas.length ? <Vacio titulo={filtro === 'PAGADO' ? 'Aún no hay compras pagadas' : 'No hay deudas por pagar'} icono="wallet" /> : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setLista(null); void cargar(); }} />
+          : lista === null ? <TablaEsqueleto columnas={7} />
+          : !filas.length ? <Vacio titulo={filtro === 'PAGADO' ? 'Aún no hay compras pagadas' : 'No hay deudas por pagar'} icono="wallet" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Compra</th><th>Proveedor</th><th>Documento</th><th>Vence</th><th className="t-right">Total</th><th className="t-right">Saldo</th><th>Estado</th></tr></thead>
             <tbody>{filas.map((d) => (

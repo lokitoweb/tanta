@@ -169,14 +169,42 @@ export function Encabezado({ titulo, descripcion, acciones }: { titulo: string; 
 
 /* ---------- Vacío ---------- */
 
-export function Vacio({ titulo, detalle, icono = 'box' }: { titulo: string; detalle?: string; icono?: NombreIcono }) {
+export function Vacio({ titulo, detalle, icono = 'box', onReintentar }: { titulo: string; detalle?: string; icono?: NombreIcono; onReintentar?: () => void }) {
   return (
-    <div className="empty">
+    <div className="empty" role={onReintentar ? 'alert' : undefined}>
       <div className="empty__icon"><Icon name={icono} size={22} /></div>
       <p className="empty__title">{titulo}</p>
       {detalle && <p className="empty__text">{detalle}</p>}
+      {onReintentar && <div className="empty__accion"><Boton onClick={onReintentar}>Reintentar</Boton></div>}
     </div>
   );
+}
+
+/* ---------- Esqueletos de carga ---------- */
+
+/** Bloque gris animado con la forma del contenido que viene (texto, título, KPI o bloque). */
+export function Esqueleto({ variante = 'texto', ancho }: { variante?: 'texto' | 'titulo' | 'kpi' | 'bloque'; ancho?: string | number }) {
+  return <span className={'esq esq--' + variante} style={ancho !== undefined ? { width: ancho } : undefined} aria-hidden="true" />;
+}
+
+/** Tabla de carga: misma grilla que la real, con anchos variados para que se lea natural. */
+export function TablaEsqueleto({ filas = 6, columnas = 5 }: { filas?: number; columnas?: number }) {
+  const anchos = ['70%', '55%', '85%', '40%', '62%'];
+  return (
+    <div className="table-wrap" aria-busy="true" aria-label="Cargando">
+      <table className="table esq-tabla">
+        <thead><tr>{Array.from({ length: columnas }, (_, i) => <th key={i}><Esqueleto ancho="50%" /></th>)}</tr></thead>
+        <tbody>{Array.from({ length: filas }, (_, f) => (
+          <tr key={f}>{Array.from({ length: columnas }, (_, c) => <td key={c}><Esqueleto ancho={anchos[(f + c) % anchos.length]} /></td>)}</tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Pila de líneas para tarjetas y formularios que cargan. */
+export function PilaEsqueleto({ lineas = 4 }: { lineas?: number }) {
+  return <div className="esq-pila" aria-busy="true" aria-label="Cargando">{Array.from({ length: lineas }, (_, i) => <Esqueleto key={i} ancho={i === 0 ? '45%' : ['90%', '75%', '82%'][i % 3]} />)}</div>;
 }
 
 /* ---------- Avatar ---------- */

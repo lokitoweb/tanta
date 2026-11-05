@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
+import { guardarImagen } from './sistema.js';
+import { invalidar } from '../cache.js';
 
 /**
  * Maestros administrables (PDF §3.3): categorías, productos, insumos, recetas,
@@ -17,6 +19,22 @@ const pct = z.number().min(0).max(0.95);
 function invalido(reply: FastifyReply, e: z.ZodError) {
   const i = e.issues[0];
   return reply.code(422).send(error(422, 'DATOS_INVALIDOS', i ? `${i.path.join('.') || 'dato'}: ${i.message}` : 'Datos inválidos.'));
+}
+
+/** Imagen del producto: data URL nueva = se guarda y reemplaza; null = se quita; la URL actual o nada = sin cambio. */
+export const ImagenProducto = z.string().max(1_500_000).nullable().optional();
+export async function aplicarImagen(productoId: string, imagen: string | null | undefined, usuarioId: string): Promise<void> {
+  if (imagen === undefined || (imagen !== null && !imagen.startsWith('data:'))) return;
+  const nueva = imagen === null ? null : await guardarImagen(imagen, usuarioId);
+  const previa = await uno<{ imagen_id: string | null }>('SELECT imagen_id FROM core.producto WHERE id = $1', [productoId]);
+  await q('UPDATE core.producto SET imagen_id = $2 WHERE id = $1', [productoId, nueva]);
+  if (previa?.imagen_id) await q('DELETE FROM core.archivo WHERE id = $1', [previa.imagen_id]);
+}
+/** Error de imagen (415/413) con su código; cualquier otro sigue su curso. */
+export function falloImagen(reply: FastifyReply, e: unknown) {
+  const x = e as { status?: number; codigo?: string; message: string };
+  if (!x.status) throw e;
+  return reply.code(x.status).send(error(x.status, x.codigo ?? 'IMAGEN_INVALIDA', x.message));
 }
 
 export async function rutasMaestros(app: FastifyInstance) {
@@ -52,13 +70,16 @@ export async function rutasMaestros(app: FastifyInstance) {
   // Datos de producción de la hoja 'pan' (MAE-03): con ellos el motor calcula unidades, MO y CIF.
   const Producto = z.object({
     nombre: texto(2, 120), categoriaId: texto(1, 40), unidad: z.string().trim().toUpperCase().max(20),
-    precioConIgv: z.number().positive().max(100_000), estado: z.enum(['ACTIVO', 'INACTIVO']),
+    precioConIgv: z.number().min(0).max(100_000), estado: z.enum(['ACTIVO', 'INACTIVO']),
     pesoMasaG: z.number().positive().max(100_000).nullable().optional(),
     anticipacionHoras: z.number().int().min(0).max(720).nullable().optional(),
     perdidaCoccion: pct.nullable().optional(), horasHombreLote: z.number().min(0).max(100).nullable().optional(), horasHornoLote: z.number().min(0).max(100).nullable().optional(),
+    imagenUrl: ImagenProducto,
+    // MAE-06: insumo que produce este producto (sub-receta). "" o null = producto de venta normal.
+    insumoId: z.union([z.literal(''), z.string().uuid()]).nullable().optional(),
   });
 
-  app.patch('/productos/:id', { preHandler: autenticar }, async (req, reply) => {
+  app.patch('/productos/:id', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     if (!exigir(req, reply, 'maestros.editar')) return;
     const { id } = req.params as { id: string };
     const p = Producto.safeParse(req.body);
@@ -68,20 +89,37 @@ export async function rutasMaestros(app: FastifyInstance) {
     if (!(await uno('SELECT 1 FROM core.unidad_medida WHERE codigo = $1 AND activo', [p.data.unidad]))) return reply.code(422).send(error(422, 'UNIDAD_INVALIDA', `La unidad ${p.data.unidad} no existe o está inactiva.`));
     if (!antes) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El producto no existe.'));
     if (!(await uno('SELECT 1 FROM core.categoria WHERE id = $1', [p.data.categoriaId]))) return reply.code(422).send(error(422, 'CATEGORIA_INEXISTENTE', 'La categoría no existe.'));
+    const insumoId = p.data.insumoId === undefined ? undefined : (p.data.insumoId || null);
+    if (insumoId) {
+      // La unidad del intermedio debe ser la del stock del insumo: 1 unidad producida = 1 unidad de inventario.
+      const ins = await uno<{ unidad_inventario: string; nombre: string }>('SELECT unidad_inventario, nombre FROM core.insumo WHERE id = $1', [insumoId]);
+      if (!ins) return reply.code(422).send(error(422, 'INSUMO_INEXISTENTE', 'El insumo no existe.'));
+      if (ins.unidad_inventario !== p.data.unidad) return reply.code(422).send(error(422, 'UNIDAD_DISTINTA', `El producto debe venderse en ${ins.unidad_inventario}, la unidad de stock de «${ins.nombre}».`));
+      if (await uno('SELECT 1 FROM core.producto WHERE insumo_id = $1 AND id <> $2', [insumoId, id])) return reply.code(409).send(error(409, 'INSUMO_YA_PRODUCIDO', 'Otro producto ya produce ese insumo.'));
+      if (await uno('SELECT 1 FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE r.producto_id = $1 AND d.insumo_id = $2', [id, insumoId])) return reply.code(422).send(error(422, 'CICLO', 'La receta de este producto usa ese mismo insumo.'));
+    }
+    // Solo un intermedio (no se vende) puede quedar sin precio.
+    const intermedio = insumoId !== undefined ? insumoId !== null : Boolean(await uno('SELECT 1 FROM core.producto WHERE id = $1 AND insumo_id IS NOT NULL', [id]));
+    if (!intermedio && p.data.precioConIgv <= 0) return reply.code(422).send(error(422, 'PRECIO_INVALIDO', 'precioConIgv: el precio debe ser mayor que cero.'));
+    // La imagen primero: si es inválida (415/413) no se guarda nada a medias.
+    try { await aplicarImagen(id, p.data.imagenUrl, req.usuario!.id); } catch (e) { return falloImagen(reply, e); }
     await tx(async (c) => {
       await c.query(`UPDATE core.producto SET nombre=$2, categoria_id=$3, unidad=$4, precio_con_igv=$5, estado=$6,
           peso_masa_g = CASE WHEN $7::boolean THEN $8::numeric ELSE peso_masa_g END,
           perdida_coccion = coalesce($9::numeric, perdida_coccion),
           horas_hombre_lote = coalesce($10::numeric, horas_hombre_lote), horas_horno_lote = coalesce($11::numeric, horas_horno_lote),
-          anticipacion_horas = coalesce($12::int, anticipacion_horas)
+          anticipacion_horas = coalesce($12::int, anticipacion_horas),
+          insumo_id = CASE WHEN $13::boolean THEN $14::uuid ELSE insumo_id END
         WHERE id=$1`,
         [id, p.data.nombre, p.data.categoriaId, p.data.unidad, p.data.precioConIgv.toFixed(4), p.data.estado,
-          p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, p.data.perdidaCoccion ?? null, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null, p.data.anticipacionHoras ?? null]);
+          p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, p.data.perdidaCoccion ?? null, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null, p.data.anticipacionHoras ?? null, insumoId !== undefined, insumoId ?? null]);
       await c.query('SELECT core.recalcular_costos()');
     });
+    invalidar('cat:'); // el catálogo (web y app) ve el cambio al instante, no tras el TTL
+    const { imagenUrl: _imagen, ...cambios } = p.data;
     await auditar({ ...actor(req), accion: 'PRODUCTO_EDITADO', entidad: 'producto', entidadId: id,
-      detalle: { antes: { nombre: antes.nombre, precio: num(antes.precio_con_igv), estado: antes.estado }, despues: p.data }, ip: req.ip });
-    return { id, ...p.data };
+      detalle: { antes: { nombre: antes.nombre, precio: num(antes.precio_con_igv), estado: antes.estado }, despues: cambios }, ip: req.ip });
+    return { id, ...cambios };
   });
 
   /* --------------------------------------------------------------- insumos */
@@ -138,6 +176,92 @@ export async function rutasMaestros(app: FastifyInstance) {
         u.densidad, u.unidadInventario, u.factor]);
     await auditar({ ...actor(req), accion: 'INSUMO_CREADO', entidad: 'insumo', entidadId: f!.id, detalle: p.data, ip: req.ip });
     return reply.code(201).send({ ...f, ...p.data });
+  });
+
+  /**
+   * MAE-02 / RN-40: carga masiva de insumos desde la plantilla (Lista_de_Insumos). Cada fila se valida
+   * igual que el alta individual; las filas con error vuelven con su motivo y NO impiden cargar las
+   * válidas. No se duplican insumos: un nombre que ya existe se informa y se salta.
+   */
+  app.post('/insumos/importar', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
+    if (!editaInsumos(req, reply)) return;
+    const filas = z.object({ filas: z.array(z.record(z.string(), z.unknown())).min(1).max(1000) }).safeParse(req.body);
+    if (!filas.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Envía entre 1 y 1000 filas.'));
+    const creados: Array<{ fila: number; codigo: string; nombre: string }> = [];
+    const errores: Array<{ fila: number; nombre: string; motivo: string }> = [];
+    const vistos = new Set<string>();
+    for (const [i, crudo] of filas.data.filas.entries()) {
+      const fila = i + 2; // fila 1 = encabezados de la plantilla
+      const nombre = String(crudo.nombre ?? '').trim();
+      const p = Insumo.safeParse(crudo);
+      if (!p.success) { const x = p.error.issues[0]; errores.push({ fila, nombre, motivo: `${x?.path.join('.') || 'dato'}: ${x?.message}` }); continue; }
+      const clave = p.data.nombre.toLowerCase();
+      if (vistos.has(clave) || await uno('SELECT 1 FROM core.insumo WHERE lower(nombre) = $1', [clave])) { errores.push({ fila, nombre, motivo: 'Ya existe un insumo con ese nombre.' }); continue; }
+      const u = await unidades(p.data);
+      if ('error' in u) { errores.push({ fila, nombre, motivo: u.error }); continue; }
+      const f = await uno<{ id: string; codigo: string }>(
+        `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, unidad_inventario)
+         VALUES ('INS-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.insumo WHERE codigo ~ '^INS-[0-9]+$')::text, 3, '0'),
+                 $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11) RETURNING id, codigo`,
+        [p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, costoReferencia(p.data),
+          u.densidad, u.unidadInventario, u.factor]);
+      vistos.add(clave);
+      creados.push({ fila, codigo: f!.codigo, nombre: p.data.nombre });
+    }
+    if (creados.length) invalidar('cat:');
+    await auditar({ ...actor(req), accion: 'INSUMOS_IMPORTADOS', entidad: 'insumo', detalle: { creados: creados.length, errores: errores.length }, ip: req.ip });
+    return { creados, errores };
+  });
+
+  /**
+   * AIN-09 / RN-40: inventario inicial valorizado de insumos y productos terminados. Cada ítem genera un
+   * movimiento «Saldo inicial» (APERTURA) que fija stock y costo. Solo para ítems SIN movimientos: después
+   * el stock se mueve con compras, producción, ventas y conteos (no se reescribe el kárdex).
+   */
+  app.post('/inventario/inicial', { preHandler: autenticar, bodyLimit: 1_000_000 }, async (req, reply) => {
+    const p0 = req.usuario!.permisos;
+    if (!p0.has('maestros.editar') && !p0.has('inventario.mover')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso inventario.mover.'));
+    const Fila = z.object({
+      tipo: z.enum(['INSUMO', 'PRODUCTO']), codigo: z.string().trim().min(1).max(40),
+      cantidad: z.number().positive().max(10_000_000), costoUnitario: z.number().min(0).max(1_000_000),
+      lote: z.string().trim().max(40).optional(), venceEn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    });
+    const cuerpo = z.object({ filas: z.array(z.unknown()).min(1).max(1000) }).safeParse(req.body);
+    if (!cuerpo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Envía entre 1 y 1000 filas.'));
+    const aplicados: Array<{ fila: number; codigo: string }> = [];
+    const errores: Array<{ fila: number; codigo: string; motivo: string }> = [];
+    for (const [i, crudo] of cuerpo.data.filas.entries()) {
+      const fila = i + 2;
+      const p = Fila.safeParse(crudo);
+      const codigo = String((crudo as { codigo?: unknown })?.codigo ?? '');
+      if (!p.success) { const x = p.error.issues[0]; errores.push({ fila, codigo, motivo: `${x?.path.join('.') || 'dato'}: ${x?.message}` }); continue; }
+      const d = p.data;
+      try {
+        await tx(async (c) => {
+          const esInsumo = d.tipo === 'INSUMO';
+          const it = (await c.query<{ id: string }>(
+            esInsumo ? 'SELECT id FROM core.insumo WHERE upper(codigo) = upper($1) FOR UPDATE' : 'SELECT id FROM core.producto WHERE upper(codigo) = upper($1) FOR UPDATE', [d.codigo])).rows[0];
+          if (!it) throw Object.assign(new Error(`No existe el ${esInsumo ? 'insumo' : 'producto'} ${d.codigo}.`), { status: 422 });
+          const conMov = (await c.query(`SELECT 1 FROM core.movimiento_inventario WHERE ${esInsumo ? 'insumo_id' : 'producto_id'} = $1 LIMIT 1`, [it.id])).rowCount;
+          if (conMov) throw Object.assign(new Error('Ya tiene movimientos: el saldo inicial solo se carga una vez (usa un conteo para ajustar).'), { status: 409 });
+          const valor = d.cantidad * d.costoUnitario;
+          await c.query(`INSERT INTO core.movimiento_inventario
+              (tipo,item_tipo,${esInsumo ? 'insumo_id' : 'producto_id'},documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por,lote,vence_en)
+            VALUES ('APERTURA',$1,$2,'Saldo inicial',$3,$4,$5,$3,$5,$4,$6,$7,$8)`,
+            [d.tipo, it.id, d.cantidad.toFixed(6), d.costoUnitario.toFixed(6), valor.toFixed(4), req.usuario!.id, d.lote ?? null, d.venceEn ?? null]);
+          if (esInsumo) await c.query('UPDATE core.insumo SET stock = $2, cpp = $3, actualizado_en = now() WHERE id = $1', [it.id, d.cantidad.toFixed(6), d.costoUnitario.toFixed(6)]);
+          else await c.query('UPDATE core.producto SET stock = $2 WHERE id = $1', [it.id, d.cantidad.toFixed(6)]);
+        });
+        aplicados.push({ fila, codigo: d.codigo });
+      } catch (e) {
+        const x = e as Error & { status?: number };
+        if (!x.status) throw e;
+        errores.push({ fila, codigo: d.codigo, motivo: x.message });
+      }
+    }
+    if (aplicados.length) { await q('SELECT core.recalcular_costos()'); invalidar('cat:'); }
+    await auditar({ ...actor(req), accion: 'INVENTARIO_INICIAL', entidad: 'inventario', detalle: { aplicados: aplicados.length, errores: errores.length }, ip: req.ip });
+    return { aplicados, errores };
   });
 
   app.patch('/insumos/:id', { preHandler: autenticar }, async (req, reply) => {

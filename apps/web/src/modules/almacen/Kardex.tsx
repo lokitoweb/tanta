@@ -4,7 +4,7 @@ import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
 import { money, num, num2 } from '@/core/format';
-import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio, Buscador } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio, Buscador } from '@/ui/primitives';
 
 interface Mov { fecha: string; tipo: string; documento: string; almacen?: string; lote?: string; vence?: string; cantidad: number; costoUnitario?: number; valor?: number; saldoCantidad: number; saldoValor?: number; cpp?: number }
 
@@ -27,11 +27,13 @@ export function Kardex() {
   const item = items.find((i) => i.codigo === codigo);
   const valoriza = puede('costos.ver') || puede('inventario.mover');
 
-  useEffect(() => {
+  const cargar = () => {
     if (!codigo) return;
     setMovs(null);
-    api<Mov[]>(`/kardex/${encodeURIComponent(codigo)}`).then((m) => { setMovs(m); setError(null); }).catch((e) => setError(e.message));
-  }, [codigo, dataset.movimientos]);
+    setError(null);
+    api<Mov[]>(`/kardex/${encodeURIComponent(codigo)}`).then(setMovs).catch((e) => setError(e.message));
+  };
+  useEffect(cargar, [codigo, dataset.movimientos]);
 
   // Buscador de ítem (escribe nombre o código) y de asientos, con paginación de 50.
   const etiqueta = (i: { nombre: string; codigo: string }) => `${i.nombre} (${i.codigo})`;
@@ -72,8 +74,8 @@ export function Kardex() {
       </div>
 
       <Tarjeta padding="none">
-        {error ? <Vacio titulo="No se pudo cargar" detalle={error} icono="ledger" />
-          : movs === null ? <div className="tabla-cargando">Cargando movimientos…</div>
+        {error ? <Vacio titulo="No se pudo cargar" detalle={error} icono="ledger" onReintentar={cargar} />
+          : movs === null ? <TablaEsqueleto columnas={6} />
             : movs.length === 0 ? <Vacio titulo="Sin movimientos" detalle="Este ítem aún no tiene asientos en el kárdex." icono="ledger" />
               : (
                 <>

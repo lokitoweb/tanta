@@ -15,7 +15,7 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
 
 const prod = () => sql('SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1');
 // Cliente propio por prueba: no depende de la deuda de los datos de ejemplo.
-const cliente = (cond = 'CREDITO', limite = 0) => sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago)
+const cliente = (cond = 'CREDITO', limite = 100000) => sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago)
   VALUES ('T-${randomUUID().slice(0, 8)}', 'Cliente prueba ventas', 30, ${limite}, '${cond}') RETURNING id) SELECT id FROM c`);
 // Documento por cobrar directo, con vencimiento a "dias" atrás.
 const deuda = (cli, monto, dias = 0) => sql(`WITH x AS (INSERT INTO core.cuenta_por_cobrar (cliente_id, monto, saldo, estado, vence_en)

@@ -12,7 +12,7 @@ import { rutasAdmin } from './routes/admin.js';
 import { rutasSistema } from './routes/sistema.js';
 import { rutasMaestros } from './routes/maestros.js';
 import { rutasReportes } from './routes/reportes.js';
-import { rutasCobranza } from './routes/cobranza.js';
+import { rutasCobranza, despacharAlertasCobranza } from './routes/cobranza.js';
 import { rutasAlmacen, rutasAlmacenes, rutasLotes, despacharAlertasStock, despacharAlertasVencimiento } from './routes/almacen.js';
 import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
 import { rutasCompras } from './routes/compras.js';
@@ -159,7 +159,12 @@ try {
     despacharAlertasStock().catch((e) => app.log.error(e, 'alertas de stock'));
     despacharAlertasVencimiento().catch((e) => app.log.error(e, 'alertas de vencimiento'));
     despacharAvisosPago().catch((e) => app.log.error(e, 'avisos de pago'));
+    despacharAlertasCobranza().catch((e) => app.log.error(e, 'alertas de cobranza'));
   }, 15_000).unref();
+  // COS-09: el motor crea el período del mes en curso y actualiza tarifas aunque nadie edite nada (cambio de mes).
+  const motor = () => pool.query('SELECT core.recalcular_costos()').then(() => invalidar('cat:')).catch((e) => app.log.error(e, 'motor de costos'));
+  void motor();
+  setInterval(motor, 3_600_000).unref();
   // PED-05 / CP-36: los avisos de cada estado del pedido salen en segundos (meta del Excel: menos de 30 s).
   setInterval(() => { despacharAvisosPedido().catch((e) => app.log.error(e, 'avisos de pedido')); }, 5_000).unref();
   app.log.info(`Tanta Core en http://127.0.0.1:${PUERTO}/api/v1`);

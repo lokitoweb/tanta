@@ -15,6 +15,7 @@ class OperacionPendiente {
     required this.clave,
     required this.creada,
     this.descripcion = '',
+    this.usuario = '',
   });
 
   final String id;
@@ -27,6 +28,9 @@ class OperacionPendiente {
   final DateTime creada;
   final String descripcion;
 
+  /// Usuario que la registró: solo se envía con su sesión (otro usuario del mismo equipo no la firma).
+  final String usuario;
+
   Map<String, dynamic> aJson() => {
         'id': id,
         'tipo': tipo,
@@ -34,6 +38,7 @@ class OperacionPendiente {
         'clave': clave,
         'creada': creada.toIso8601String(),
         'descripcion': descripcion,
+        'usuario': usuario,
       };
 
   factory OperacionPendiente.desdeJson(Map<String, dynamic> j) => OperacionPendiente(
@@ -43,6 +48,7 @@ class OperacionPendiente {
         clave: j['clave'] as String,
         creada: DateTime.tryParse('${j['creada']}') ?? DateTime.now(),
         descripcion: '${j['descripcion'] ?? ''}',
+        usuario: '${j['usuario'] ?? ''}',
       );
 }
 
@@ -110,6 +116,7 @@ class ColaOffline {
       clave: clave ?? _nuevoId(),
       creada: DateTime.now(),
       descripcion: descripcion,
+      usuario: Api.instancia.usuarioId,
     );
     _items.add(op);
     await _guardar();
@@ -136,7 +143,8 @@ class ColaOffline {
     final rechazos = <String>[];
 
     try {
-      for (final op in List<OperacionPendiente>.from(_items)) {
+      // Las de otro usuario esperan a que él vuelva a entrar en este equipo.
+      for (final op in _items.where((x) => x.usuario.isEmpty || x.usuario == api.usuarioId).toList()) {
         try {
           if (enviador != null) {
             await enviador(op);

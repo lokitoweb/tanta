@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
-import { Boton, Buscador, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 
 interface Evento { id: number; actor: string; rol: string; accion: string; entidad: string; entidadId: string | null; detalle: unknown; creadoEn: string }
@@ -10,7 +10,10 @@ const tono = (a: string) => /ELIMIN|BLOQUE|REUSO|FALL|ANUL/.test(a) ? 'danger' :
 
 /** Bitácora inmutable: quién hizo qué y cuándo. La cadena de hashes se puede verificar aquí. */
 export function Auditoria() {
-  const [eventos, setEventos] = useState<Evento[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay eventos.
+  const [eventos, setEventos] = useState<Evento[] | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const [verifError, setVerifError] = useState<string | null>(null);
   const [texto, setTexto] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
@@ -20,16 +23,21 @@ export function Auditoria() {
 
   const consulta = (antesDe?: number) => '?' + new URLSearchParams(Object.entries({ texto, desde, hasta, antesDe: antesDe ? String(antesDe) : '' }).filter(([, v]) => v)).toString();
   const cargar = async (mas = false) => {
-    const lote = await api<Evento[]>(`/auditoria${consulta(mas ? eventos.at(-1)?.id : undefined)}`);
-    setEventos((e) => (mas ? [...e, ...lote] : lote));
-    setHayMas(lote.length === 50);
+    try {
+      const lote = await api<Evento[]>(`/auditoria${consulta(mas ? eventos?.at(-1)?.id : undefined)}`);
+      setEventos((e) => (mas ? [...(e ?? []), ...lote] : lote));
+      setHayMas(lote.length === 50);
+      setCargaError(null);
+    } catch (e) { setCargaError(e instanceof Error ? e.message : 'No se pudo cargar.'); }
   };
+  const verificar = () => { setVerifError(null); api<Verificacion>('/auditoria/verificar').then(setVerif).catch((e) => { setVerif(null); setVerifError(e.message); }); };
   useEffect(() => { const t = setTimeout(() => void cargar(), 300); return () => clearTimeout(t); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [texto, desde, hasta]);
 
   return (
     <>
       <Encabezado titulo="Auditoría" descripcion="Cada acción sensible queda registrada y encadenada con hash: no se puede editar ni borrar."
-        acciones={<Boton icono="shield" onClick={() => void api<Verificacion>('/auditoria/verificar').then(setVerif)}>Verificar integridad</Boton>} />
+        acciones={<Boton icono="shield" onClick={verificar}>Verificar integridad</Boton>} />
+      {verifError && <div className="aviso aviso--danger" role="status"><span className="aviso__icono">!</span><div><p>No se pudo verificar: {verifError}</p></div></div>}
       {verif && (
         <div className={`aviso aviso--${verif.ok ? 'ok' : 'danger'}`} role="status">
           <span className="aviso__icono">{verif.ok ? '✓' : '!'}</span>
@@ -45,7 +53,9 @@ export function Auditoria() {
             <label className="filtros__campo"><span>Hasta</span><input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></label>
           </div>
         </div>
-        {eventos.length === 0 ? <Vacio titulo="Sin eventos" detalle="No hay registros con estos filtros." icono="ledger" /> : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setEventos(null); void cargar(); }} />
+          : eventos === null ? <TablaEsqueleto columnas={4} />
+          : eventos.length === 0 ? <Vacio titulo="Sin eventos" detalle="No hay registros con estos filtros." icono="ledger" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Registro</th></tr></thead>
             <tbody>{eventos.map((e) => (
@@ -57,7 +67,7 @@ export function Auditoria() {
               </tr>))}</tbody>
           </table></div>
         )}
-        {hayMas && <div className="form__acciones form__acciones--centro"><Boton onClick={() => void cargar(true)}>Cargar más</Boton></div>}
+        {hayMas && !cargaError && <div className="form__acciones form__acciones--centro"><Boton onClick={() => void cargar(true)}>Cargar más</Boton></div>}
       </Tarjeta>
       <Dialogo abierto={detalle !== null} titulo={detalle?.accion.replace(/_/g, ' ') ?? ''} descripcion={detalle ? `${detalle.actor} · ${detalle.creadoEn}` : ''}
         onCerrar={() => setDetalle(null)} acciones={<Boton variant="primary" onClick={() => setDetalle(null)}>Cerrar</Boton>}>

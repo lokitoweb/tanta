@@ -28,6 +28,8 @@ class Api {
   String? _acceso;
   String? _refresco;
   String nombre = '';
+  /// Dueño de la sesión: la cola offline solo envía con la sesión de quien registró la operación.
+  String usuarioId = '';
   String rol = '';
   List<String> permisos = const [];
   List<Map<String, dynamic>> menu = const [];
@@ -60,6 +62,7 @@ class Api {
     }
     _acceso = await _seguro.read(key: 'acceso');
     _refresco = await _seguro.read(key: 'refresco');
+    usuarioId = await _seguro.read(key: 'usuarioId') ?? '';
     // Migración única desde versiones que guardaban en SharedPreferences.
     final p = await SharedPreferences.getInstance();
     final viejo = p.getString('refresco');
@@ -81,12 +84,14 @@ class Api {
     _acceso = null;
     _refresco = null;
     nombre = '';
+    usuarioId = '';
     rol = '';
     permisos = const [];
     menu = const [];
     fotoUrl = null;
     await _seguro.delete(key: 'acceso');
     await _seguro.delete(key: 'refresco');
+    await _seguro.delete(key: 'usuarioId');
   }
 
   Map<String, String> _cabeceras({bool conCuerpo = false}) => {
@@ -220,6 +225,8 @@ class Api {
   Future<void> yo() async {
     final datos = await _get('/auth/yo') as Map<String, dynamic>;
     nombre = (datos['usuario'] as Map)['nombre'] as String;
+    usuarioId = '${(datos['usuario'] as Map)['id'] ?? ''}';
+    await _seguro.write(key: 'usuarioId', value: usuarioId);
     fotoUrl = (datos['usuario'] as Map)['fotoUrl'] as String?;
     rol = (datos['rol'] as Map)['nombre'] as String;
     permisos = (datos['permisos'] as List).cast<String>();
@@ -396,6 +403,8 @@ class Api {
     try {
       final r = await http.get(Uri.parse('$indicado/config/publica')).timeout(const Duration(seconds: 5));
       if (r.statusCode != 200) return;
+      // Las credenciales son del servidor anterior: no se envían al nuevo (se vuelve a ingresar).
+      if (_refresco != null || _acceso != null) await cerrarSesion();
       base = indicado;
       config = jsonDecode(r.body) as Map<String, dynamic>;
       await _seguro.write(key: 'servidor', value: indicado);
@@ -436,8 +445,8 @@ class Api {
 
   Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;
 
-  Future<void> actualizarPerfil({required String nombre, required String email, required String telefono}) async {
-    await _enviar('PATCH', '/perfil', {'nombre': nombre, 'email': email, 'telefono': telefono});
+  Future<void> actualizarPerfil({required String nombre, required String email, required String telefono, String? clave}) async {
+    await _enviar('PATCH', '/perfil', {'nombre': nombre, 'email': email, 'telefono': telefono, if (clave != null && clave.isNotEmpty) 'clave': clave});
     await yo();
   }
 

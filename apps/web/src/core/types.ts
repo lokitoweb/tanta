@@ -12,7 +12,9 @@ export interface Producto {
   id: string; codigo: string; nombre: string; categoriaId: string; unidad: string;
   precioConIgv: number; precioNeto: number; costoUnitario: number;
   margen: number; margenObjetivo: number; vendidos30d: number; stock: number;
-  mermaPct: number; estado: string;
+  mermaPct: number; estado: string; imagenUrl?: string | null;
+  /** Sub-receta: insumo que produce (masa madre). No se vende. */
+  insumoId?: string | null;
 }
 export interface Insumo {
   id: string; codigo?: string; nombre: string; unidad: string; cpp: number; stock: number;

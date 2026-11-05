@@ -52,6 +52,11 @@ android {
             // Google Play rechaza la llave de debug: sin key.properties solo sirve para probar localmente.
             signingConfig = if (propiedadesLlave.isNotEmpty()) signingConfigs.getByName("release")
                             else signingConfigs.getByName("debug")
+            // Que nunca pase en silencio: una APK firmada con la llave de debug no se puede actualizar
+            // luego con la llave real (los usuarios tendrían que desinstalar).
+            if (propiedadesLlave.isEmpty()) {
+                logger.warn("ATENCIÓN: android/key.properties no existe; el release se firma con la llave de DEBUG (solo para pruebas, no para Play Store ni para distribuir).")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
         }

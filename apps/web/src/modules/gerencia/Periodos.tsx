@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { money, pct } from '@/core/format';
-import { Boton, Encabezado, Insignia, Tarjeta } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 
 interface Periodo {
@@ -14,19 +14,19 @@ const MES = ['', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
 
 export function Periodos() {
   const { refrescarDatos } = useApp();
-  const [periodos, setPeriodos] = useState<Periodo[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay períodos.
+  const [periodos, setPeriodos] = useState<Periodo[] | null>(null);
   const [confirmar, setConfirmar] = useState<Periodo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
   const [trabajando, setTrabajando] = useState(false);
-  const [cargando, setCargando] = useState(true);
 
   const cargar = async () => {
     try {
       setPeriodos(await api<Periodo[]>('/periodos'));
+      setCargaError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron cargar los períodos.');
-    } finally {
-      setCargando(false);
+      setCargaError(e instanceof Error ? e.message : 'No se pudieron cargar los períodos.');
     }
   };
 
@@ -67,9 +67,10 @@ export function Periodos() {
           </div>
         </div>
 
-        {cargando ? (
-          <div className="tabla-cargando">Cargando períodos…</div>
-        ) : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setPeriodos(null); void cargar(); }} />
+          : periodos === null ? <TablaEsqueleto columnas={6} />
+          : periodos.length === 0 ? <Vacio titulo="Sin períodos" detalle="Aparecen cuando hay ventas registradas." icono="ledger" />
+          : (
           <div className="table-wrap">
             <table className="table">
               <thead>

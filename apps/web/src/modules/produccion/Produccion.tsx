@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { num, num2, pct } from '@/core/format';
-import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TarjetaTitulo, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Paginador, filtrarTexto, usePaginado } from '@/ui/Paginador';
 import { Dialogo } from '@/ui/Dialogo';
 import { Icon } from '@/ui/icons';
@@ -26,7 +26,10 @@ const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10
 export function Produccion() {
   const { dataset, puede, refrescarDatos } = useApp();
   const ops = dataset.ops;
-  const [consolidado, setConsolidado] = useState<Consolidado[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay pedidos pendientes.
+  const [consolidadoCargado, setConsolidado] = useState<Consolidado[] | null>(null);
+  const [consolidadoError, setConsolidadoError] = useState<string | null>(null);
+  const consolidado = consolidadoCargado ?? [];
   const [nueva, setNueva] = useState<{ productoId: string; cantidad: string; entrega: string; criterio: 'PROPORCIONAL' | 'LOTES_COMPLETOS' } | null>(null);
   const [req, setReq] = useState<Calculo | null>(null);
   const [cerrar, setCerrar] = useState<{ op: Op; buenas: string; merma: string; motivoTipo: string; motivo: string; horasHombre: string; horasHorno: string } | null>(null);
@@ -38,7 +41,7 @@ export function Produccion() {
   const [qOp, setQOp] = useState('');
   const pagOps = usePaginado(filtrarTexto(ops.filter((o) => o.estado === tabOp), qOp), 10);
 
-  const cargarConsolidado = () => api<Consolidado[]>('/produccion/consolidado').then(setConsolidado).catch(() => setConsolidado([]));
+  const cargarConsolidado = () => api<Consolidado[]>('/produccion/consolidado').then((c) => { setConsolidado(c); setConsolidadoError(null); }).catch((e) => setConsolidadoError(e.message));
   useEffect(() => { void cargarConsolidado(); }, [dataset.ops]);
 
   // Requerimiento de insumos en vivo al elegir producto y cantidad.
@@ -120,7 +123,9 @@ export function Produccion() {
 
       <Tarjeta padding="none">
         <div className="card__head card__head--padded"><TarjetaTitulo titulo="Pedidos consolidados" subtitulo="Lo que piden los clientes, por fecha de entrega, frente a lo ya planificado" /></div>
-        {consolidado.length === 0 ? <Vacio titulo="Sin pedidos pendientes" detalle="Los pedidos registrados aparecen aquí agrupados por producto." icono="clipboard" /> : (
+        {consolidadoError ? <Vacio titulo="No se pudo cargar" detalle={consolidadoError} onReintentar={() => { setConsolidadoError(null); setConsolidado(null); void cargarConsolidado(); }} />
+          : consolidadoCargado === null ? <TablaEsqueleto columnas={7} />
+          : consolidado.length === 0 ? <Vacio titulo="Sin pedidos pendientes" detalle="Los pedidos registrados aparecen aquí agrupados por producto." icono="clipboard" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Entrega</th><th>Producto</th><th className="t-right">Pedidos</th><th className="t-right">Pedido</th><th className="t-right">Planificado</th><th className="t-right">Stock</th><th className="t-right">Por planificar</th><th /></tr></thead>
             <tbody>{consolidado.map((c) => (

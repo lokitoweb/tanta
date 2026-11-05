@@ -5,7 +5,7 @@ import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { Dialogo } from '@/ui/Dialogo';
 import { useApp } from '@/core/app-state';
 import { money, num, pct } from '@/core/format';
-import { Boton, Encabezado, Insignia, Kpi, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Kpi, PilaEsqueleto, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Tabla, type Columna } from '@/ui/Tabla';
 import type { Cliente } from '@/core/types';
 
@@ -29,11 +29,13 @@ export function Cobranza() {
   const [cierre, setCierre] = useState<Cierre | null>(null);
   const [fecha, setFecha] = useState(hoy());
   const [estado, setEstado] = useState<EstadoCuenta | null>(null);
-  useEffect(() => { api<Cierre>(`/cobranza/cierre?fecha=${fecha}`).then(setCierre).catch(() => setCierre(null)); }, [fecha, dataset]);
+  const [cierreError, setCierreError] = useState<string | null>(null);
+  const cargarCierre = () => { setCierre(null); setCierreError(null); api<Cierre>(`/cobranza/cierre?fecha=${fecha}`).then(setCierre).catch((e) => setCierreError(e.message)); };
+  useEffect(cargarCierre, [fecha, dataset]);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
 
-  const abrirPago = (c = deudores[0]) => { setAviso(null); setPago({ clienteId: c?.id ?? '', monto: c ? c.saldo.toFixed(2) : '', medio: 'EFECTIVO', referencia: '' }); };
+  const abrirPago = (c = deudores[0]) => { setAviso(null); setPago({ clienteId: c?.id ?? '', monto: c ? c.saldo.toFixed(2) : '', medio: medios[0]?.codigo ?? '', referencia: '' }); };
   const cuenta = deudores.find((c) => c.id === pago?.clienteId);
   const conReferencia = pago !== null && !!medios.find((m) => m.codigo === pago.medio)?.requiereOperacion;
   const registrar = async () => {
@@ -152,7 +154,9 @@ export function Cobranza() {
         <Tarjeta className="col-12">
           <TarjetaTitulo titulo="Cierre del día" subtitulo={`COB-09 · cobrado ${money(cierre?.total ?? 0)} por forma de pago y vendedor`}
             accion={<input className="field__input" type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} />} />
-          {cierre?.lineas.length ? (<>
+          {cierreError ? <Vacio titulo="No se pudo cargar" detalle={cierreError} onReintentar={cargarCierre} />
+            : cierre === null ? <PilaEsqueleto lineas={3} />
+            : cierre.lineas.length ? (<>
             <p className="t-muted">{cierre.porMedio.map((m) => `${m.medio.toLowerCase()} ${money(m.monto)}`).join(' · ')}</p>
             <table className="table table--compacta"><thead><tr><th>Forma de pago</th><th>Vendedor</th><th className="t-right">Pagos</th><th className="t-right">Monto</th></tr></thead>
               <tbody>{cierre.lineas.map((l, i) => <tr key={i}><td>{l.medio.toLowerCase()}</td><td>{l.vendedor}</td><td className="t-right">{l.pagos}</td><td className="t-right">{money(l.monto)}</td></tr>)}</tbody></table>

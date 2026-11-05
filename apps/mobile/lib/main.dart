@@ -48,6 +48,8 @@ class _RaizState extends State<Raiz> {
   Map<String, dynamic>? _datos;
   EstadoVersion _version = const EstadoVersion();
   bool _cargando = true;
+  /// Sin red al abrir: la sesión (y la cola offline) se conservan; se ofrece reintentar.
+  String? _sinRed;
 
   /// Tras entrar: registra versión/dispositivo y pregunta si hay que actualizar.
   Future<void> _sesionLista(Map<String, dynamic> datos) async {
@@ -78,8 +80,15 @@ class _RaizState extends State<Raiz> {
       try {
         await Api.instancia.yo();
         await _sesionLista(await Api.instancia.datos());
-      } catch (_) {
-        await Api.instancia.cerrarSesion();
+      } on ApiException catch (e) {
+        // Solo una sesión rechazada (401/403) cierra la sesión; un 5xx no borra nada.
+        if (e.status == 401 || e.status == 403) {
+          await Api.instancia.cerrarSesion();
+        } else {
+          _sinRed = e.mensaje;
+        }
+      } catch (e) {
+        _sinRed = e is SinConexion ? 'No hay conexión con el servidor.' : 'No se pudo cargar la información.';
       }
     }
     if (mounted) setState(() => _cargando = false);
@@ -101,6 +110,32 @@ class _RaizState extends State<Raiz> {
                 child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.sand500),
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    if (_sinRed != null) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Marca(escala: 1.1),
+                const SizedBox(height: 22),
+                const Icon(Icons.wifi_off_rounded, size: 32, color: TantaColors.textMuted),
+                const SizedBox(height: 10),
+                Text(_sinRed!, textAlign: TextAlign.center, style: const TextStyle(color: TantaColors.textMuted)),
+                const SizedBox(height: 4),
+                const Text('Tu sesión y las operaciones pendientes siguen guardadas.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () { setState(() { _sinRed = null; _cargando = true; }); _arrancar(); },
+                  icon: const Icon(Icons.refresh_rounded), label: const Text('Reintentar'),
+                ),
+              ]),
+            ),
           ),
         ),
       );

@@ -4,9 +4,10 @@ import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
-import { emitirEvento } from './sistema.js';
+import { emitirEvento, guardarImagen } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
+import { falloImagen, ImagenProducto } from './maestros.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -39,20 +40,25 @@ export async function rutasOperaciones(app: FastifyInstance) {
     unidad: z.string().min(1).max(20).default('UNIDAD'),
     precioConIgv: z.number().min(0).max(100000),
     mermaPct: z.number().min(0).max(0.5).default(0.03),
+    imagenUrl: ImagenProducto,
   });
 
-  app.post('/productos', { preHandler: autenticar }, async (req, reply) => {
+  app.post('/productos', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     if (!exigir(req, reply, 'maestros.editar')) return;
     const parseo = NuevoProducto.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Datos inválidos.'));
 
-    const d = parseo.data;
+    const { imagenUrl, ...d } = parseo.data;
+    // La imagen se valida antes de crear el producto: un 415/413 no deja un producto sin foto que se duplica al reintentar.
+    let imagenId: string | null = null;
+    if (imagenUrl?.startsWith('data:')) try { imagenId = await guardarImagen(imagenUrl, req.usuario!.id); } catch (e) { return falloImagen(reply, e); }
     const fila = await uno<{ id: string }>(
-      `INSERT INTO core.producto (codigo, nombre, categoria_id, unidad, precio_con_igv, merma_pct)
-       VALUES ('P' || lpad((SELECT coalesce(max(substring(codigo from 2)::int), 0) + 1 FROM core.producto WHERE codigo ~ '^P[0-9]+$')::text, 3, '0'), $1,$2,$3,$4,$5)
+      `INSERT INTO core.producto (codigo, nombre, categoria_id, unidad, precio_con_igv, merma_pct, imagen_id)
+       VALUES ('P' || lpad((SELECT coalesce(max(substring(codigo from 2)::int), 0) + 1 FROM core.producto WHERE codigo ~ '^P[0-9]+$')::text, 3, '0'), $1,$2,$3,$4,$5,$6)
        RETURNING id`,
-      [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), d.mermaPct.toFixed(6)],
+      [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), d.mermaPct.toFixed(6), imagenId],
     );
+    invalidar('cat:');
     await auditar({
       actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
       accion: 'PRODUCTO_CREADO', entidad: 'producto', entidadId: fila?.id, detalle: d, ip: req.ip,
@@ -229,23 +235,40 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const costoTotal = costoInsumos + costoMo + costoCif;
 
           // ingreso del producto terminado al stock
-          const pr = await c.query<{ costo_unitario: string; stock: string }>(
-            'SELECT costo_unitario, stock FROM core.producto WHERE id = $1 FOR UPDATE', [op.producto_id],
+          const pr = await c.query<{ costo_unitario: string; stock: string; insumo_id: string | null }>(
+            'SELECT costo_unitario, stock, insumo_id FROM core.producto WHERE id = $1 FOR UPDATE', [op.producto_id],
           );
           // El pan entra al almacén a su costo real (costo de la OP ÷ unidades buenas); sin unidades, al estándar.
           const costoProd = cantidadProducida > 0 ? costoTotal / cantidadProducida : Number(pr.rows[0]?.costo_unitario ?? 0);
-          const stockProd = Number(pr.rows[0]?.stock ?? 0);
-          const nuevoStockProd = stockProd + cantidadProducida;
+          const insumoIntermedio = pr.rows[0]?.insumo_id ?? null;
 
-          await c.query(
-            `INSERT INTO core.movimiento_inventario
-               (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
-             VALUES ('INGRESO_PRODUCCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$8)`,
-            [op.producto_id, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6),
-              (cantidadProducida * costoProd).toFixed(4), nuevoStockProd.toFixed(6),
-              ((stockProd + cantidadProducida) * costoProd).toFixed(4), costoProd.toFixed(6)],
-          );
-          await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStockProd.toFixed(6), op.producto_id]);
+          if (insumoIntermedio) {
+            // PRO-13: un intermedio (masa madre) entra al almacén de INSUMOS con costo promedio ponderado.
+            const ins = (await c.query<{ stock: string; cpp: string }>('SELECT stock, cpp FROM core.insumo WHERE id = $1 FOR UPDATE', [insumoIntermedio])).rows[0];
+            const st = Math.max(0, Number(ins.stock)), cppAnt = Number(ins.cpp);
+            const nuevoStock = st + cantidadProducida;
+            const nuevoCpp = nuevoStock > 0 ? (st * cppAnt + cantidadProducida * costoProd) / nuevoStock : costoProd;
+            await c.query(
+              `INSERT INTO core.movimiento_inventario
+                 (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por)
+               VALUES ('INGRESO_PRODUCCION','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+              [insumoIntermedio, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6), (cantidadProducida * costoProd).toFixed(4),
+                nuevoStock.toFixed(6), (nuevoStock * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), req.usuario!.id],
+            );
+            await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3', [nuevoStock.toFixed(6), nuevoCpp.toFixed(6), insumoIntermedio]);
+          } else {
+            const stockProd = Number(pr.rows[0]?.stock ?? 0);
+            const nuevoStockProd = stockProd + cantidadProducida;
+            await c.query(
+              `INSERT INTO core.movimiento_inventario
+                 (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
+               VALUES ('INGRESO_PRODUCCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$8)`,
+              [op.producto_id, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6),
+                (cantidadProducida * costoProd).toFixed(4), nuevoStockProd.toFixed(6),
+                ((stockProd + cantidadProducida) * costoProd).toFixed(4), costoProd.toFixed(6)],
+            );
+            await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStockProd.toFixed(6), op.producto_id]);
+          }
 
           await c.query(
             `UPDATE core.orden_produccion
@@ -338,7 +361,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const ids = [...new Set(items.map((i) => i.productoId))].sort();
           const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; costo_unitario: string; stock: string; reservado: string }>(
             `SELECT id, nombre, precio_con_igv, costo_unitario, stock, reservado
-             FROM core.producto WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+             FROM core.producto WHERE id = ANY($1::uuid[]) AND insumo_id IS NULL ORDER BY id FOR UPDATE`, // los intermedios no se venden
             [ids],
           );
           const mapa = new Map(prods.rows.map((r) => [r.id, r]));
@@ -465,7 +488,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
               `SELECT c.limite_credito, c.dias_credito, c.condicion_pago,
                       coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x
                                 WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) AS deuda
-               FROM core.cliente c WHERE c.id = $1`,
+               FROM core.cliente c WHERE c.id = $1 FOR UPDATE`,
               [clienteId],
             );
             if (cliente.rows.length === 0) {
@@ -477,7 +500,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
             }
             const limite = Number(cliente.rows[0].limite_credito);
             const deuda = Number(cliente.rows[0].deuda);
-            if (limite > 0 && deuda + totalConIgv > limite + 0.001) {
+            // RN-35 / MAE-08: un cliente con crédito tiene límite definido; sin límite no hay línea (antes 0 = ilimitado).
+            if (limite <= 0) throw Object.assign(new Error('Este cliente no tiene límite de crédito definido: fíjalo en su ficha para venderle a plazo.'), { status: 409 });
+            if (deuda + totalConIgv > limite + 0.001) {
               throw Object.assign(new Error(`Límite de crédito excedido: debe S/ ${deuda.toFixed(2)}, límite S/ ${limite.toFixed(2)} y esta venta suma S/ ${totalConIgv.toFixed(2)}.`), { status: 409 });
             }
 
@@ -523,9 +548,14 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const { motivo } = parseo.data;
     try {
       const r = await tx(async (c) => {
-        const v = (await c.query<{ id: string; estado: string }>('SELECT id, estado FROM core.venta WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
+        const v = (await c.query<{ id: string; estado: string; cerrado: boolean }>(
+          `SELECT v.id, v.estado, EXISTS (SELECT 1 FROM core.periodo_costos p WHERE p.estado = 'CERRADO'
+                    AND make_date(p.anio, p.mes, 1) = date_trunc('month', v.creado_en AT TIME ZONE 'America/Lima')::date) AS cerrado
+           FROM core.venta v WHERE v.codigo = $1 FOR UPDATE OF v`, [codigo])).rows[0];
         if (!v) throw Object.assign(new Error('La venta no existe.'), { status: 404 });
         if (v.estado === 'ANULADA') throw Object.assign(new Error('La venta ya está anulada.'), { status: 409 });
+        // Un período cerrado tiene reportes definitivos: la corrección va en el mes en curso (nota de crédito), no se reescribe el pasado.
+        if (v.cerrado) throw Object.assign(new Error('La venta es de un período ya cerrado: no se puede anular.'), { status: 409 });
         const cobrado = (await c.query<{ n: string }>(
           'SELECT count(*) n FROM core.cobranza b JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id WHERE x.venta_id = $1', [v.id])).rows[0].n;
         if (Number(cobrado) > 0) throw Object.assign(new Error('La venta tiene cobros registrados: no se puede anular.'), { status: 409 });

@@ -204,3 +204,38 @@ export async function rutasCobranza(app: FastifyInstance) {
     return reply.code(201).send({ ...p.data, activo: true });
   });
 }
+
+/**
+ * COB-10: avisa al vendedor del cliente y a Gerencia de los documentos por cobrar vencidos:
+ * el día del vencimiento y luego cada 7 días mientras quede saldo. SKIP LOCKED: con varias
+ * instancias del API cada aviso sale una sola vez.
+ */
+export async function despacharAlertasCobranza(): Promise<number> {
+  const filas = await tx(async (c) => (await c.query<{ cliente: string; vendedor_id: string | null; saldo: string; dias: number; doc: string }>(`
+    UPDATE core.cuenta_por_cobrar x SET alerta_en = (now() AT TIME ZONE 'America/Lima')::date
+    FROM core.cliente cl
+    WHERE x.id IN (SELECT id FROM core.cuenta_por_cobrar
+        WHERE estado IN ('PENDIENTE','PARCIAL') AND saldo > 0 AND vence_en <= (now() AT TIME ZONE 'America/Lima')::date
+          AND (alerta_en IS NULL OR alerta_en <= (now() AT TIME ZONE 'America/Lima')::date - 7)
+        ORDER BY id LIMIT 1000 FOR UPDATE SKIP LOCKED)
+      AND cl.id = x.cliente_id
+    RETURNING cl.nombre cliente, cl.vendedor_id, x.saldo,
+      (now() AT TIME ZONE 'America/Lima')::date - x.vence_en dias,
+      coalesce((SELECT v.codigo FROM core.venta v WHERE v.id = x.venta_id), 'documento') doc`)).rows);
+  // Un resumen por destinatario y ronda: con muchas deudas vencidas no se inunda la campana.
+  const resumen = (xs: typeof filas) => {
+    const f = xs[0];
+    const total = xs.reduce((t, x) => t + num(x.saldo), 0);
+    const clientes = [...new Set(xs.map((x) => x.cliente))];
+    return xs.length === 1
+      ? { tipo: 'cobranza', ruta: '/ventas/cobranza', titulo: `Deuda vencida: ${f.cliente}`,
+          cuerpo: `${f.doc}: S/ ${num(f.saldo).toFixed(2)} ${f.dias === 0 ? 'vence hoy' : `vencido hace ${f.dias} día(s)`}` }
+      : { tipo: 'cobranza', ruta: '/ventas/cobranza', titulo: `${xs.length} deudas vencidas por cobrar`,
+          cuerpo: `S/ ${total.toFixed(2)} · ${clientes.slice(0, 3).join(', ')}${clientes.length > 3 ? ` y ${clientes.length - 3} más` : ''}` };
+  };
+  if (filas.length) avisar([{ permiso: 'dashboard.ver' }], resumen(filas));
+  const porVendedor = new Map<string, typeof filas>();
+  for (const f of filas) if (f.vendedor_id) porVendedor.set(f.vendedor_id, [...(porVendedor.get(f.vendedor_id) ?? []), f]);
+  for (const [vendedor, xs] of porVendedor) avisar([{ usuarioId: vendedor }], resumen(xs));
+  return filas.length;
+}

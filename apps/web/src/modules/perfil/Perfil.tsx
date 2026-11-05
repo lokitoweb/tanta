@@ -3,7 +3,7 @@ import { api, regenerarRecuperacion } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { imagenABase64 } from '@/core/imagen';
 import { fechaHora } from '@/core/format';
-import { Avatar, Boton, Encabezado, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Avatar, Boton, Encabezado, PilaEsqueleto, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 
 interface PerfilDatos {
@@ -15,7 +15,7 @@ interface PerfilDatos {
 export function Perfil() {
   const { recargarSesion, cerrarSesion } = useApp();
   const [p, setP] = useState<PerfilDatos | null>(null);
-  const [form, setForm] = useState({ nombre: '', email: '', telefono: '' });
+  const [form, setForm] = useState<{ nombre: string; email: string; telefono: string; clave?: string }>({ nombre: '', email: '', telefono: '' });
   const [clave, setClave] = useState({ actual: '', nueva: '', repetir: '' });
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
@@ -27,7 +27,9 @@ export function Perfil() {
     setP(d);
     setForm({ nombre: d.nombre, email: d.email, telefono: d.telefono });
   };
-  useEffect(() => { void cargar(); }, []);
+  const [cargaError, setCargaError] = useState<string | null>(null);
+  const cargaInicial = () => { setCargaError(null); cargar().catch((e) => setCargaError(e instanceof Error ? e.message : 'No se pudo cargar.')); };
+  useEffect(cargaInicial, []);
 
   const ejecutar = async (clave: string, fn: () => Promise<string>) => {
     setOcupado(clave);
@@ -60,7 +62,12 @@ export function Perfil() {
 
   const fuerza = clave.nueva.length >= 14 ? 'fuerte' : clave.nueva.length >= 10 ? 'aceptable' : clave.nueva ? 'débil' : '';
 
-  if (!p) return <div className="tabla-cargando">Cargando perfil…</div>;
+  if (!p) return (
+    <>
+      <Encabezado titulo="Mi perfil" />
+      <Tarjeta>{cargaError ? <Vacio titulo="No se pudo cargar tu perfil" detalle={cargaError} icono="user" onReintentar={cargaInicial} /> : <PilaEsqueleto lineas={6} />}</Tarjeta>
+    </>
+  );
 
   return (
     <>
@@ -100,6 +107,12 @@ export function Perfil() {
             <label className="field"><span className="field__label">Correo</span>
               <input className="field__input" type="email" maxLength={160} autoComplete="email" placeholder="nombre@empresa.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </label>
+            {form.email.trim().toLowerCase() !== (p.email ?? '').toLowerCase() && (
+              <label className="field"><span className="field__label">Contraseña actual</span>
+                <input className="field__input" type="password" required autoComplete="current-password" value={form.clave ?? ''} onChange={(e) => setForm({ ...form, clave: e.target.value })} />
+                <span className="field__ayuda">El correo sirve para recuperar la cuenta: cambiarlo pide tu contraseña.</span>
+              </label>
+            )}
             <label className="field"><span className="field__label">Teléfono</span>
               <input className="field__input" type="tel" maxLength={30} autoComplete="tel" placeholder="999 999 999" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} />
             </label>
@@ -129,8 +142,8 @@ export function Perfil() {
             </div>
           </form>
           <div className="perfil-mfa">
-            <div><b>Verificación en dos pasos</b><small>{p.codigos_mfa} códigos de respaldo sin usar</small></div>
-            <Boton icono="shield" onClick={() => void ejecutar('mfa', async () => { setCodigos(await regenerarRecuperacion()); return 'Se generaron códigos nuevos; los anteriores quedan anulados.'; })}>Generar códigos</Boton>
+            <div><b>Verificación en dos pasos</b><small>{p.codigos_mfa} códigos de respaldo sin usar · escribe tu contraseña actual arriba para generar otros</small></div>
+            <Boton icono="shield" disabled={!clave.actual} onClick={() => void ejecutar('mfa', async () => { setCodigos(await regenerarRecuperacion(clave.actual)); setClave({ actual: '', nueva: '', repetir: '' }); return 'Se generaron códigos nuevos; los anteriores quedan anulados.'; })}>Generar códigos</Boton>
           </div>
         </Tarjeta>
       </div>

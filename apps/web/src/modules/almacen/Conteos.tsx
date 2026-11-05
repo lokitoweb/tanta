@@ -3,7 +3,7 @@ import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { money, num2 as num } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
-import { Boton, Encabezado, Insignia, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 
 interface Conteo { id: string; codigo: string; estado: string; observacion: string; motivoRechazo: string | null; fecha: string; registradoPor: string; resueltoPor: string | null;
   items: Array<{ insumo: string; unidad: string; sistema: number; contado: number; diferencia: number; valor?: number }> }
@@ -12,7 +12,9 @@ const TONO: Record<string, 'warn' | 'ok' | 'danger'> = { PENDIENTE: 'warn', APRO
 /** Conteo físico (M05): el Almacén cuenta y envía; el Gerente aprueba y recién entonces se ajusta el stock. */
 export function Conteos() {
   const { dataset, puede, refrescarDatos } = useApp();
-  const [conteos, setConteos] = useState<Conteo[]>([]);
+  // null = cargando (esqueleto); [] = cargó y no hay conteos.
+  const [conteos, setConteos] = useState<Conteo[] | null>(null);
+  const [cargaError, setCargaError] = useState<string | null>(null);
   const [contado, setContado] = useState<Record<string, string> | null>(null);
   const [observacion, setObservacion] = useState('');
   const [ver, setVer] = useState<Conteo | null>(null);
@@ -20,7 +22,7 @@ export function Conteos() {
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
-  const cargar = () => api<Conteo[]>('/conteos').then(setConteos).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
+  const cargar = () => api<Conteo[]>('/conteos').then((c) => { setConteos(c); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => { void cargar(); }, []);
   const accion = async (fn: () => Promise<string>) => {
     setOcupado(true);
@@ -96,7 +98,9 @@ export function Conteos() {
       </Dialogo>
 
       <Tarjeta padding="none">
-        {!conteos.length ? <Vacio titulo="Sin conteos registrados" icono="clipboard" /> : (
+        {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setConteos(null); void cargar(); }} />
+          : conteos === null ? <TablaEsqueleto columnas={6} />
+          : !conteos.length ? <Vacio titulo="Sin conteos registrados" icono="clipboard" /> : (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Código</th><th>Fecha</th><th>Registró</th><th className="t-right">Ítems</th><th className="t-right">Diferencias</th><th>Estado</th></tr></thead>
             <tbody>{conteos.map((k) => (

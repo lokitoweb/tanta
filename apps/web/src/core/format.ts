@@ -47,13 +47,12 @@ export function relativa(iso: string): string {
   return `hace ${Math.round(h / 24)} d`;
 }
 
-/** Semáforo de margen contra objetivo (07 §7.4 del dossier). */
+/** RN-37 (igual que el API): rojo bajo el objetivo; ámbar hasta 5 puntos sobre el objetivo; verde por encima. */
 export type Semaforo = 'ok' | 'warn' | 'danger';
 export function semaforo(margen: number, objetivo: number): Semaforo {
-  const brecha = objetivo - margen;
-  if (brecha <= 0) return 'ok';
-  if (brecha <= 0.05) return 'warn';
-  return 'danger';
+  if (margen < objetivo) return 'danger';
+  if (margen <= objetivo + 0.05) return 'warn';
+  return 'ok';
 }
 
 export function iniciales(nombre: string): string {

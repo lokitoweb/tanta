@@ -172,6 +172,7 @@ class _PedidosState extends State<Pedidos> {
       children: [
         TituloSeccion('', subtitulo: '${_pedidos.length} en el período'),
         const SizedBox(height: 14),
+        if (_pedidos.isEmpty) const VacioMensaje('No hay pedidos en el período', icono: Icons.receipt_long_outlined),
         ..._pedidos.map((p) {
           final estado = '${p['estado']}';
           final siguiente = _siguiente[estado];
@@ -265,10 +266,13 @@ class _CobranzaState extends State<Cobranza> {
     try {
       final r = await Api.instancia.cartera();
       if (!mounted) return;
-      setState(() => _cuentas = r.cast<Map<String, dynamic>>());
-    } catch (e) {
+      setState(() { _cuentas = r.cast<Map<String, dynamic>>(); _error = null; });
+    } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e.mensaje);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Sin conexión: intenta de nuevo');
     }
   }
 
@@ -277,7 +281,9 @@ class _CobranzaState extends State<Cobranza> {
 
   Future<void> _cobrar(Map<String, dynamic> c) async {
     final controlador = TextEditingController(text: (c['saldo'] as num).toStringAsFixed(2));
-    final medio = ValueNotifier<String>('EFECTIVO');
+    // El primer medio de cobranza habilitado (mediosPago nunca viene vacío: cae en efectivo).
+    final medios = mediosPago('enCobranza');
+    final medio = ValueNotifier<String>('${medios.first['codigo']}');
     final referencia = TextEditingController();
 
     final confirmado = await showDialog<bool>(
@@ -303,8 +309,8 @@ class _CobranzaState extends State<Cobranza> {
               builder: (_, v, __) => DropdownButtonFormField<String>(
                 initialValue: v,
                 decoration: const InputDecoration(labelText: 'Medio'),
-                items: [for (final m in mediosPago('enCobranza')) DropdownMenuItem(value: '${m['codigo']}', child: Text('${m['nombre']}'))],
-                onChanged: (x) => medio.value = x ?? 'EFECTIVO',
+                items: [for (final m in medios) DropdownMenuItem(value: '${m['codigo']}', child: Text('${m['nombre']}'))],
+                onChanged: (x) => medio.value = x ?? medio.value,
               ),
             ),
             ValueListenableBuilder<String>(
@@ -386,18 +392,20 @@ class _CobranzaState extends State<Cobranza> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) {
-      return Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_error!)));
-    }
     final cuentas = _cuentas;
-    if (cuentas == null) {
-      return const Center(child: CircularProgressIndicator(color: TantaColors.sand500));
+    if (_error != null || cuentas == null) {
+      return RefreshIndicator(
+        onRefresh: _cargar,
+        child: ListView(children: [
+          _error != null ? ErrorReintentar(mensaje: _error!, onReintentar: _cargar) : const Esqueleto(),
+        ]),
+      );
     }
 
     final puedeCobrar = Api.instancia.puede('cobranza.registrar');
     final vencidas = cuentas.where((c) => c['vencida'] == true).length;
 
-    return ListView(
+    return RefreshIndicator(onRefresh: _cargar, child: ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
         TituloSeccion('',
@@ -415,6 +423,7 @@ class _CobranzaState extends State<Cobranza> {
           ),
         ),
         const SizedBox(height: 14),
+        if (cuentas.isEmpty) const VacioMensaje('No hay cuentas por cobrar', icono: Icons.account_balance_wallet_outlined),
         ...cuentas.map((c) {
           final vencida = c['vencida'] == true;
           return Padding(
@@ -460,6 +469,6 @@ class _CobranzaState extends State<Cobranza> {
           );
         }),
       ],
-    );
+    ));
   }
 }

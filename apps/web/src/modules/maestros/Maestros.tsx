@@ -4,7 +4,8 @@ import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { money, num } from '@/core/format';
 import { Crud, type Campo } from '@/ui/Crud';
-import { Kpi } from '@/ui/primitives';
+import { Kpi, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Importar } from '@/ui/Importar';
 import type { ColRep } from '@/ui/TablaReporte';
 
 type Reg = Record<string, unknown> & { id?: string };
@@ -116,6 +117,9 @@ export function Productos() {
   ];
   return (
     <Crud titulo="Productos" nombreExport="productos" deps={dataset.productos}
+      extra={puede('costos.ver') && dataset.productos.length > 0 && (
+        <SimuladorPrecio igv={dataset.negocio.igv} productos={dataset.productos.map((p) => ({ id: p.id, nombre: p.nombre, costoUnitario: p.costoUnitario, precioConIgv: p.precioConIgv }))} />
+      )}
       descripcion={puede('costos.ver') ? 'Costo = insumos por unidad esperada + mano de obra (horas hombre) + CIF (horas de horno, kg de masa y unidades).' : 'Catálogo de productos y precios.'}
       cargar={async () => dataset.productos.map((p) => ({ ...p, categoria: dataset.categorias.find((c) => c.id === (p as unknown as Reg).categoriaId)?.nombre } as unknown as Reg))}
       nuevo={{ nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO' }}
@@ -123,6 +127,7 @@ export function Productos() {
       editar={puede('maestros.editar') ? async (id, d) => { await api(`/productos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
       columnas={columnas}
       campos={[
+        { key: 'imagenUrl', label: 'Imagen del catálogo', tipo: 'imagen', ayuda: 'PNG, JPEG o WebP. Se reduce antes de subirla; la ven los clientes en la web y la app.' },
         { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 120 },
         { key: 'categoriaId', label: 'Categoría', tipo: 'select', opciones: cats },
         { key: 'unidad', label: 'Unidad de venta', tipo: 'select', opciones: unidadesVenta, ayuda: 'Se administran en Maestros → Catálogos → Unidades' },
@@ -133,7 +138,41 @@ export function Productos() {
         { key: 'horasHombreLote', label: 'Horas hombre por lote', tipo: 'numero' },
         { key: 'horasHornoLote', label: 'Horas de horno por lote', tipo: 'numero' },
         { key: 'anticipacionHoras', label: 'Anticipación mínima del pedido (horas)', tipo: 'numero', ayuda: 'Ej.: 24 para tortas por encargo' },
+        { key: 'insumoId', label: 'Produce el insumo (sub-receta)', tipo: 'select', ancho: true,
+          opciones: [{ valor: '', texto: 'No: es un producto de venta' }, ...dataset.insumos.map((i) => ({ valor: i.id, texto: `${i.nombre} (${i.unidadInventario ?? i.unidad})` }))],
+          ayuda: 'Para masa madre o rellenos: su receta da el costo, su OP entra al almacén de insumos y no se vende. La unidad de venta debe ser la del stock del insumo.' },
       ]} />
+  );
+}
+
+/** COS-10 / RN-16 / RN-17: precio sugerido desde un margen objetivo (precio neto = costo ÷ (1 − margen)) o un markup (costo × (1 + markup)). */
+function SimuladorPrecio({ productos, igv }: { productos: Array<{ id: string; nombre: string; costoUnitario: number; precioConIgv: number }>; igv: number }) {
+  const [id, setId] = useState(productos[0]?.id ?? '');
+  const [modo, setModo] = useState<'margen' | 'markup'>('margen');
+  const [valor, setValor] = useState(40);
+  const p = productos.find((x) => x.id === id);
+  if (!p) return null;
+  const f = valor / 100;
+  const neto = modo === 'margen' ? (f < 1 ? p.costoUnitario / (1 - f) : 0) : p.costoUnitario * (1 + f);
+  const actualNeto = p.precioConIgv / (1 + igv);
+  return (
+    <Tarjeta>
+      <TarjetaTitulo titulo="Simulador de precio" subtitulo="Precio neto = costo ÷ (1 − margen) · o costo × (1 + markup). No cambia nada hasta que edites el producto." />
+      <div className="form form--2col">
+        <label className="field"><span className="field__label">Producto</span>
+          <select className="field__input" value={id} onChange={(e) => setId(e.target.value)}>{productos.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label>
+        <label className="field"><span className="field__label">{modo === 'margen' ? 'Margen objetivo (%)' : 'Markup (%)'}</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select className="field__input" style={{ maxWidth: 120 }} value={modo} onChange={(e) => setModo(e.target.value as 'margen' | 'markup')}><option value="margen">Margen</option><option value="markup">Markup</option></select>
+            <input className="field__input" type="number" min={0} max={modo === 'margen' ? 95 : 1000} step="0.5" value={valor} onChange={(e) => setValor(Number(e.target.value))} />
+          </div></label>
+      </div>
+      <div className="grid grid--auto" style={{ marginTop: 12 }}>
+        <Kpi label="Costo unitario" valor={money(p.costoUnitario)} nota="insumos + mano de obra + CIF" icono="ledger" />
+        <Kpi label="Precio neto sugerido" valor={money(neto)} nota={'actual ' + money(actualNeto)} icono="spark" />
+        <Kpi label="Precio con IGV sugerido" valor={money(neto * (1 + igv))} nota={'actual ' + money(p.precioConIgv)} icono="wallet" />
+      </div>
+    </Tarjeta>
   );
 }
 
@@ -151,6 +190,13 @@ export function Insumos() {
       cargar={async () => dataset.insumos.map((i) => ({ ...i, activo: (i as unknown as Reg).activo ?? true } as unknown as Reg))}
       nuevo={{ nombre: '', unidad: 'KG', unidadInventario: 'KG', minimo: 0, proveedor: '', activo: true, tipo: 'OTRO', presentacion: '', precioCompra: '', cantPresentacion: '', equivKg: '' }}
       crear={editaInsumos ? async (d) => { await api('/insumos', { method: 'POST', body: d }); await refrescarDatos(); } : undefined}
+      acciones={editaInsumos && (
+        <Importar titulo="Importar insumos" descripcion="Carga la Lista de Insumos desde la plantilla. Las filas con error se muestran con su motivo y no frenan a las válidas; no se duplican nombres."
+          plantilla={{ nombre: 'Harina preparada', tipo: 'HARINA', unidad: 'KG', unidadInventario: 'KG', minimo: 25, proveedor: '', presentacion: 'Saco 50 kg', precioCompra: 120, cantPresentacion: 50, equivKg: '' }}
+          numericas={['minimo', 'precioCompra', 'cantPresentacion', 'equivKg']}
+          enviar={async (filas) => { const r = await api<{ creados: unknown[]; errores: Array<{ fila: number; nombre: string; motivo: string }> }>('/insumos/importar', { method: 'POST', body: { filas } }); return { ok: r.creados.length, errores: r.errores }; }}
+          onListo={() => void refrescarDatos()} />
+      )}
       editar={editaInsumos ? async (id, d) => { await api(`/insumos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
       columnas={[
         { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'tipo', label: 'Tipo' }, { key: 'unidad', label: 'Unidad' },
