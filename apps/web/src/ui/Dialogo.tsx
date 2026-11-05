@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react';
 import { Icon } from './icons';
 
-/** Diálogo modal sencillo: fondo oscuro, tarjeta centrada, cierre con Escape. */
+/**
+ * Diálogo modal: fondo oscuro, tarjeta centrada. Se cierra solo con la X (o Escape):
+ * un clic en el fondo no lo cierra, así no se pierde un formulario a medio llenar
+ * al seleccionar texto y soltar el mouse fuera de la tarjeta.
+ */
 export function Dialogo({ abierto, titulo, descripcion, children, onCerrar, acciones }: {
   abierto: boolean;
   titulo: string;
@@ -17,11 +21,10 @@ export function Dialogo({ abierto, titulo, descripcion, children, onCerrar, acci
       role="dialog"
       aria-modal="true"
       aria-label={titulo}
-      onClick={onCerrar}
       onKeyDown={(e) => { if (e.key === 'Escape') onCerrar(); }}
       tabIndex={-1}
     >
-      <div className="dialogo" onClick={(e) => e.stopPropagation()}>
+      <div className="dialogo">
         <header className="dialogo__head">
           <div>
             <h2 className="dialogo__titulo">{titulo}</h2>
