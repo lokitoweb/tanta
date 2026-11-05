@@ -949,8 +949,17 @@ class MisPedidos extends StatefulWidget {
   State<MisPedidos> createState() => _MisPedidosState();
 }
 
-const _etiquetaPedido = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
+/// Nombre amable de cada estado del pedido (panel, Mis pedidos).
+const etiquetaPedido = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
   'DESPACHADO': 'En camino', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
+
+/// Color del estado: por confirmar (ámbar), en curso (azul), listo o entregado (verde), anulado (rojo).
+Tono tonoPedido(String estado) => switch (estado) {
+      'REGISTRADO' => Tono.warn,
+      'LISTO' || 'ENTREGADO' => Tono.ok,
+      'RECHAZADO' || 'CANCELADO' => Tono.danger,
+      _ => Tono.info,
+    };
 
 class _MisPedidosState extends State<MisPedidos> {
   List<dynamic>? _lista;
@@ -1015,7 +1024,7 @@ class _MisPedidosState extends State<MisPedidos> {
               if (k < pasos.length - 1) Container(width: 2, height: 22, color: k < actual ? Colors.green.shade700 : Colors.grey.shade300),
             ]),
             const SizedBox(width: 10),
-            Expanded(child: Text('${_etiquetaPedido[pasos[k]]}${cuando[pasos[k]] == null ? '' : ' · ${cuando[pasos[k]]!.day}/${cuando[pasos[k]]!.month} ${cuando[pasos[k]]!.hour.toString().padLeft(2, '0')}:${cuando[pasos[k]]!.minute.toString().padLeft(2, '0')}'}',
+            Expanded(child: Text('${etiquetaPedido[pasos[k]]}${cuando[pasos[k]] == null ? '' : ' · ${cuando[pasos[k]]!.day}/${cuando[pasos[k]]!.month} ${cuando[pasos[k]]!.hour.toString().padLeft(2, '0')}:${cuando[pasos[k]]!.minute.toString().padLeft(2, '0')}'}',
                 style: TextStyle(fontWeight: k == actual ? FontWeight.w700 : FontWeight.w400))),
           ]),
         if ('${p['motivo'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Motivo: ${p['motivo']}')),
@@ -1051,7 +1060,7 @@ class _MisPedidosState extends State<MisPedidos> {
               final p = l[i];
               return ListTile(
                 title: Text('${p['codigo']} · ${dinero(((p['total'] as num?) ?? 0).toDouble())}'),
-                subtitle: Text('${_etiquetaPedido[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'),
+                subtitle: Text('${etiquetaPedido[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _detalle(p),
               );

@@ -111,22 +111,64 @@ class _CatalogoState extends State<Catalogo> {
       builder: (context, c, _) {
         final items = c.values.fold<int>(0, (s, v) => s + v);
         final t = totalesCarrito(productos);
+        final etiquetaCat = _categoria == 'todas' ? 'Todo'
+            : '${categorias.where((x) => x['id'] == _categoria).firstOrNull?['nombre'] ?? 'Todo'}';
         return Column(children: [
+          // Una sola línea (Android e iOS): buscador, categoría y repetir el último pedido.
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: TextField(
-              onChanged: (v) => setState(() => _buscar = v),
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Buscar pan', isDense: true),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            child: SizedBox(
+              height: 48,
+              child: Row(children: [
+                Expanded(child: TextField(
+                  onChanged: (v) => setState(() => _buscar = v),
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search, size: 20), hintText: 'Buscar pan', isDense: true,
+                      contentPadding: EdgeInsets.symmetric(vertical: 12)),
+                )),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  tooltip: 'Categoría',
+                  initialValue: _categoria,
+                  onSelected: (v) => setState(() => _categoria = v),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  itemBuilder: (_) => [
+                    _opcion('todas', 'Todo'),
+                    for (final x in categorias) _opcion(x['id'] as String, x['nombre'] as String),
+                  ],
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    height: 48,
+                    constraints: const BoxConstraints(maxWidth: 130),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: _categoria == 'todas' ? TantaColors.ink800 : TantaColors.honey500,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Flexible(child: Text(etiquetaCat, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: TantaColors.cream50, fontWeight: FontWeight.w600, fontSize: 13))),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.expand_more, size: 18, color: TantaColors.cream50),
+                    ]),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 48, height: 48,
+                  child: IconButton.outlined(
+                    tooltip: 'Repetir mi último pedido',
+                    style: IconButton.styleFrom(
+                      backgroundColor: TantaColors.surfaceCard,
+                      side: const BorderSide(color: TantaColors.borderDefault),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: _repetir,
+                    icon: const Icon(Icons.replay_rounded, size: 20, color: TantaColors.ink800),
+                  ),
+                ),
+              ]),
             ),
-          ),
-          SizedBox(
-            height: 56,
-            child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), children: [
-              Padding(padding: const EdgeInsets.only(right: 8),
-                  child: ActionChip(avatar: const Icon(Icons.replay, size: 16), label: const Text('Repetir último'), onPressed: _repetir)),
-              _chip('todas', 'Todo'),
-              ...categorias.map((x) => _chip(x['id'] as String, x['nombre'] as String)),
-            ]),
           ),
           Expanded(
             child: filtrados.isEmpty
@@ -146,11 +188,16 @@ class _CatalogoState extends State<Catalogo> {
                     },
                   ),
           ),
-          if (items > 0)
-            Container(
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            transitionBuilder: (w, a) => SizeTransition(sizeFactor: a, alignment: Alignment.topCenter,
+                child: SlideTransition(position: Tween(begin: const Offset(0, 0.4), end: Offset.zero).animate(a), child: w)),
+            child: items == 0 ? const SizedBox(width: double.infinity) : Container(
+              key: const ValueKey('carrito'),
               margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
-              decoration: BoxDecoration(color: TantaColors.ink800, borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: TantaColors.ink800, borderRadius: BorderRadius.circular(14),
+                  boxShadow: [BoxShadow(color: TantaColors.ink900.withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 6))]),
               child: Row(children: [
                 const Icon(Icons.shopping_basket_outlined, color: TantaColors.cream50),
                 const SizedBox(width: 12),
@@ -167,26 +214,19 @@ class _CatalogoState extends State<Catalogo> {
                 ),
               ]),
             ),
+          ),
         ]);
       },
     );
   }
 
-  Widget _chip(String id, String etiqueta) {
-    final activo = _categoria == id;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(etiqueta, style: TextStyle(fontSize: 12, color: activo ? TantaColors.cream50 : TantaColors.textSecondary)),
-        selected: activo,
-        backgroundColor: TantaColors.surfaceCard,
-        selectedColor: TantaColors.ink800,
-        side: BorderSide(color: activo ? TantaColors.ink800 : TantaColors.borderDefault),
-        showCheckmark: false,
-        onSelected: (_) => setState(() => _categoria = id),
-      ),
-    );
-  }
+  PopupMenuItem<String> _opcion(String id, String etiqueta) => PopupMenuItem(
+        value: id,
+        child: Row(children: [
+          Expanded(child: Text(etiqueta)),
+          if (_categoria == id) const Icon(Icons.check, size: 18, color: TantaColors.ink800),
+        ]),
+      );
 }
 
 /// PED-06: repetir carga los productos al carrito; el precio es siempre el vigente (lo pone el servidor).
@@ -387,17 +427,19 @@ class _Producto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return Pulsable(
       onTap: onAbrir,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(color: TantaColors.surfaceCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: TantaColors.borderSubtle)),
-        clipBehavior: Clip.antiAlias,
+      child: Ink(
+        decoration: BoxDecoration(color: TantaColors.surfaceCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: TantaColors.borderSubtle),
+            boxShadow: [BoxShadow(color: TantaColors.ink900.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             child: Container(
+              clipBehavior: Clip.antiAlias,
               width: double.infinity,
-              decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFE8D9C3), Color(0xFFD8C0A0)])),
+              decoration: const BoxDecoration(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(13)),
+                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFE8D9C3), Color(0xFFD8C0A0)])),
               alignment: Alignment.center,
               child: p['imagenUrl'] != null
                   ? Image.network('${Api.base}${p['imagenUrl']}', fit: BoxFit.cover, width: double.infinity, height: double.infinity,
@@ -419,11 +461,16 @@ class _Producto extends StatelessWidget {
                   child: InkWell(
                     onTap: onAgregar,
                     borderRadius: BorderRadius.circular(999),
-                    child: Container(
-                      width: 30, height: 30,
-                      decoration: BoxDecoration(border: Border.all(color: TantaColors.borderDefault), shape: BoxShape.circle),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: 32, height: 32,
+                      decoration: BoxDecoration(
+                        color: cantidad > 0 ? TantaColors.ink800 : Colors.transparent,
+                        border: Border.all(color: cantidad > 0 ? TantaColors.ink800 : TantaColors.borderDefault),
+                        shape: BoxShape.circle,
+                      ),
                       child: cantidad > 0
-                          ? Center(child: Text('$cantidad', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)))
+                          ? Center(child: Text('$cantidad', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: TantaColors.cream50)))
                           : const Icon(Icons.add, size: 16),
                     ),
                   ),

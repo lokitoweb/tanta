@@ -296,3 +296,92 @@ class VacioMensaje extends StatelessWidget {
     );
   }
 }
+
+/// Entrada suave (sube y aparece), escalonada por [orden]: da ritmo al abrir el panel sin distraer.
+class Aparecer extends StatelessWidget {
+  const Aparecer({super.key, required this.child, this.orden = 0});
+  final Widget child;
+  final int orden;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 320 + 60 * orden.clamp(0, 6)),
+      curve: Curves.easeOutCubic,
+      builder: (_, t, hijo) => Opacity(opacity: t, child: Transform.translate(offset: Offset(0, 14 * (1 - t)), child: hijo)),
+      child: child,
+    );
+  }
+}
+
+/// Se encoge un poco al tocar: respuesta táctil en tarjetas y accesos.
+class Pulsable extends StatefulWidget {
+  const Pulsable({super.key, required this.child, required this.onTap, this.radio = 14});
+  final Widget child;
+  final VoidCallback? onTap;
+  final double radio;
+
+  @override
+  State<Pulsable> createState() => _PulsableState();
+}
+
+class _PulsableState extends State<Pulsable> {
+  bool _abajo = false;
+  void _set(bool v) { if (_abajo != v) setState(() => _abajo = v); }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _abajo ? 0.96 : 1,
+      duration: const Duration(milliseconds: 120),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(widget.radio),
+          onTap: widget.onTap,
+          onHighlightChanged: _set,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Acceso rápido del panel: icono en círculo y nombre debajo (una fila horizontal).
+class AccesoRapido extends StatelessWidget {
+  const AccesoRapido({super.key, required this.icono, required this.titulo, required this.onTap});
+  final IconData icono;
+  final String titulo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: titulo,
+      child: Pulsable(
+        onTap: onTap,
+        child: Ink(
+          width: 98,
+          padding: const EdgeInsets.fromLTRB(8, 12, 8, 10),
+          decoration: BoxDecoration(
+            color: TantaColors.surfaceCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: TantaColors.borderSubtle),
+          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Container(
+              width: 38, height: 38,
+              decoration: const BoxDecoration(color: TantaColors.cream200, shape: BoxShape.circle),
+              child: Icon(icono, size: 20, color: TantaColors.ink800),
+            ),
+            const SizedBox(height: 8),
+            Text(titulo, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11.5, height: 1.15, fontWeight: FontWeight.w600, color: TantaColors.textPrimary)),
+          ]),
+        ),
+      ),
+    );
+  }
+}

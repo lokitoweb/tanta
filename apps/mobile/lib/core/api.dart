@@ -14,6 +14,16 @@ class Api {
   Api._();
   static final Api instancia = Api._();
 
+  /// Sube cada vez que el servidor acepta un cambio (pedido, venta, pago…): las pantallas que muestran
+  /// el resumen (panel, KPIs, «Mis últimos pedidos») se recargan solas. Un solo lugar, sin duplicar avisos.
+  final cambios = ValueNotifier<int>(0);
+  // Sesión, avisos y telemetría no cambian los datos del negocio.
+  static bool _cambiaDatos(String ruta) => !ruta.startsWith('/auth') && !ruta.startsWith('/notificaciones');
+  dynamic _trasCambio(String ruta, dynamic r) {
+    if (_cambiaDatos(ruta)) cambios.value++;
+    return r;
+  }
+
   static const String _baseCompilada = String.fromEnvironment(
     'API_URL',
     defaultValue: '', // sin dirección: la app se activa con el QR de la web
@@ -182,7 +192,7 @@ class Api {
       // Sin red: la operación queda pendiente y se reintenta sola.
       throw SinConexion();
     }
-    return _decodificar(r);
+    return _trasCambio(ruta, await _decodificar(r));
   }
 
   /// UUID v4 suficiente para la clave de idempotencia (no requiere dependencias).
@@ -354,7 +364,7 @@ class Api {
     } catch (_) {
       throw SinConexion();
     }
-    return _decodificar(r);
+    return _trasCambio(ruta, await _decodificar(r));
   }
 
   /// Solo en la build de pruebas. Acepta "https://x.trycloudflare.com" y completa /api/v1.

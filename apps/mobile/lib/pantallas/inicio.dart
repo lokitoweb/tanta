@@ -31,13 +31,30 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
   int _indice = int.fromEnvironment('DEMO_TAB', defaultValue: 0);
 
   Timer? _reloj;
+  Timer? _espera;
   String? _avisoMostrado;
+  late Map<String, dynamic> _datos = widget.datos;
+
+  /// Vuelve a pedir el resumen (KPIs, últimos pedidos…). Sin red se queda con lo que tenía.
+  Future<void> _recargar() async {
+    try {
+      final d = await Api.instancia.datos();
+      if (mounted) setState(() => _datos = d);
+    } catch (_) {}
+  }
+
+  // Varios cambios seguidos (pedido + su pago) = una sola recarga.
+  void _alCambiar() {
+    _espera?.cancel();
+    _espera = Timer(const Duration(milliseconds: 400), _recargar);
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     ColaOffline.instancia.ultimoAviso.addListener(_avisar);
+    Api.instancia.cambios.addListener(_alCambiar);
 
     // Mientras la app está abierta en el mostrador se reintenta cada 20 s.
     // Así el vendedor no tiene que pulsar nada cuando vuelve el WiFi.
@@ -48,6 +65,8 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
   @override
   void dispose() {
     _reloj?.cancel();
+    _espera?.cancel();
+    Api.instancia.cambios.removeListener(_alCambiar);
     ColaOffline.instancia.ultimoAviso.removeListener(_avisar);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -56,7 +75,10 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState estado) {
     // Volver a primer plano es la mejor señal de que puede haber red otra vez.
-    if (estado == AppLifecycleState.resumed) _intentarSync();
+    if (estado == AppLifecycleState.resumed) {
+      _intentarSync();
+      _recargar(); // lo que cambió en otro equipo (pedido confirmado, pago registrado)
+    }
   }
 
   Future<void> _intentarSync() async {
@@ -87,22 +109,22 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     // Cada pestaña existe solo si el servidor confirmó el permiso.
     return [
       _Pestana('Panel', Icons.home_outlined, Icons.home,
-          _PanelInicio(datos: widget.datos, version: widget.version, irA: _irA)),
+          _PanelInicio(datos: _datos, version: widget.version, irA: _irA, onRecargar: _recargar)),
       if (api.puede('produccion.ver'))
         _Pestana('Producción', Icons.local_fire_department_outlined, Icons.local_fire_department,
-            Produccion(datos: widget.datos)),
+            Produccion(datos: _datos)),
       if (api.puede('pedidos.ver'))
         _Pestana('Pedidos', Icons.receipt_long_outlined, Icons.receipt_long,
-            Pedidos(datos: widget.datos)),
+            Pedidos(datos: _datos)),
       if (api.puede('cobranza.ver'))
         _Pestana('Cobranza', Icons.account_balance_wallet_outlined, Icons.account_balance_wallet,
             const Cobranza()),
       if (api.puede('inventario.ver'))
         _Pestana('Almacén', Icons.inventory_2_outlined, Icons.inventory_2,
-            Almacen(datos: widget.datos)),
+            Almacen(datos: _datos)),
       if (api.puede('catalogo.ver'))
         _Pestana('Catálogo', Icons.bakery_dining_outlined, Icons.bakery_dining,
-            Catalogo(datos: widget.datos)),
+            Catalogo(datos: _datos)),
       // Todos los roles: datos, contraseña, privacidad y eliminar cuenta (exigido por las tiendas).
       _Pestana('Perfil', Icons.person_outline, Icons.person, Perfil(onSalir: widget.onSalir)),
     ];
@@ -115,14 +137,14 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     if (ruta.startsWith('/pedidos/') && api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) pantalla = MisPedidos(productos: _productos);
     if (ruta.startsWith('/almacen/requisiciones')) pantalla = const Requisiciones();
     if (ruta.startsWith('/almacen/compras') && api.puede('compras.verificar')) pantalla = const VerificarCompras();
-    if (ruta.startsWith('/almacen/conteos')) pantalla = Conteos(datos: widget.datos);
+    if (ruta.startsWith('/almacen/conteos')) pantalla = Conteos(datos: _datos);
     if (pantalla != null) { Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla!)); return; }
     if (ruta.startsWith('/ventas/pedidos')) _irA('Pedidos');
     if (ruta.startsWith('/almacen')) _irA('Almacén');
     if (ruta.startsWith('/ventas/cobranza')) _irA('Cobranza');
   }
 
-  List<Map<String, dynamic>> get _productos => (widget.datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>();
+  List<Map<String, dynamic>> get _productos => (_datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>();
 
   /// Accesos rápidos del panel: salta a la pestaña por su título.
   void _irA(String titulo) {
@@ -280,10 +302,11 @@ class _AvisoColaState extends State<_AvisoCola> {
 
 /// Panel de inicio: se adapta al perfil con los datos que trae el API.
 class _PanelInicio extends StatelessWidget {
-  const _PanelInicio({required this.datos, required this.version, required this.irA});
+  const _PanelInicio({required this.datos, required this.version, required this.irA, required this.onRecargar});
   final Map<String, dynamic> datos;
   final EstadoVersion version;
   final ValueChanged<String> irA;
+  final Future<void> Function() onRecargar;
 
   @override
   Widget build(BuildContext context) {
@@ -295,12 +318,23 @@ class _PanelInicio extends StatelessWidget {
     final accesos = _accesos(context, api);
     final actividad = _actividad(api);
 
-    return ListView(
+    var orden = 0; // entrada escalonada de las secciones
+    Widget entra(Widget w) => Aparecer(orden: orden++, child: w);
+    return RefreshIndicator(
+      color: TantaColors.ink800,
+      onRefresh: onRecargar,
+      child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(color: TantaColors.ink800, borderRadius: BorderRadius.circular(12)),
+        entra(Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+                colors: [TantaColors.ink800, TantaColors.ink900]),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [BoxShadow(color: TantaColors.ink900.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 8))],
+          ),
           child: Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -314,7 +348,7 @@ class _PanelInicio extends StatelessWidget {
             ),
             Avatar(nombre: api.nombre, fotoUrl: api.fotoUrl, radio: 26),
           ]),
-        ),
+        )),
         if (version.disponible && !version.obligatoria) ...[
           const SizedBox(height: 12),
           Material(
@@ -328,7 +362,7 @@ class _PanelInicio extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        GridView(
+        entra(GridView(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -338,44 +372,59 @@ class _PanelInicio extends StatelessWidget {
             mainAxisExtent: 108,
           ),
           children: _kpis(api, datos, k),
-        ),
+        )),
         if (accesos.isNotEmpty) ...[
           const SizedBox(height: 22),
-          const TituloSeccion('Accesos rápidos'),
+          entra(const TituloSeccion('Accesos rápidos')),
           const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 8, children: accesos),
+          // Una sola fila horizontal (Android e iOS): se desliza si no caben.
+          entra(SizedBox(
+            height: 92,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              clipBehavior: Clip.none,
+              itemCount: accesos.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) => accesos[i],
+            ),
+          )),
         ],
         if (actividad.length > 1) ...[
           const SizedBox(height: 22),
-          TituloSeccion(actividad.first.$1),
+          entra(TituloSeccion(actividad.first.titulo)),
           const SizedBox(height: 10),
-          Panel(
+          entra(Panel(
             padding: EdgeInsets.zero,
             child: Column(children: [
               for (final (i, fila) in actividad.skip(1).indexed) ...[
-                if (i > 0) const Divider(height: 1),
+                if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
-                  dense: true,
-                  title: Text(fila.$1, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text(fila.$2),
-                  trailing: Text(fila.$3, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                  onTap: fila.abrir == null ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => fila.abrir!)),
+                  title: Text(fila.titulo, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Align(alignment: Alignment.centerLeft, child: fila.estado.isEmpty
+                        ? Text(fila.detalle, style: const TextStyle(fontSize: 12.5))
+                        : Insignia(etiquetaPedido[fila.estado] ?? fila.estado, tono: tonoPedido(fila.estado), punto: true)),
+                  ),
+                  trailing: Text(fila.valor, style: estiloDisplay.copyWith(fontSize: 15)),
                 ),
               ],
             ]),
-          ),
+          )),
         ],
       ],
-    );
+    ));
   }
 
   /// Botones a las pestañas que el rol realmente tiene.
   List<Widget> _accesos(BuildContext context, Api api) {
-    Widget chip(String titulo, IconData icono) =>
-        ActionChip(avatar: Icon(icono, size: 18), label: Text(titulo), onPressed: () => irA(titulo));
+    Widget chip(String titulo, IconData icono) => AccesoRapido(icono: icono, titulo: titulo, onTap: () => irA(titulo));
     // Registrar: abre la pantalla de la acción; el servidor vuelve a validar el permiso.
-    Widget accion(String titulo, IconData icono, Widget pantalla) => ActionChip(
-          avatar: Icon(icono, size: 18), label: Text(titulo),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)),
+    Widget accion(String titulo, IconData icono, Widget pantalla) => AccesoRapido(
+          icono: icono, titulo: titulo,
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)),
         );
     return [
       if (api.puede('ventas.registrar')) accion('Nueva venta', Icons.point_of_sale_outlined, NuevaVenta(datos: datos)),
@@ -397,23 +446,24 @@ class _PanelInicio extends StatelessWidget {
   }
 
   /// Lo más reciente para el rol. El primer elemento es el título de la sección.
-  List<(String, String, String)> _actividad(Api api) {
+  List<_Fila> _actividad(Api api) {
     String txt(dynamic v) => '${v ?? ''}';
     if (api.puede('produccion.ver')) {
       final ops = ((datos['ops'] as List?) ?? const []).where((o) => o['estado'] != 'TERMINADA').take(5);
-      return [('Órdenes pendientes', '', ''), for (final o in ops) (txt(o['producto']), '${o['codigo']} · ${o['estado']}', '${o['cantidad']} u')];
+      return [const _Fila('Órdenes pendientes'), for (final o in ops) _Fila(txt(o['producto']), detalle: '${o['codigo']} · ${o['estado']}', valor: '${o['cantidad']} u')];
     }
     if (api.puede('inventario.ver')) {
       final ins = ((datos['insumos'] as List?) ?? const []).where((i) => i['estado'] == 'BAJO_MINIMO').take(5);
-      return [('Insumos por reponer', '', ''), for (final i in ins) (txt(i['nombre']), 'mínimo ${i['minimo']}', '${i['stock']} ${i['unidad']}')];
+      return [const _Fila('Insumos por reponer'), for (final i in ins) _Fila(txt(i['nombre']), detalle: 'mínimo ${i['minimo']}', valor: '${i['stock']} ${i['unidad']}')];
     }
     if (api.puede('pedidos.ver')) {
       final ps = ((datos['pedidos'] as List?) ?? const []).take(5);
-      return [('Pedidos recientes', '', ''), for (final p in ps) (txt(p['cliente']), '${p['codigo']} · ${p['estado']}', dinero(_n(p['total']).toDouble()))];
+      return [const _Fila('Pedidos recientes'), for (final p in ps) _Fila('${txt(p['cliente'])} · ${txt(p['codigo'])}', estado: txt(p['estado']), valor: dinero(_n(p['total']).toDouble()))];
     }
     if (api.puede('catalogo.ver')) {
       final ps = ((datos['misPedidos'] as List?) ?? const []).take(5);
-      return [('Mis últimos pedidos', '', ''), for (final p in ps) (txt(p['codigo']), txt(p['estado']), dinero(_n(p['total']).toDouble()))];
+      final productos = (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>();
+      return [const _Fila('Mis últimos pedidos'), for (final p in ps) _Fila(txt(p['codigo']), estado: txt(p['estado']), valor: dinero(_n(p['total']).toDouble()), abrir: MisPedidos(productos: productos))];
     }
     return const [];
   }
@@ -480,5 +530,11 @@ class _PanelInicio extends StatelessWidget {
   }
 
   num _n(dynamic v) => v is num ? v : num.tryParse('$v') ?? 0;
+}
 
+/// Una fila de «lo más reciente»: con estado se muestra como insignia de color.
+class _Fila {
+  const _Fila(this.titulo, {this.detalle = '', this.estado = '', this.valor = '', this.abrir});
+  final String titulo, detalle, estado, valor;
+  final Widget? abrir;
 }

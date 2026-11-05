@@ -83,6 +83,18 @@ ThemeData construirTema() {
       ),
     ),
     dividerTheme: const DividerThemeData(color: TantaColors.borderSubtle, thickness: 1, space: 1),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: TantaColors.ink900,
+      contentTextStyle: const TextStyle(fontFamily: 'Inter', color: TantaColors.cream50, fontSize: 13.5, height: 1.35),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      elevation: 6,
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: TantaColors.surfaceCard,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
   );
 }
 
