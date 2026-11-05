@@ -176,3 +176,29 @@ test('categorías: no se elimina una con productos; una vacía sí', async () =>
   assert.equal((await api(adm, 'DELETE', `/categorias/${nueva.b.id}`)).s, 204);
   assert.equal(sql(`SELECT count(*) FROM core.categoria WHERE id = '${nueva.b.id}'`), '0');
 });
+
+test('producto: código manual o automático, pérdida por cocción desde el peso final y costo por lote de horno', async () => {
+  const adm = await login('lbermudez');
+  const cat = sql('SELECT id FROM core.categoria ORDER BY orden LIMIT 1');
+  const manual = 'PX-' + sufijo.toUpperCase();
+  const a = await api(adm, 'POST', '/productos', { codigo: manual, nombre: 'Pan manual ' + sufijo, categoriaId: cat, unidad: 'UNIDAD', precioConIgv: 1 });
+  assert.equal(a.s, 201, JSON.stringify(a.b));
+  limpiar.push(`DELETE FROM core.receta WHERE producto_id = '${a.b.id}'`, `DELETE FROM core.producto WHERE id = '${a.b.id}'`);
+  assert.equal(sql(`SELECT codigo FROM core.producto WHERE id = '${a.b.id}'`), manual);
+  assert.equal((await api(adm, 'POST', '/productos', { codigo: manual, nombre: 'Otro ' + sufijo, categoriaId: cat, unidad: 'UNIDAD', precioConIgv: 1 })).s, 409, 'código repetido');
+  const b = await api(adm, 'POST', '/productos', { nombre: 'Pan auto ' + sufijo, categoriaId: cat, unidad: 'UNIDAD', precioConIgv: 1 });
+  limpiar.push(`DELETE FROM core.receta WHERE producto_id = '${b.b.id}'`, `DELETE FROM core.producto WHERE id = '${b.b.id}'`);
+  assert.match(sql(`SELECT codigo FROM core.producto WHERE id = '${b.b.id}'`), /^P\d{3,}$/, 'sin código, el sistema lo genera');
+
+  const datos = { nombre: 'Pan manual ' + sufijo, categoriaId: cat, unidad: 'UNIDAD', precioConIgv: 1, estado: 'ACTIVO', pesoMasaG: 60, pesoFinalG: 51, unidadesLote: 40, horasHornoLote: 0.5, horasHombreLote: 1 };
+  assert.equal((await api(adm, 'PATCH', `/productos/${a.b.id}`, { ...datos, pesoFinalG: 70 })).s, 422, 'final mayor que crudo');
+  assert.equal((await api(adm, 'PATCH', `/productos/${a.b.id}`, datos)).s, 200);
+  assert.equal(sql(`SELECT round(perdida_coccion, 4) || '|' || unidades_lote FROM core.producto WHERE id = '${a.b.id}'`), '0.1500|40', 'pérdida = 1 − 51 ÷ 60');
+  assert.equal((await api(adm, 'PATCH', `/productos/${a.b.id}`, { ...datos, vidaUtilDias: 3 })).s, 200);
+  assert.equal(sql(`SELECT vida_util_dias FROM core.producto WHERE id = '${a.b.id}'`), '3', 'vida útil guardada');
+  // Mano de obra por pan = horas hombre × costo hora ÷ panes del lote de horno.
+  const hora = Number(sql("SELECT costo_hora_hombre FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1"));
+  const moTxt = sql(`SELECT mo_unitario FROM core.receta WHERE producto_id = '${a.b.id}'`);
+  const mo = Number(moTxt);
+  if (hora > 0 && moTxt) assert.ok(Math.abs(mo - hora / 40) < 1e-4, `MO ${mo} = ${hora} ÷ 40`);
+});

@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
-import { money, num } from '@/core/format';
+import { money, num, pct } from '@/core/format';
 import { Crud, type Campo } from '@/ui/Crud';
-import { Kpi, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Encabezado, Kpi, Tarjeta, Vacio } from '@/ui/primitives';
 import { Importar } from '@/ui/Importar';
 import type { ColRep } from '@/ui/TablaReporte';
 
@@ -112,68 +112,108 @@ export function Productos() {
   const cats = dataset.categorias.map((c) => ({ valor: c.id, texto: c.nombre }));
   // Unidad de venta: unidades de conteo o masa del catálogo.
   const unidadesVenta = useCatalogos().unidades.filter((u) => u.familia !== 'VOLUMEN').map((u) => ({ valor: u.codigo, texto: u.descripcion }));
+  const verCosto = puede('costos.ver');
+  const igv = dataset.negocio.igv;
+  const n = (v: unknown) => (v === '' || v === null || v === undefined ? NaN : Number(v));
+  const neto = (form: Reg) => n(form.precioConIgv) / (1 + igv);
+
   const columnas: ColRep[] = [
     { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Producto' }, { key: 'categoria', label: 'Categoría' },
     { key: 'precioConIgv', label: 'Precio (con IGV)', tipo: 'dinero' }, { key: 'stock', label: 'Stock', tipo: 'num' },
-    ...(puede('costos.ver') ? [{ key: 'costoUnitario', label: 'Costo', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }] as ColRep[] : []),
+    ...(verCosto ? [{ key: 'costoUnitario', label: 'Costo', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }] as ColRep[] : []),
     { key: 'estado', label: 'Estado' },
   ];
   return (
     <Crud titulo="Productos" nombreExport="productos" deps={dataset.productos}
-      extra={puede('costos.ver') && dataset.productos.length > 0 && (
-        <SimuladorPrecio igv={dataset.negocio.igv} productos={dataset.productos.map((p) => ({ id: p.id, nombre: p.nombre, costoUnitario: p.costoUnitario, precioConIgv: p.precioConIgv }))} />
-      )}
-      descripcion={puede('costos.ver') ? 'Costo = insumos por unidad esperada + mano de obra (horas hombre) + CIF (horas de horno, kg de masa y unidades).' : 'Catálogo de productos y precios.'}
+      descripcion={verCosto ? 'Datos de cada pan. Cómo se forma su costo y el precio sugerido están en Gerencia → Análisis de precios.' : 'Catálogo de productos y precios.'}
       cargar={async () => dataset.productos.map((p) => ({ ...p, categoria: dataset.categorias.find((c) => c.id === (p as unknown as Reg).categoriaId)?.nombre } as unknown as Reg))}
-      nuevo={{ nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO' }}
-      crear={puede('maestros.editar') ? async (d) => { await api('/productos', { method: 'POST', body: { ...d, mermaPct: 0.03 } }); await refrescarDatos(); } : undefined}
+      nuevo={{ codigo: '', nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO' }}
+      // Alta en dos pasos: se crea (código, nombre, categoría, precio) y se guardan los datos de producción con la misma validación de la edición.
+      crear={puede('maestros.editar') ? async (d) => {
+        const r = await api<{ id: string }>('/productos', { method: 'POST', body: { ...d, mermaPct: 0.03 } });
+        await api(`/productos/${r.id}`, { method: 'PATCH', body: { ...d, codigo: undefined } });
+        await refrescarDatos();
+      } : undefined}
       editar={puede('maestros.editar') ? async (id, d) => { await api(`/productos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
       columnas={columnas}
       campos={[
-        { key: 'imagenUrl', label: 'Imagen del catálogo', tipo: 'imagen', ayuda: 'PNG, JPEG o WebP. Se reduce antes de subirla; la ven los clientes en la web y la app.' },
-        { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 120 },
+        { key: 'imagenUrl', label: 'Imagen del catálogo', tipo: 'imagen', ayuda: 'PNG, JPEG o WebP. La ven los clientes en la web y la app.' },
+        { key: 'codigo', label: 'Código', max: 20, placeholder: 'Automático (P001…)', ayuda: 'Escríbelo o déjalo vacío para que el sistema lo genere' },
+        { key: 'nombre', label: 'Nombre', requerido: true, max: 120 },
         { key: 'categoriaId', label: 'Categoría', tipo: 'select', opciones: cats },
-        { key: 'unidad', label: 'Unidad de venta', tipo: 'select', opciones: unidadesVenta, ayuda: 'Se administran en Maestros → Catálogos → Unidades' },
-        { key: 'precioConIgv', label: 'Precio con IGV (S/)', tipo: 'numero', requerido: true },
+        { key: 'unidad', label: 'Unidad de venta (presentación)', tipo: 'select', opciones: unidadesVenta, ayuda: 'Se administran en Maestros → Catálogos → Unidades' },
+        { key: 'precioConIgv', label: 'Precio de venta con IGV (S/)', tipo: 'numero', requerido: true },
+        { key: 'c-neto', label: 'Precio neto sin IGV (S/)', tipo: 'calculado', calcular: (form) => (Number.isFinite(neto(form)) ? money(neto(form)) : '—'), ayuda: `Precio con IGV ÷ ${(1 + igv).toFixed(2)}` },
+        { key: 'pesoMasaG', label: 'Peso de masa cruda por unidad (g)', tipo: 'numero', ayuda: 'El bollito pesado antes de entrar al horno' },
+        { key: 'pesoFinalG', label: 'Peso final por unidad (g)', tipo: 'numero', ayuda: 'El pan pesado al salir del horno' },
+        { key: 'c-perdida', label: 'Pérdida por cocción', tipo: 'calculado', ayuda: 'Lo calcula el sistema: 1 − peso final ÷ peso crudo',
+          calcular: (form) => { const c = n(form.pesoMasaG), fin = n(form.pesoFinalG); return c > 0 && fin > 0 ? (fin > c ? 'El peso final no puede superar al crudo' : pct(1 - fin / c)) : '—'; } },
+        { key: 'unidadesLote', label: 'Unidades por lote (bandeja al horno)', tipo: 'numero', ayuda: 'Cuántos panes entran al horno a la vez' },
+        { key: 'horasHornoLote', label: 'Tiempo de horneado por lote (horas)', tipo: 'numero', ayuda: 'Ej.: 0.5 = media hora. Con él se calculan el gas del horno y la mano de obra' },
+        { key: 'vidaUtilDias', label: 'Días de vida útil', tipo: 'numero', ayuda: 'Días que se puede vender desde que sale del horno. Cada horneada guarda su fecha de producción y de vencimiento' },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
-        { key: 'pesoMasaG', label: 'Peso de masa cruda por unidad (g)', tipo: 'numero', ayuda: 'Con este dato las unidades por lote salen de la masa de la receta' },
-        { key: 'perdidaCoccion', label: 'Pérdida por cocción (%)', tipo: 'pct' },
-        { key: 'horasHombreLote', label: 'Horas hombre por lote', tipo: 'numero' },
-        { key: 'horasHornoLote', label: 'Horas de horno por lote', tipo: 'numero' },
         { key: 'anticipacionHoras', label: 'Anticipación mínima del pedido (horas)', tipo: 'numero', ayuda: 'Ej.: 24 para pan por encargo' },
-        { key: 'insumoId', label: 'Produce el insumo (sub-receta)', tipo: 'select', ancho: true,
+        { key: 'insumoId', label: 'Produce el insumo (sub-receta)', tipo: 'select',
           opciones: [{ valor: '', texto: 'No: es un producto de venta' }, ...dataset.insumos.map((i) => ({ valor: i.id, texto: `${i.nombre} (${i.unidadInventario ?? i.unidad})` }))],
-          ayuda: 'Para masa madre o rellenos: su receta da el costo, su OP entra al almacén de insumos y no se vende. La unidad de venta debe ser la del stock del insumo.' },
+          ayuda: 'Solo masa madre o rellenos: entra al almacén de insumos y no se vende' },
       ]} />
   );
 }
 
-/** COS-10 / RN-16 / RN-17: precio sugerido desde un margen objetivo (precio neto = costo ÷ (1 − margen)) o un markup (costo × (1 + markup)). */
-function SimuladorPrecio({ productos, igv }: { productos: Array<{ id: string; nombre: string; costoUnitario: number; precioConIgv: number }>; igv: number }) {
+/**
+ * Análisis de costo y precio (fuera del registro, como pidió el dueño): cómo se forma el costo de un pan
+ * con su receta, la mano de obra y los costos indirectos del mes, cuánto deja hoy y qué precio haría falta
+ * para un margen o markup objetivo (COS-10 / RN-16 / RN-17). El costo cambia solo cuando cambian las compras.
+ */
+export function AnalisisPrecio({ productos, recetas, igv }: {
+  productos: Array<{ id: string; nombre: string; costoUnitario: number; precioConIgv: number }>; recetas: Array<Record<string, unknown>>; igv: number;
+}) {
   const [id, setId] = useState(productos[0]?.id ?? '');
   const [modo, setModo] = useState<'margen' | 'markup'>('margen');
   const [valor, setValor] = useState(40);
   const p = productos.find((x) => x.id === id);
   if (!p) return null;
+  const r = recetas.find((x) => x.productoId === id);
+  const v = (k: string) => Number(r?.[k] ?? 0);
+  const costo = r ? v('costoConMerma') + v('moUnit') + v('cifUnit') : p.costoUnitario;
+  const netoActual = p.precioConIgv / (1 + igv);
+  const utilidad = netoActual - costo;
   const f = valor / 100;
-  const neto = modo === 'margen' ? (f < 1 ? p.costoUnitario / (1 - f) : 0) : p.costoUnitario * (1 + f);
-  const actualNeto = p.precioConIgv / (1 + igv);
+  const netoSugerido = modo === 'margen' ? (f < 1 ? costo / (1 - f) : 0) : costo * (1 + f);
+  const filas: Array<[string, string, string]> = r ? [
+    ['Masa total del lote', `${v('masaLoteKg').toFixed(3)} kg`, 'Suma de los insumos de la receta'],
+    ['Unidades por lote (teóricas → esperadas)', `${v('unidadesTeoricas').toFixed(1)} → ${v('unidadesEsperadas').toFixed(1)}`, 'Masa ÷ peso crudo; luego se descuenta la merma de proceso'],
+    ['Costo de insumos del lote', money(v('costoLote')), 'Cantidad de la receta × costo promedio de cada insumo'],
+    ['Insumos por unidad (con merma)', money(v('costoConMerma')), 'Costo de insumos × (1 + % merma)'],
+    ['Mano de obra por unidad', money(v('moUnit')), 'Tiempo de horneado × costo de la hora ÷ unidades por lote'],
+    ['Costos indirectos por unidad', money(v('cifUnit')), 'Gas, luz, alquiler… repartidos por hora de horno, kg de masa y unidad'],
+  ] : [];
   return (
     <Tarjeta>
-      <TarjetaTitulo titulo="Simulador de precio" subtitulo="Precio neto = costo ÷ (1 − margen) · o costo × (1 + markup). No cambia nada hasta que edites el producto." />
       <div className="form form--2col">
         <label className="field"><span className="field__label">Producto</span>
           <select className="field__input" value={id} onChange={(e) => setId(e.target.value)}>{productos.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label>
-        <label className="field"><span className="field__label">{modo === 'margen' ? 'Margen objetivo (%)' : 'Markup (%)'}</span>
+        <label className="field"><span className="field__label">Precio sugerido según</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <select className="field__input" style={{ maxWidth: 120 }} value={modo} onChange={(e) => setModo(e.target.value as 'margen' | 'markup')}><option value="margen">Margen</option><option value="markup">Markup</option></select>
-            <input className="field__input" type="number" min={0} max={modo === 'margen' ? 95 : 1000} step="0.5" value={valor} onChange={(e) => setValor(Number(e.target.value))} />
+            <input className="field__input" type="number" min={0} max={modo === 'margen' ? 95 : 1000} step="0.5" value={valor} aria-label={modo === 'margen' ? 'Margen objetivo (%)' : 'Markup (%)'} onChange={(e) => setValor(Number(e.target.value))} />
           </div></label>
       </div>
+      {r ? (
+        <div className="table-wrap" style={{ marginTop: 12 }}>
+          <table className="table">
+            <thead><tr><th>Concepto</th><th className="t-right">Valor</th><th>Cómo se calcula</th></tr></thead>
+            <tbody>
+              {filas.map(([c, val, como]) => <tr key={c}><td>{c}</td><td className="t-right">{val}</td><td className="t-muted">{como}</td></tr>)}
+              <tr><td><b>Costo total por unidad</b></td><td className="t-right"><b>{money(costo)}</b></td><td className="t-muted">Insumos + mano de obra + costos indirectos</td></tr>
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="t-muted" style={{ marginTop: 12 }}>Este producto aún no tiene receta: regístrala en Maestros → Recetas para ver su costo.</p>}
       <div className="grid grid--auto" style={{ marginTop: 12 }}>
-        <Kpi label="Costo unitario" valor={money(p.costoUnitario)} nota="insumos + mano de obra + CIF" icono="ledger" />
-        <Kpi label="Precio neto sugerido" valor={money(neto)} nota={'actual ' + money(actualNeto)} icono="spark" />
-        <Kpi label="Precio con IGV sugerido" valor={money(neto * (1 + igv))} nota={'actual ' + money(p.precioConIgv)} icono="wallet" />
+        <Kpi label="Precio actual sin IGV" valor={money(netoActual)} nota={'con IGV ' + money(p.precioConIgv)} icono="wallet" />
+        <Kpi label="Utilidad y margen hoy" valor={money(utilidad)} nota={`margen ${netoActual > 0 ? pct(utilidad / netoActual) : '—'} · markup ${costo > 0 ? pct(utilidad / costo) : '—'}`} icono="chart" />
+        <Kpi label="Precio sugerido con IGV" valor={money(netoSugerido * (1 + igv))} nota={'sin IGV ' + money(netoSugerido)} icono="spark" />
       </div>
     </Tarjeta>
   );
@@ -272,5 +312,18 @@ export function Almacenes() {
         { key: 'principal', label: 'Principal de su tipo (recibe los movimientos)', tipo: 'bool' },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: [{ valor: 'ACTIVO', texto: 'Activo' }, { valor: 'INACTIVO', texto: 'Inactivo' }] },
       ]} />
+  );
+}
+
+/* ------------------------------------------------- Gerencia: análisis de precios */
+export function AnalisisPrecios() {
+  const { dataset } = useApp();
+  const productos = dataset.productos.filter((p) => !p.insumoId && p.estado === 'ACTIVO');
+  return (
+    <>
+      <Encabezado titulo="Análisis de precios" descripcion="Cómo se forma el costo de cada pan y qué precio conviene. Se actualiza solo cuando cambian los precios de compra o los costos indirectos." />
+      {productos.length ? <AnalisisPrecio igv={dataset.negocio.igv} productos={productos} recetas={dataset.recetas as unknown as Array<Record<string, unknown>>} />
+        : <Vacio titulo="Sin productos activos" detalle="Registra productos en Maestros → Productos." />}
+    </>
   );
 }

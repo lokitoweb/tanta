@@ -4,7 +4,7 @@ import { Gate } from '@/core/app-state';
 import { Panel } from '@/modules/panel/Panel';
 import { Dashboard } from '@/modules/gerencia/Dashboard';
 import { Reportes } from '@/modules/gerencia/Reportes';
-import { Almacenes, Categorias, Clientes, CostosIndirectos, Insumos, Productos, Proveedores } from '@/modules/maestros/Maestros';
+import { AnalisisPrecios, Almacenes, Categorias, Clientes, CostosIndirectos, Insumos, Productos, Proveedores } from '@/modules/maestros/Maestros';
 import { Compras } from '@/modules/almacen/Compras';
 import { Conteos } from '@/modules/almacen/Conteos';
 import { Deudas } from '@/modules/almacen/Deudas';
@@ -61,6 +61,7 @@ export function App() {
         <Route path="/seguridad/usuarios" element={<Gate permiso="usuarios.ver" siNo={<SinAcceso />}><Usuarios /></Gate>} />
         <Route path="/seguridad/parametros" element={<Gate permiso="parametros.gestionar" siNo={<SinAcceso />}><Parametros /></Gate>} />
         <Route path="/gerencia/periodos" element={<Gate permiso="periodos.cerrar" siNo={<SinAcceso />}><Periodos /></Gate>} />
+        <Route path="/gerencia/analisis-precios" element={<Gate permiso="costos.ver" siNo={<SinAcceso />}><AnalisisPrecios /></Gate>} />
 
         <Route path="/maestros/categorias" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Categorias /></Gate>} />
         <Route path="/maestros/clientes" element={<Gate permiso="clientes.gestionar" siNo={<SinAcceso />}><Clientes /></Gate>} />

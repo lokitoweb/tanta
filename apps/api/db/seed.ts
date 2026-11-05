@@ -123,6 +123,7 @@ const NAV: Array<[string, string, string, string, string, string, number, number
   ['n-dashboard', 'Gerencia', 'Costos y márgenes', '/gerencia/dashboard', 'chart', 'dashboard.ver', 1, 4],
   ['n-reportes', 'Reportes', 'Reportes', '/gerencia/reportes', 'report', 'reportes.ver', 1, 8],
   ['n-periodos', 'Gerencia', 'Períodos de costo', '/gerencia/periodos', 'report', 'periodos.cerrar', 3, 4],
+  ['n-analisis-precios', 'Gerencia', 'Análisis de precios', '/gerencia/analisis-precios', 'chart', 'costos.ver', 2, 4],
 ];
 
 // Una sola categoría: Panadería. Cada pan con su receta.

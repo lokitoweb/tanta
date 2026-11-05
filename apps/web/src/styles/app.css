@@ -1413,3 +1413,14 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 }
 .btn-icono--peligro:hover, .btn-icono--peligro:focus-visible { color: var(--tanta-state-danger); border-color: var(--tanta-border-default); background: var(--tanta-surface-card); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Formularios en bloques: subtítulo de sección y valores calculados (solo lectura) */
+.form__seccion { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; margin-top: 4px; border-top: 1px solid var(--tanta-border-subtle); }
+.form__seccion:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.form__seccion b { font-size: 0.8125rem; font-weight: 650; color: var(--tanta-text-primary); }
+.form__seccion span { font-size: 0.75rem; color: var(--tanta-text-muted); }
+.field--calculado .field__valor {
+  display: flex; align-items: center; min-height: 38px; padding: 0 12px; border-radius: var(--tanta-radius-md);
+  background: var(--tanta-neutral-50); border: 1px dashed var(--tanta-border-default);
+  font-variant-numeric: tabular-nums; font-weight: 600; color: var(--tanta-text-primary);
+}

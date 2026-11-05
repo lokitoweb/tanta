@@ -99,6 +99,14 @@ export async function rutasMaestros(app: FastifyInstance) {
     anticipacionHoras: z.number().int().min(0).max(720).nullable().optional(),
     perdidaCoccion: pct.nullable().optional(), horasHombreLote: z.number().min(0).max(100).nullable().optional(), horasHornoLote: z.number().min(0).max(100).nullable().optional(),
     imagenUrl: ImagenProducto,
+    // Código propio del negocio (opcional): si no se escribe, el sistema lo genera (P001, P002…).
+    codigo: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/, 'El código lleva de 2 a 20 letras, números o guiones').optional().or(z.literal('')),
+    // Peso del pan al salir del horno (g): con el peso crudo el sistema calcula la pérdida por cocción.
+    pesoFinalG: z.number().positive().max(100_000).nullable().optional(),
+    // Panes que entran al horno en un lote (bandeja): reparte las horas de horno y de mano de obra.
+    unidadesLote: z.number().int().positive().max(100_000).nullable().optional(),
+    // Días que el pan se puede vender desde que sale del horno: fija el vencimiento de cada horneada.
+    vidaUtilDias: z.number().int().min(0).max(3650).nullable().optional(),
     // MAE-06: insumo que produce este producto (sub-receta). "" o null = producto de venta normal.
     insumoId: z.union([z.literal(''), z.string().uuid()]).nullable().optional(),
   });
@@ -122,6 +130,15 @@ export async function rutasMaestros(app: FastifyInstance) {
       if (await uno('SELECT 1 FROM core.producto WHERE insumo_id = $1 AND id <> $2', [insumoId, id])) return reply.code(409).send(error(409, 'INSUMO_YA_PRODUCIDO', 'Otro producto ya produce ese insumo.'));
       if (await uno('SELECT 1 FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE r.producto_id = $1 AND d.insumo_id = $2', [id, insumoId])) return reply.code(422).send(error(422, 'CICLO', 'La receta de este producto usa ese mismo insumo.'));
     }
+    if (p.data.pesoFinalG && p.data.pesoMasaG && p.data.pesoFinalG > p.data.pesoMasaG) {
+      return reply.code(422).send(error(422, 'PESO_FINAL_MAYOR', 'pesoFinalG: el peso al salir del horno no puede ser mayor que el de la masa cruda.'));
+    }
+    const codigo = p.data.codigo || undefined;
+    if (codigo && await uno('SELECT 1 FROM core.producto WHERE upper(codigo) = $1 AND id <> $2', [codigo, id])) {
+      return reply.code(409).send(error(409, 'CODIGO_DUPLICADO', `El código ${codigo} ya lo usa otro producto.`));
+    }
+    // Pérdida por cocción = 1 − peso final ÷ peso crudo (se mide, no se adivina el %).
+    const perdida = p.data.pesoFinalG && p.data.pesoMasaG ? 1 - p.data.pesoFinalG / p.data.pesoMasaG : p.data.perdidaCoccion ?? null;
     // Solo un intermedio (no se vende) puede quedar sin precio.
     const intermedio = insumoId !== undefined ? insumoId !== null : Boolean(await uno('SELECT 1 FROM core.producto WHERE id = $1 AND insumo_id IS NOT NULL', [id]));
     if (!intermedio && p.data.precioConIgv <= 0) return reply.code(422).send(error(422, 'PRECIO_INVALIDO', 'precioConIgv: el precio debe ser mayor que cero.'));
@@ -133,10 +150,15 @@ export async function rutasMaestros(app: FastifyInstance) {
           perdida_coccion = coalesce($9::numeric, perdida_coccion),
           horas_hombre_lote = coalesce($10::numeric, horas_hombre_lote), horas_horno_lote = coalesce($11::numeric, horas_horno_lote),
           anticipacion_horas = coalesce($12::int, anticipacion_horas),
-          insumo_id = CASE WHEN $13::boolean THEN $14::uuid ELSE insumo_id END
+          insumo_id = CASE WHEN $13::boolean THEN $14::uuid ELSE insumo_id END,
+          peso_final_g = CASE WHEN $15::boolean THEN $16::numeric ELSE peso_final_g END,
+          unidades_lote = CASE WHEN $17::boolean THEN $18::int ELSE unidades_lote END,
+          codigo = coalesce($19, codigo),
+          vida_util_dias = CASE WHEN $20::boolean THEN $21::int ELSE vida_util_dias END
         WHERE id=$1`,
         [id, p.data.nombre, p.data.categoriaId, p.data.unidad, p.data.precioConIgv.toFixed(4), p.data.estado,
-          p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, p.data.perdidaCoccion ?? null, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null, p.data.anticipacionHoras ?? null, insumoId !== undefined, insumoId ?? null]);
+          p.data.pesoMasaG !== undefined, p.data.pesoMasaG ?? null, perdida, p.data.horasHombreLote ?? null, p.data.horasHornoLote ?? null, p.data.anticipacionHoras ?? null, insumoId !== undefined, insumoId ?? null,
+          p.data.pesoFinalG !== undefined, p.data.pesoFinalG ?? null, p.data.unidadesLote !== undefined, p.data.unidadesLote ?? null, codigo ?? null, p.data.vidaUtilDias !== undefined, p.data.vidaUtilDias ?? null]);
       await c.query('SELECT core.recalcular_costos()');
     });
     invalidar('cat:'); // el catálogo (web y app) ve el cambio al instante, no tras el TTL

@@ -40,6 +40,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     unidad: z.string().min(1).max(20).default('UNIDAD'),
     precioConIgv: z.number().min(0).max(100000),
     mermaPct: z.number().min(0).max(0.5).default(0.03),
+    // Vacío = el sistema genera el siguiente (P001, P002…).
+    codigo: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/, 'El código lleva de 2 a 20 letras, números o guiones').optional().or(z.literal('')),
     imagenUrl: ImagenProducto,
   });
 
@@ -48,15 +50,18 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = NuevoProducto.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Datos inválidos.'));
 
-    const { imagenUrl, ...d } = parseo.data;
+    const { imagenUrl, codigo, ...d } = parseo.data;
+    if (codigo && await uno('SELECT 1 FROM core.producto WHERE upper(codigo) = $1', [codigo])) {
+      return reply.code(409).send(error(409, 'CODIGO_DUPLICADO', `El código ${codigo} ya lo usa otro producto.`));
+    }
     // La imagen se valida antes de crear el producto: un 415/413 no deja un producto sin foto que se duplica al reintentar.
     let imagenId: string | null = null;
     if (imagenUrl?.startsWith('data:')) try { imagenId = await guardarImagen(imagenUrl, req.usuario!.id); } catch (e) { return falloImagen(reply, e); }
     const fila = await uno<{ id: string }>(
       `INSERT INTO core.producto (codigo, nombre, categoria_id, unidad, precio_con_igv, merma_pct, imagen_id)
-       VALUES ('P' || lpad((SELECT coalesce(max(substring(codigo from 2)::int), 0) + 1 FROM core.producto WHERE codigo ~ '^P[0-9]+$')::text, 3, '0'), $1,$2,$3,$4,$5,$6)
+       VALUES (coalesce($7, 'P' || lpad((SELECT coalesce(max(substring(codigo from 2)::int), 0) + 1 FROM core.producto WHERE codigo ~ '^P[0-9]+$')::text, 3, '0')), $1,$2,$3,$4,$5,$6)
        RETURNING id`,
-      [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), d.mermaPct.toFixed(6), imagenId],
+      [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), d.mermaPct.toFixed(6), imagenId, codigo || null],
     );
     invalidar('cat:');
     await auditar({
@@ -165,8 +170,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
           if (requisicion && requisicion.estado === 'PENDIENTE') {
             throw Object.assign(new Error(`Almacén aún no entrega los insumos (${requisicion.codigo}).`), { status: 409 });
           }
-          const receta = (await c.query<{ unidades_teoricas: string; unidades_esperadas: string; horas_hombre_lote: string; horas_horno_lote: string }>(
-            `SELECT r.unidades_teoricas, r.unidades_esperadas, p.horas_hombre_lote, p.horas_horno_lote
+          const receta = (await c.query<{ unidades_teoricas: string; unidades_esperadas: string; horas_hombre_lote: string; horas_horno_lote: string; vida_util_dias: number | null }>(
+            `SELECT r.unidades_teoricas, r.unidades_esperadas, p.horas_hombre_lote, p.horas_horno_lote, p.vida_util_dias
              FROM core.receta r JOIN core.producto p ON p.id = r.producto_id WHERE r.id = $1`, [op.receta_id])).rows[0];
           const lotes = op.lotes !== null ? Number(op.lotes) : cantidadProducida / Math.max(Number(receta?.unidades_esperadas ?? 0), 1e-9);
           // Unidades buenas + merma no superan lo preparado (lotes × unidades teóricas), con 5 % de holgura.
@@ -228,7 +233,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
               (SELECT tarifa_hora_horno FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) th,
               (SELECT tarifa_kg_masa FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tk,
               (SELECT tarifa_unidad FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tu`)).rows[0];
-          const horasHombre = d.horasHombreReal ?? lotes * Number(receta?.horas_hombre_lote ?? 0);
+          // Sin horas hombre propias, la mano de obra se paga por el tiempo de horneado (criterio del dueño).
+          const horasHombre = d.horasHombreReal ?? lotes * (Number(receta?.horas_hombre_lote ?? 0) || Number(receta?.horas_horno_lote ?? 0));
           const horasHorno = d.horasHornoReal ?? lotes * Number(receta?.horas_horno_lote ?? 0);
           const costoMo = horasHombre * Number(t.hora ?? 0);
           const costoCif = horasHorno * Number(t.th ?? 0) + Number(op.masa_kg ?? 0) * Number(t.tk ?? 0) + cantidadProducida * Number(t.tu ?? 0);
@@ -261,11 +267,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
             const nuevoStockProd = stockProd + cantidadProducida;
             await c.query(
               `INSERT INTO core.movimiento_inventario
-                 (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
-               VALUES ('INGRESO_PRODUCCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$8)`,
+                 (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,lote,vence_en)
+               VALUES ('INGRESO_PRODUCCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$8,$2,(now() AT TIME ZONE 'America/Lima')::date + $9::int)`,
               [op.producto_id, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6),
                 (cantidadProducida * costoProd).toFixed(4), nuevoStockProd.toFixed(6),
-                ((stockProd + cantidadProducida) * costoProd).toFixed(4), costoProd.toFixed(6)],
+                ((stockProd + cantidadProducida) * costoProd).toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
             );
             await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStockProd.toFixed(6), op.producto_id]);
           }
@@ -274,10 +280,12 @@ export async function rutasOperaciones(app: FastifyInstance) {
             `UPDATE core.orden_produccion
              SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3, motivo_merma = $4,
                  unidades_buenas = $3, unidades_merma = $5, motivo_merma_tipo = $6, horas_hombre_real = $7, horas_horno_real = $8,
-                 costo_total = $9, costo_unitario_real = $10
+                 costo_total = $9, costo_unitario_real = $10,
+                 fecha_produccion = (now() AT TIME ZONE 'America/Lima')::date,
+                 vence_en = (now() AT TIME ZONE 'America/Lima')::date + $11::int
              WHERE id = $1`,
             [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma, unidadesMerma.toFixed(4), d.motivoMermaTipo ?? null,
-              horasHombre.toFixed(3), horasHorno.toFixed(3), costoTotal.toFixed(4), costoProd.toFixed(6)],
+              horasHombre.toFixed(3), horasHorno.toFixed(3), costoTotal.toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
           );
           await c.query('SELECT core.recalcular_costos()');
 

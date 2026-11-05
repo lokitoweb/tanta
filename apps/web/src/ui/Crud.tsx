@@ -8,7 +8,11 @@ import { imagenABase64 } from '@/core/imagen';
 
 export interface Campo {
   key: string; label: string;
-  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'imagen';
+  /** seccion = subtítulo que agrupa campos; calculado = valor de solo lectura que se recalcula al escribir. */
+  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'imagen' | 'seccion' | 'calculado';
+  /** Para tipo calculado: recibe el formulario actual y devuelve el texto a mostrar. */
+  calcular?: (form: Record<string, unknown>) => string;
+  placeholder?: string;
   opciones?: Array<{ valor: string; texto: string }>;
   requerido?: boolean; ayuda?: string; max?: number; ancho?: boolean;
   /** Solo se escribe al crear (p. ej. el código de un catálogo): al editar se muestra sin cambiarlo. */
@@ -37,6 +41,8 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [cargaError, setCargaError] = useState<string | null>(null);
+  // Campo que nombra al registro en los títulos: "nombre" si existe; si no, el primer campo editable.
+  const claveTitulo = (campos.find((c) => c.key === 'nombre') ?? campos.find((c) => !['imagen', 'seccion', 'calculado'].includes(c.tipo ?? '')) ?? campos[0]).key;
   const [aBorrar, setABorrar] = useState<Reg | null>(null);
   const [borrando, setBorrando] = useState(false);
   const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
@@ -62,7 +68,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
     setGuardando(true);
     setError(null);
     try {
-      const datos = Object.fromEntries(campos.map((c) => [c.key, (c.tipo === 'numero' || c.tipo === 'pct') && form[c.key] === '' ? null : form[c.key]]));
+      const datos = Object.fromEntries(campos.filter((c) => c.tipo !== 'seccion' && c.tipo !== 'calculado').map((c) => [c.key, (c.tipo === 'numero' || c.tipo === 'pct') && form[c.key] === '' ? null : form[c.key]]));
       if (form.id) await editar!(form.id, datos); else await crear!(datos);
       setForm(null);
       await refrescar();
@@ -99,17 +105,25 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
               onEliminar={eliminar ? (f) => { setErrorBorrar(null); setABorrar(f); } : undefined} />}
       </Tarjeta>
 
-      <Dialogo abierto={aBorrar !== null} titulo={`Eliminar · ${String(aBorrar?.[(campos.find((c) => c.tipo !== 'imagen') ?? campos[0]).key] ?? '')}`}
+      <Dialogo abierto={aBorrar !== null} titulo={`Eliminar · ${String(aBorrar?.[claveTitulo] ?? '')}`}
         descripcion="Se borra de forma permanente y queda en la auditoría. Si está en uso, el sistema no lo permite."
         onCerrar={() => setABorrar(null)}
         acciones={<><Boton onClick={() => setABorrar(null)}>Cancelar</Boton><Boton variant="danger" onClick={() => void borrar()} disabled={borrando}>{borrando ? 'Eliminando…' : 'Eliminar'}</Boton></>}>
         {errorBorrar ? <p className="form__error" role="alert">{errorBorrar}</p> : <p>¿Seguro que quieres eliminarlo?</p>}
       </Dialogo>
-      <Dialogo abierto={form !== null} titulo={form?.id ? `Editar · ${String(form?.[(campos.find((c) => c.tipo !== 'imagen') ?? campos[0]).key] ?? '')}` : `Nuevo · ${titulo.toLowerCase()}`}
+      <Dialogo abierto={form !== null} titulo={form?.id ? `Editar · ${String(form?.[claveTitulo] ?? '')}` : `Nuevo · ${titulo.toLowerCase()}`}
         onCerrar={() => setForm(null)}
         acciones={<><Boton onClick={() => setForm(null)}>Cancelar</Boton><Boton variant="primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</Boton></>}>
         <form className="form form--2col form--dialogo" onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
-          {campos.map((c) => c.tipo === 'imagen' ? (
+          {campos.map((c) => c.tipo === 'seccion' ? (
+            <div key={c.key} className="form__seccion field--ancho"><b>{c.label}</b>{c.ayuda && <span>{c.ayuda}</span>}</div>
+          ) : c.tipo === 'calculado' ? (
+            <div key={c.key} className={`field field--calculado ${c.ancho ? 'field--ancho' : ''}`}>
+              <span className="field__label">{c.label}</span>
+              <output className="field__valor">{form ? c.calcular?.(form) ?? '—' : '—'}</output>
+              {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}
+            </div>
+          ) : c.tipo === 'imagen' ? (
             <div key={c.key} className="field field--ancho">
               <span className="field__label">{c.label}</span>
               <div className="campo-imagen">
@@ -133,7 +147,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
                   {c.opciones?.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
                 </select>
               ) : (
-                <input className="field__input" required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id}
+                <input className="field__input" placeholder={c.placeholder} required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id}
                   type={c.tipo === 'numero' || c.tipo === 'pct' ? 'number' : c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : 'text'}
                   step={c.tipo === 'pct' ? '0.1' : c.tipo === 'numero' ? 'any' : undefined} min={c.tipo === 'numero' || c.tipo === 'pct' ? 0 : undefined}
                   value={valor(c)} onChange={(e) => set(c, e.target.value)} />
