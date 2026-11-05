@@ -35,7 +35,15 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
   }, [elegirCliente]);
 
   // Presentaciones de venta del producto (unidad + paquetes): cada una con su precio.
-  const presDe = (id: string) => (productos.find((p) => p.id === id)?.presentaciones ?? []).filter((x) => x.activo);
+  // Presentaciones vendibles: el SKU #1 (si no es la unidad suelta) y las del SKU #2…
+  const presDe = (id: string) => {
+    const p = productos.find((x) => x.id === id);
+    if (!p) return [];
+    const eq = p.presentacionEquivalencia ?? 1;
+    const sku1 = p.presentacionCodigo && eq !== 1
+      ? [{ presentacion: p.presentacionCodigo, nombre: p.presentacionNombre ?? p.presentacionCodigo, precioConIgv: Math.round(p.precioConIgv * eq * 100) / 100 }] : [];
+    return [...sku1, ...(p.presentaciones ?? []).filter((x) => x.activo)];
+  };
   const precio = (id: string, pres: string) => (pres ? presDe(id).find((x) => x.presentacion === pres)?.precioConIgv : productos.find((p) => p.id === id)?.precioConIgv) ?? 0;
   const total = items.reduce((s, i) => s + precio(i.productoId, i.presentacion) * (Number(i.cantidad) || 0), 0);
   const valido = items.length > 0 && items.every((i) => i.productoId && Number(i.cantidad) > 0) && fecha >= hoy() && (!elegirCliente || clienteId);

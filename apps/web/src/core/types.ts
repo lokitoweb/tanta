@@ -17,6 +17,8 @@ export interface Producto {
   insumoId?: string | null;
   /** SKU de la unidad y presentaciones de venta adicionales (paquete x 6) con su precio. */
   sku?: string; presentaciones?: PresentacionProducto[];
+  /** SKU #1: presentación de venta y su equivalencia en unidades (precioConIgv es por unidad). */
+  presentacionCodigo?: string; presentacionNombre?: string; presentacionEquivalencia?: number;
   pesoMasaG?: number | null; pesoFinalG?: number | null; unidadesLote?: number | null; horasHornoLote?: number; vidaUtilDias?: number | null;
 }
 export interface PresentacionProducto { presentacion: string; nombre: string; equivalencia: number; sku: string; precioConIgv: number; activo: boolean }

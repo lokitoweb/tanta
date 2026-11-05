@@ -32,7 +32,7 @@ before(async () => {
   const mapa = Object.fromEntries(ids.slice(1).map((x) => x.split('=')));
   harina = mapa[`TH-${sufijo}`]; levadura = mapa[`TL-${sufijo}`];
   const receta = await api(sa, 'PUT', `/recetas/${productoId}`, { rendimiento: 24, mermaEstandar: 0.03, lineas: [
-    { insumoId: harina, cantidad: 10 }, { insumoId: mapa[`TA-${sufijo}`], cantidad: 5800, unidad: 'ML' }, { insumoId: levadura, cantidad: 584, unidad: 'GR' }] });
+    { insumoId: harina, cantidad: 10 }, { insumoId: mapa[`TA-${sufijo}`], cantidad: 5800, unidad: 'ML' }, { insumoId: levadura, cantidad: 584, unidad: 'G' }] });
   assert.equal(receta.s, 200, JSON.stringify(receta.b));
   // CP-15: con 30 kg de harina en stock, una orden de 40 kg queda en FALTA.
   const { comprarInventario } = flujoCompras(api, login);

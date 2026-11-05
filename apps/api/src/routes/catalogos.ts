@@ -140,6 +140,11 @@ export async function rutasCatalogos(app: FastifyInstance) {
       if (catalogo === 'presentaciones-venta' && d.insumoId && !(await uno('SELECT 1 FROM core.insumo WHERE id = $1 AND activo', [d.insumoId]))) {
         throw fallo(422, 'El insumo a descontar no existe o está inactivo.');
       }
+      // Un nombre por catálogo: dos «gramo» o dos «Paquete x 6» confunden en cada combo.
+      const colNombre = catalogo === 'unidades' ? 'descripcion' : 'nombre';
+      if (await uno(`SELECT 1 FROM ${def.tabla} WHERE lower(${colNombre}) = lower($1) AND codigo <> $2`, [d[colNombre], c.data])) {
+        throw fallo(409, `Ya existe «${String(d[colNombre])}» en este catálogo con otro código.`);
+      }
       if (!crear && catalogo === 'unidades') {
         // Familia y factor no cambian si la unidad ya se usa: el stock y las recetas quedarían en otra escala.
         const actual = await uno<{ familia: string; factor: string }>('SELECT familia, factor_a_patron factor FROM core.unidad_medida WHERE codigo = $1', [c.data]);

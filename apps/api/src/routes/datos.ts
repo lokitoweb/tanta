@@ -100,7 +100,8 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
                p.precio_con_igv, p.costo_unitario, p.merma_pct, p.vendidos_30d, p.stock, p.estado,
-               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, p.anticipacion_horas, p.imagen_id, p.insumo_id, p.peso_final_g, p.unidades_lote, p.vida_util_dias, p.sku,
+               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, p.anticipacion_horas, p.imagen_id, p.insumo_id, p.peso_final_g, p.unidades_lote, p.vida_util_dias, p.sku, p.presentacion_codigo,
+               (SELECT json_build_object('nombre', v.nombre, 'equivalencia', v.equivalencia) FROM core.presentacion_venta v WHERE v.codigo = p.presentacion_codigo) sku1,
                coalesce((SELECT json_agg(json_build_object('presentacion', pp.presentacion_codigo, 'nombre', v.nombre, 'equivalencia', v.equivalencia,
                  'sku', coalesce(pp.sku, ''), 'precioConIgv', pp.precio_con_igv, 'activo', pp.activo) ORDER BY pp.orden)
                  FROM core.producto_presentacion pp JOIN core.presentacion_venta v ON v.codigo = pp.presentacion_codigo WHERE pp.producto_id = p.id), '[]') presentaciones,
@@ -292,6 +293,10 @@ export async function rutasDatos(app: FastifyInstance) {
           unidadesLote: pr.unidades_lote === null ? null : Number(pr.unidades_lote),
           vidaUtilDias: pr.vida_util_dias === null ? null : Number(pr.vida_util_dias),
           sku: pr.sku ?? '',
+          // SKU #1: su presentación; el precio del producto es por unidad (SKU #1 = precio × equivalencia).
+          presentacionCodigo: pr.presentacion_codigo,
+          presentacionNombre: (pr.sku1 as unknown as { nombre: string }).nombre,
+          presentacionEquivalencia: num((pr.sku1 as unknown as { equivalencia: string }).equivalencia),
           presentaciones: (pr.presentaciones as unknown as Array<Record<string, unknown>>).map((x) => ({ ...x, equivalencia: num(x.equivalencia as string), precioConIgv: num(x.precioConIgv as string) })),
         };
         if (!verCosto) return base;

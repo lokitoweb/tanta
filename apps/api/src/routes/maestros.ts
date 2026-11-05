@@ -22,7 +22,9 @@ const sku = z.string().trim().regex(/^([A-Za-z0-9-]{3,30})?$/, 'El SKU lleva de 
 
 function invalido(reply: FastifyReply, e: z.ZodError) {
   const i = e.issues[0];
-  return reply.code(422).send(error(422, 'DATOS_INVALIDOS', i ? `${i.path.join('.') || 'dato'}: ${i.message}` : 'Datos inválidos.'));
+  // presentaciones.0.precioConIgv → «SKU #2: …» (la fila 0 de otras presentaciones es el SKU #2).
+  const donde = i?.path[0] === 'presentaciones' && typeof i.path[1] === 'number' ? `SKU #${i.path[1] + 2}` : i?.path.join('.') || 'dato';
+  return reply.code(422).send(error(422, 'DATOS_INVALIDOS', i ? `${donde}: ${i.message}` : 'Datos inválidos.'));
 }
 
 /** Imagen del producto: data URL nueva = se guarda y reemplaza; null = se quita; la URL actual o nada = sin cambio. */
@@ -108,8 +110,8 @@ export async function rutasMaestros(app: FastifyInstance) {
 
   /* ------------------------------------------------------------- productos */
   const Presentacion = z.object({
-    presentacion: z.string().trim().toUpperCase().min(2).max(20), sku,
-    precioConIgv: z.number().positive().max(1_000_000), activo: z.boolean().default(true),
+    presentacion: z.string().trim().toUpperCase().min(2, 'Elige la presentación de cada SKU').max(20), sku,
+    precioConIgv: z.number({ invalid_type_error: 'Indica el precio de cada SKU', required_error: 'Indica el precio de cada SKU' }).positive('El precio debe ser mayor que cero').max(1_000_000), activo: z.boolean().default(true),
   });
   // Datos de producción de la hoja 'pan' (MAE-03): con ellos el motor calcula unidades, MO y CIF.
   const Producto = z.object({
@@ -133,13 +135,24 @@ export async function rutasMaestros(app: FastifyInstance) {
     sku: sku.optional(),
     // SKU #2…: otras presentaciones de venta (paquete x 6…) con su SKU y su precio. Ausente = no se tocan.
     presentaciones: z.array(Presentacion).max(20).optional(),
+    // SKU #1: presentación del catálogo «Presentaciones de venta» (Unidad, Paquete x 6…). Ausente = no cambia.
+    presentacionCodigo: z.string().trim().toUpperCase().min(2).max(20).optional(),
   });
 
   /** Valida y reemplaza las presentaciones del producto; el SKU no se repite en ningún producto ni presentación. */
   async function guardarPresentaciones(c: import('../db.js').Cliente, productoId: string, skuUnitario: string | undefined,
-    lista: Array<z.infer<typeof Presentacion>> | undefined) {
+    lista: Array<z.infer<typeof Presentacion>> | undefined, presUnitaria?: string) {
+    if (presUnitaria !== undefined) {
+      if (!(await c.query('SELECT 1 FROM core.presentacion_venta WHERE codigo = $1 AND activo', [presUnitaria])).rowCount) {
+        throw fallo(422, `La presentación ${presUnitaria} no existe o está inactiva (Maestros → Catálogos → Presentaciones de venta).`);
+      }
+      await c.query('UPDATE core.producto SET presentacion_codigo = $2 WHERE id = $1', [productoId, presUnitaria]);
+    }
+    // Todos los SKU eligen del mismo catálogo; una presentación no se repite entre ellos (tampoco con el SKU #1).
+    const sku1 = presUnitaria ?? (await c.query<{ p: string }>('SELECT presentacion_codigo p FROM core.producto WHERE id = $1', [productoId])).rows[0]?.p;
     const codigos = (lista ?? []).map((x) => x.presentacion);
-    if (new Set(codigos).size !== codigos.length) throw fallo(422, 'Una presentación aparece dos veces.');
+    if (new Set(codigos).size !== codigos.length) throw fallo(422, 'Una presentación aparece en dos SKU: cada SKU lleva una presentación distinta.');
+    if (sku1 && codigos.includes(sku1)) throw fallo(422, `La presentación ${sku1} ya es el SKU #1 de este producto: elige otra para los demás SKU.`);
     const skus = [...(skuUnitario ? [skuUnitario] : []), ...(lista ?? []).map((x) => x.sku).filter(Boolean)];
     if (new Set(skus.map((s) => s.toUpperCase())).size !== skus.length) throw fallo(422, 'Un SKU se repite en este producto.');
     if (skus.length) {
@@ -245,7 +258,7 @@ export async function rutasMaestros(app: FastifyInstance) {
     // La imagen primero: si es inválida (415/413) no se guarda nada a medias.
     try { await aplicarImagen(id, p.data.imagenUrl, req.usuario!.id); } catch (e) { return falloImagen(reply, e); }
     try { await tx(async (c) => {
-      await guardarPresentaciones(c, id, p.data.sku, p.data.presentaciones);
+      await guardarPresentaciones(c, id, p.data.sku, p.data.presentaciones, p.data.presentacionCodigo);
       await c.query(`UPDATE core.producto SET nombre=$2, categoria_id=$3, unidad=$4, precio_con_igv=$5, estado=$6,
           peso_masa_g = CASE WHEN $7::boolean THEN $8::numeric ELSE peso_masa_g END,
           perdida_coccion = coalesce($9::numeric, perdida_coccion),

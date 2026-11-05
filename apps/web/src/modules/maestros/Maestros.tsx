@@ -125,9 +125,15 @@ export function Productos() {
   const { dataset, puede, refrescarDatos } = useApp();
   const cat = useCatalogos();
   const cats = dataset.categorias.map((c) => ({ valor: c.id, texto: c.nombre }));
-  // Presentación unitaria (SKU #1): unidades de conteo o masa del catálogo.
-  const unidadesVenta = cat.unidades.filter((u) => u.familia !== 'VOLUMEN').map((u) => ({ valor: u.codigo, texto: u.descripcion }));
-  const presVenta = cat.presentacionesVenta.map((p) => ({ valor: p.codigo, texto: `${p.nombre} (${num(p.equivalencia)} unid)` }));
+  // Todos los SKU (#1, #2, #3…) eligen del mismo catálogo: Maestros → Catálogos → Presentaciones de venta.
+  const presVenta = cat.presentacionesVenta.map((p) => ({ valor: p.codigo, texto: p.nombre }));
+  const equiv = (codigo: unknown) => cat.presentacionesVenta.find((p) => p.codigo === codigo)?.equivalencia ?? 1;
+  // El precio del producto se guarda por unidad (costos y margen son por unidad): SKU #1 «Paquete x 6» a S/ 48 = S/ 8 la unidad.
+  // La unidad de stock de una sub-receta es la del insumo que produce.
+  const aGuardar = (d: Reg): Reg => ({
+    ...d, precioConIgv: Math.round((n(d.precioConIgv) / equiv(d.presentacionCodigo)) * 10_000) / 10_000,
+    unidad: dataset.insumos.find((i) => i.id === d.insumoId)?.unidadInventario ?? (d.insumoId ? d.unidad : 'UNIDAD'),
+  });
   const verCosto = puede('costos.ver');
   const edita = puede('maestros.editar');
   const igv = dataset.negocio.igv;
@@ -137,7 +143,7 @@ export function Productos() {
 
   const columnas: ColRep[] = [
     { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'categoria', label: 'Categoría' },
-    { key: 'precioConIgv', label: 'Precio unidad', tipo: 'dinero' }, { key: 'presentacionesTxt', label: 'Otras presentaciones' },
+    { key: 'precioUnidad', label: 'Precio unidad', tipo: 'dinero' }, { key: 'presentacionesTxt', label: 'Otras presentaciones' },
     ...(verCosto ? [{ key: 'costoUnitario', label: 'Costo', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }] as ColRep[] : []),
     { key: 'estado', label: 'Estado' },
   ];
@@ -158,15 +164,20 @@ export function Productos() {
           ...p, categoria: dataset.categorias.find((c) => c.id === p.categoriaId)?.nombre,
           presentacionesTxt: (p.presentaciones ?? []).map((x) => `${x.nombre} ${money(x.precioConIgv)}`).join(' · '),
           presentaciones: (p.presentaciones ?? []).map((x) => ({ presentacion: x.presentacion, sku: x.sku, precioConIgv: x.precioConIgv, activo: x.activo })),
+          // En el formulario el precio es el del SKU #1 (su presentación); en la tabla, el de una unidad.
+          presentacionCodigo: p.presentacionCodigo ?? 'UNID',
+          precioUnidad: p.precioConIgv,
+          precioConIgv: Math.round(p.precioConIgv * (p.presentacionEquivalencia ?? 1) * 100) / 100,
         } as unknown as Reg))}
-        nuevo={{ codigo: '', nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO', sku: '', presentaciones: [] }}
+        nuevo={{ codigo: '', nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO', sku: '', presentacionCodigo: presVenta[0]?.valor ?? 'UNID', presentaciones: [] }}
         // Alta en dos pasos: se crea (código, nombre, categoría, precio) y se guardan los datos de producción con la misma validación de la edición.
         crear={edita ? async (d) => {
-          const r = await api<{ id: string }>('/productos', { method: 'POST', body: { ...d, mermaPct: 0.03 } });
-          await api(`/productos/${r.id}`, { method: 'PATCH', body: { ...d, codigo: undefined } });
+          const g = aGuardar(d);
+          const r = await api<{ id: string }>('/productos', { method: 'POST', body: { ...g, mermaPct: 0.03 } });
+          await api(`/productos/${r.id}`, { method: 'PATCH', body: { ...g, codigo: undefined } });
           await refrescarDatos();
         } : undefined}
-        editar={edita ? async (id, d) => { await api(`/productos/${id}`, { method: 'PATCH', body: d }); await refrescarDatos(); } : undefined}
+        editar={edita ? async (id, d) => { await api(`/productos/${id}`, { method: 'PATCH', body: aGuardar(d) }); await refrescarDatos(); } : undefined}
         accionesFila={edita ? [
           { etiqueta: 'Ajustar precio', icono: 'tag', visible: (f) => verCosto && !f.insumoId, onClick: (f) => setAjustar(dataset.productos.find((p) => p.id === f.id) ?? null) },
           { etiqueta: (f) => (f.estado === 'ACTIVO' ? 'Anular' : 'Reactivar'), icono: (f) => (f.estado === 'ACTIVO' ? 'close' : 'sync'), peligro: (f) => f.estado === 'ACTIVO', onClick: (f) => void cambiarEstado(f) },
@@ -186,20 +197,21 @@ export function Productos() {
           { key: 'unidadesLote', label: 'N.° de unidades por lote', tipo: 'numero', ayuda: 'Cuántos panes entran al horno a la vez' },
           { key: 'horasHornoLote', label: 'Tiempo de horneado por lote (horas)', tipo: 'numero', ayuda: 'Ej.: 0.8 = 48 minutos. Con él se calculan el gas del horno y la mano de obra' },
           { key: 'vidaUtilDias', label: 'Días de vida útil', tipo: 'numero', ayuda: 'Cada horneada guarda su fecha de producción y de vencimiento' },
-          { key: 's-sku1', label: 'SKU #1 · presentación unitaria', tipo: 'seccion' },
+          { key: 's-sku1', label: 'SKU #1 · presentación principal', tipo: 'seccion' },
           { key: 'sku', label: 'SKU (código de barras)', max: 30, placeholder: 'Opcional' },
-          { key: 'unidad', label: 'Presentación unitaria', tipo: 'select', opciones: unidadesVenta, ayuda: 'Equivalencia 1: una unidad del producto' },
-          { key: 'precioConIgv', label: 'Precio de venta con IGV (S/)', tipo: 'numero', requerido: true },
+          { key: 'presentacionCodigo', label: 'Presentación', tipo: 'select', opciones: presVenta, ayuda: 'Del catálogo Presentaciones de venta (Maestros → Catálogos); la misma lista que los demás SKU' },
+          { key: 'precioConIgv', label: 'Precio de venta con IGV (S/)', tipo: 'numero', requerido: true,
+            ayuda: 'Precio de esta presentación. Si es un paquete, el sistema calcula el de cada unidad' },
           { key: 'c-neto', label: 'Precio sin IGV (S/)', tipo: 'calculado', calcular: (form) => (Number.isFinite(neto(form)) ? money(neto(form)) : '—'), ayuda: `Precio con IGV ÷ ${(1 + igv).toFixed(2)}` },
-          { key: 'presentaciones', label: 'SKU #2… · otras presentaciones de venta', tipo: 'filas', ancho: true, agregar: 'Agregar presentación',
-            nuevaFila: { presentacion: presVenta.find((p) => p.valor !== 'UNID')?.valor ?? presVenta[0]?.valor ?? '', sku: '', precioConIgv: '', activo: true },
+          { key: 'presentaciones', label: 'SKU #2, #3… · otras presentaciones de venta', tipo: 'filas', ancho: true, agregar: 'Agregar SKU',
+            nuevaFila: { presentacion: '', sku: '', precioConIgv: '', activo: true },
             columnasFila: [
-              { key: 'presentacion', label: 'Presentación', tipo: 'select', opciones: presVenta },
+              { key: 'presentacion', label: 'Presentación', tipo: 'select', opciones: [{ valor: '', texto: 'Elige…' }, ...presVenta] },
               { key: 'sku', label: 'SKU', max: 30, placeholder: 'Opcional' },
               { key: 'precioConIgv', label: 'Precio con IGV (S/)', tipo: 'numero' },
               { key: 'activo', label: 'Activa', tipo: 'bool' },
             ],
-            ayuda: 'Paquete x 6 a S/ 48, etc. Al venderla, el stock baja según su equivalencia y se descuenta su empaque. Se administran en Maestros → Catálogos.' },
+            ayuda: 'Misma lista que el SKU #1; cada SKU lleva una presentación distinta. Al venderla, el stock baja según su equivalencia y se descuenta su empaque.' },
           { key: 's-otros', label: 'Opcional', tipo: 'seccion' },
           { key: 'anticipacionHoras', label: 'Anticipación mínima del pedido (horas)', tipo: 'numero', ayuda: 'Ej.: 24 para pan por encargo' },
           { key: 'insumoId', label: 'Produce el insumo (sub-receta)', tipo: 'select',

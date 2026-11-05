@@ -50,8 +50,8 @@ test('punto 4: con factura (crédito fiscal) el costo del insumo va sin IGV; con
 });
 
 test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.° de operación, desactivación)', async () => {
-  assert.equal((await api(vendedor, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: 'Billetera QA', enVentas: true })).s, 403, 'solo el Administrador');
-  const r = await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: 'Billetera QA', requiereOperacion: true, enVentas: true, enCobranza: true });
+  assert.equal((await api(vendedor, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: `Billetera QA ${sufijo}`, enVentas: true })).s, 403, 'solo el Administrador');
+  const r = await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: `Billetera QA ${sufijo}`, requiereOperacion: true, enVentas: true, enCobranza: true });
   assert.equal(r.s, 201, JSON.stringify(r.b));
   assert.equal((await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: 'Otra' })).s, 409, 'código único');
   assert.ok((await api(vendedor, 'GET', '/catalogos')).b.mediosPago.some((m) => m.codigo === nuevo.medio), 'aparece en los formularios');
@@ -59,7 +59,7 @@ test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.°
   const venta = (extra) => api(vendedor, 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 1 }], formaPago: nuevo.medio, ...extra });
   assert.equal((await venta({})).s, 422, 'exige n.° de operación por su atributo');
   assert.equal((await venta({ referenciaPago: 'QA-123' })).s, 201);
-  assert.equal((await api(admin, 'PATCH', `/catalogos/medios-pago/${nuevo.medio}`, { nombre: 'Billetera QA', requiereOperacion: true, enVentas: true, enCobranza: true, activo: false })).s, 200);
+  assert.equal((await api(admin, 'PATCH', `/catalogos/medios-pago/${nuevo.medio}`, { nombre: `Billetera QA ${sufijo}`, requiereOperacion: true, enVentas: true, enCobranza: true, activo: false })).s, 200);
   assert.equal((await venta({ referenciaPago: 'QA-124' })).s, 422, 'desactivado ya no se usa');
   assert.ok(!(await api(vendedor, 'GET', '/catalogos')).b.mediosPago.some((m) => m.codigo === nuevo.medio), 'ni se ofrece');
   assert.equal((await api(admin, 'POST', '/catalogos/medios-pago', { codigo: `QA_MAL_${sufijo}`, nombre: 'Crédito raro', esCredito: true, enCompras: true })).s, 422,
@@ -74,13 +74,13 @@ test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.°
 
 test('tipos de insumo: el insumo usa los del catálogo', async () => {
   assert.equal((await api(compras, 'POST', '/insumos', { nombre: `Insumo tipo ${sufijo}`, unidad: 'KG', minimo: 0, proveedor: '', tipo: nuevo.tipo })).s, 422, 'tipo inexistente');
-  assert.equal((await api(admin, 'POST', '/catalogos/tipos-insumo', { codigo: nuevo.tipo, nombre: 'Semillas QA' })).s, 201);
+  assert.equal((await api(admin, 'POST', '/catalogos/tipos-insumo', { codigo: nuevo.tipo, nombre: `Semillas QA ${sufijo}` })).s, 201);
   const i = await api(compras, 'POST', '/insumos', { nombre: `Insumo tipo ${sufijo}`, unidad: 'KG', minimo: 0, proveedor: '', tipo: nuevo.tipo });
   assert.equal(i.s, 201, JSON.stringify(i.b));
 });
 
 test('unidades: una sola tabla; una unidad nueva convierte en recetas; la que está en uso no cambia de escala', async () => {
-  assert.equal((await api(admin, 'POST', '/catalogos/unidades', { codigo: nuevo.unidad, descripcion: 'libra QA', familia: 'MASA', factorAPatron: 0.453592 })).s, 201);
+  assert.equal((await api(admin, 'POST', '/catalogos/unidades', { codigo: nuevo.unidad, descripcion: `libra QA ${sufijo}`, familia: 'MASA', factorAPatron: 0.453592 })).s, 201);
   assert.equal(sql("SELECT to_regclass('core.unidad_conversion') IS NULL"), 't', 'ya no existe la tabla duplicada');
   const ins = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo) VALUES ('T-${sufijo}-LB', 'Insumo prueba catálogo', 'KG', 2, 0, 0) RETURNING id) SELECT id FROM i`);
   const prod = sql(`WITH p AS (INSERT INTO core.producto (codigo, nombre, categoria_id, precio_con_igv, estado, peso_masa_g, perdida_coccion) SELECT 'T-${sufijo}-P', 'Pan prueba catálogo', id, 1, 'INACTIVO', 50, 0 FROM core.categoria ORDER BY orden LIMIT 1 RETURNING id) SELECT id FROM p`);
@@ -88,17 +88,17 @@ test('unidades: una sola tabla; una unidad nueva convierte en recetas; la que es
   assert.equal(rec.s, 200, JSON.stringify(rec.b));
   cerca(Number(sql(`SELECT cantidad FROM core.receta_detalle WHERE receta_id = '${prod}'`)), 4.53592, 1e-6, '10 lb = 4.53592 kg');
   assert.equal((await api(await login('superadmin'), 'PUT', `/recetas/${prod}`, { rendimiento: 10, mermaEstandar: 0, lineas: [{ insumoId: ins, cantidad: 1, unidad: 'L' }] })).s, 422, 'otra familia no se acepta');
-  const cambio = await api(admin, 'PATCH', `/catalogos/unidades/${nuevo.unidad}`, { descripcion: 'libra QA', familia: 'MASA', factorAPatron: 0.5 });
+  const cambio = await api(admin, 'PATCH', `/catalogos/unidades/${nuevo.unidad}`, { descripcion: `libra QA ${sufijo}`, familia: 'MASA', factorAPatron: 0.5 });
   assert.equal(cambio.s, 409, 'en uso: no cambia su factor');
-  assert.equal((await api(admin, 'PATCH', `/catalogos/unidades/${nuevo.unidad}`, { descripcion: 'libra (lb)', familia: 'MASA', factorAPatron: 0.453592 })).s, 200, 'la descripción sí');
+  assert.equal((await api(admin, 'PATCH', `/catalogos/unidades/${nuevo.unidad}`, { descripcion: `libra (lb) ${sufijo}`, familia: 'MASA', factorAPatron: 0.453592 })).s, 200, 'la descripción sí');
 });
 
 test('tipos de documento: uno nuevo sin crédito fiscal se usa en compras; inactivo, ya no', async () => {
   const cod = `QA_DOC_${sufijo}`;
-  assert.equal((await api(admin, 'POST', '/catalogos/tipos-documento', { codigo: cod, nombre: 'Recibo por honorarios QA' })).s, 201);
+  assert.equal((await api(admin, 'POST', '/catalogos/tipos-documento', { codigo: cod, nombre: `Recibo por honorarios QA ${sufijo}` })).s, 201);
   const ins = sql(`SELECT id FROM core.insumo WHERE codigo = 'T-${sufijo}-IGV'`);
   assert.equal((await registrar(prov, [{ insumoId: ins, cantidad: 1, precioUnitario: 5 }], { docTipo: cod, serie: 'R001' })).s, 201);
-  await api(admin, 'PATCH', `/catalogos/tipos-documento/${cod}`, { nombre: 'Recibo por honorarios QA', activo: false });
+  await api(admin, 'PATCH', `/catalogos/tipos-documento/${cod}`, { nombre: `Recibo por honorarios QA ${sufijo}`, activo: false });
   assert.equal((await registrar(prov, [{ insumoId: ins, cantidad: 1, precioUnitario: 5 }], { docTipo: cod, serie: 'R002' })).s, 422);
 });
 

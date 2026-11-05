@@ -40,7 +40,11 @@ export async function presentacionesDe(c: import('pg').PoolClient, items: Array<
   const r = await c.query<{ producto_id: string; codigo: string; precio_con_igv: string; equivalencia: string; nombre: string; insumo_id: string | null; cantidad_insumo: string | null }>(
     `SELECT pp.producto_id, pp.presentacion_codigo codigo, pp.precio_con_igv, v.equivalencia, v.nombre, v.insumo_id, v.cantidad_insumo
      FROM core.producto_presentacion pp JOIN core.presentacion_venta v ON v.codigo = pp.presentacion_codigo
-     WHERE pp.activo AND v.activo AND (pp.producto_id, pp.presentacion_codigo) IN (SELECT * FROM unnest($1::uuid[], $2::text[]))`,
+     WHERE pp.activo AND v.activo AND (pp.producto_id, pp.presentacion_codigo) IN (SELECT * FROM unnest($1::uuid[], $2::text[]))
+     UNION ALL
+     SELECT p.id, v.codigo, p.precio_con_igv * v.equivalencia, v.equivalencia, v.nombre, v.insumo_id, v.cantidad_insumo
+     FROM core.producto p JOIN core.presentacion_venta v ON v.codigo = p.presentacion_codigo
+     WHERE v.activo AND (p.id, p.presentacion_codigo) IN (SELECT * FROM unnest($1::uuid[], $2::text[]))`,
     [pedidas.map((i) => i.productoId), pedidas.map((i) => i.presentacion!)]);
   return new Map(r.rows.map((x) => [`${x.producto_id}|${x.codigo}`, {
     equivalencia: Number(x.equivalencia), precio: Number(x.precio_con_igv), nombre: x.nombre, insumoId: x.insumo_id, cantidadInsumo: Number(x.cantidad_insumo ?? 0) }]));

@@ -98,6 +98,20 @@ test('presentación de venta: paquete x 6 con SKU y precio propio; descuenta 6 p
   const an = await api(await login('lbermudez'), 'POST', `/ventas/${v.b.codigo}/anular`, { motivo: 'Prueba de presentaciones' });
   assert.equal(an.s, 200, JSON.stringify(an.b));
   assert.equal(valor(`SELECT stock FROM core.producto WHERE id = '${prod}'`), stock0, 'los panes vuelven');
+
+  // Todos los SKU usan el mismo catálogo: el paquete puede ser el SKU #1 y la unidad un SKU #2, sin repetir.
+  limpiar.push(`UPDATE core.producto SET presentacion_codigo = 'UNID' WHERE id = '${prod}'`);
+  const dup = await api(adm, 'PATCH', `/productos/${prod}`, { ...ficha, presentacionCodigo: pres, presentaciones: [{ presentacion: pres, precioConIgv: 48 }] });
+  assert.equal(dup.s, 422, 'la misma presentación no va en dos SKU');
+  const sku1 = await api(adm, 'PATCH', `/productos/${prod}`, { ...ficha, precioConIgv: 8, presentacionCodigo: pres, presentaciones: [{ presentacion: 'UNID', precioConIgv: 9 }] });
+  assert.equal(sku1.s, 200, JSON.stringify(sku1.b));
+  const d1 = (await api(adm, 'GET', '/datos')).b.productos.find((x) => x.id === prod);
+  assert.equal(d1.presentacionCodigo, pres);
+  assert.equal(d1.presentacionEquivalencia, 6);
+  const v1 = await api(await login('cmedina'), 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 1, presentacion: pres }], formaPago: 'EFECTIVO' });
+  assert.equal(v1.s, 201, JSON.stringify(v1.b));
+  assert.equal(valor(`SELECT total_con_igv FROM core.venta WHERE codigo = '${v1.b.codigo}'`), 48, 'SKU #1 paquete: 6 × S/ 8');
+  await api(await login('lbermudez'), 'POST', `/ventas/${v1.b.codigo}/anular`, { motivo: 'Prueba SKU #1' });
   assert.equal(valor(`SELECT stock FROM core.insumo WHERE id = '${bolsa}'`), bolsas0, 'las bolsas vuelven');
   limpiar.push(`UPDATE core.presentacion_venta SET activo = false WHERE codigo = '${pres}'`);
 });
