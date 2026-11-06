@@ -131,7 +131,7 @@ class _CatalogoState extends State<Catalogo> {
                   tooltip: 'Categoría',
                   initialValue: _categoria,
                   onSelected: (v) => setState(() => _categoria = v),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   itemBuilder: (_) => [
                     _opcion('todas', 'Todo'),
                     for (final x in categorias) _opcion(x['id'] as String, x['nombre'] as String),
@@ -143,7 +143,7 @@ class _CatalogoState extends State<Catalogo> {
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
                       color: _categoria == 'todas' ? TantaColors.ink800 : TantaColors.honey500,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Flexible(child: Text(etiquetaCat, overflow: TextOverflow.ellipsis,
@@ -161,7 +161,7 @@ class _CatalogoState extends State<Catalogo> {
                     style: IconButton.styleFrom(
                       backgroundColor: TantaColors.surfaceCard,
                       side: const BorderSide(color: TantaColors.borderDefault),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _repetir,
                     icon: const Icon(Icons.replay_rounded, size: 20, color: TantaColors.ink800),
@@ -196,7 +196,7 @@ class _CatalogoState extends State<Catalogo> {
               key: const ValueKey('carrito'),
               margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
-              decoration: BoxDecoration(color: TantaColors.ink800, borderRadius: BorderRadius.circular(14),
+              decoration: BoxDecoration(color: TantaColors.ink800, borderRadius: BorderRadius.circular(8),
                   boxShadow: [BoxShadow(color: TantaColors.ink900.withValues(alpha: 0.25), blurRadius: 16, offset: const Offset(0, 6))]),
               child: Row(children: [
                 const Icon(Icons.shopping_basket_outlined, color: TantaColors.cream50),
@@ -430,7 +430,7 @@ class _Producto extends StatelessWidget {
     return Pulsable(
       onTap: onAbrir,
       child: Ink(
-        decoration: BoxDecoration(color: TantaColors.surfaceCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: TantaColors.borderSubtle),
+        decoration: BoxDecoration(color: TantaColors.surfaceCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: TantaColors.borderSubtle),
             boxShadow: [BoxShadow(color: TantaColors.ink900.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
@@ -438,7 +438,7 @@ class _Producto extends StatelessWidget {
               clipBehavior: Clip.antiAlias,
               width: double.infinity,
               decoration: const BoxDecoration(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(13)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
                   gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFFE8D9C3), Color(0xFFD8C0A0)])),
               alignment: Alignment.center,
               child: p['imagenUrl'] != null

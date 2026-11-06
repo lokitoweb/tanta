@@ -332,7 +332,7 @@ class _PanelInicio extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
                 colors: [TantaColors.ink800, TantaColors.ink900]),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(8),
             boxShadow: [BoxShadow(color: TantaColors.ink900.withValues(alpha: 0.18), blurRadius: 18, offset: const Offset(0, 8))],
           ),
           child: Row(children: [
@@ -353,7 +353,7 @@ class _PanelInicio extends StatelessWidget {
           const SizedBox(height: 12),
           Material(
             color: TantaColors.stateInfo.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(8),
             child: ListTile(
               leading: const Icon(Icons.system_update_outlined, color: TantaColors.stateInfo),
               title: const Text('Hay una nueva versión', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
@@ -371,7 +371,7 @@ class _PanelInicio extends StatelessWidget {
             crossAxisSpacing: 12,
             mainAxisExtent: 108,
           ),
-          children: _kpis(api, datos, k),
+          children: _kpis(context, api, datos, k),
         )),
         if (accesos.isNotEmpty) ...[
           const SizedBox(height: 22),
@@ -379,12 +379,11 @@ class _PanelInicio extends StatelessWidget {
           const SizedBox(height: 10),
           // Una sola fila horizontal (Android e iOS): se desliza si no caben.
           entra(SizedBox(
-            height: 92,
+            height: 40,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
               itemCount: accesos.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
               itemBuilder: (_, i) => accesos[i],
             ),
           )),
@@ -420,11 +419,12 @@ class _PanelInicio extends StatelessWidget {
 
   /// Botones a las pestañas que el rol realmente tiene.
   List<Widget> _accesos(BuildContext context, Api api) {
-    Widget chip(String titulo, IconData icono) => AccesoRapido(icono: icono, titulo: titulo, onTap: () => irA(titulo));
+    Widget chip(String titulo, IconData icono) =>
+        ActionChip(avatar: Icon(icono, size: 18), label: Text(titulo), onPressed: () => irA(titulo));
     // Registrar: abre la pantalla de la acción; el servidor vuelve a validar el permiso.
-    Widget accion(String titulo, IconData icono, Widget pantalla) => AccesoRapido(
-          icono: icono, titulo: titulo,
-          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)),
+    Widget accion(String titulo, IconData icono, Widget pantalla) => ActionChip(
+          avatar: Icon(icono, size: 18), label: Text(titulo),
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)),
         );
     return [
       if (api.puede('ventas.registrar')) accion('Nueva venta', Icons.point_of_sale_outlined, NuevaVenta(datos: datos)),
@@ -469,7 +469,9 @@ class _PanelInicio extends StatelessWidget {
   }
 
   /// Los indicadores nacen de los permisos: cada perfil ve lo que le sirve.
-  List<Widget> _kpis(Api api, Map<String, dynamic> datos, Map<String, dynamic> k) {
+  List<Widget> _kpis(BuildContext context, Api api, Map<String, dynamic> datos, Map<String, dynamic> k) {
+    Widget abre(Widget kpi, Widget pantalla) => Pulsable(radio: 8,
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)), child: kpi);
     final lista = <Widget>[];
 
     if (api.puede('costos.ver')) {
@@ -519,11 +521,14 @@ class _PanelInicio extends StatelessWidget {
     }
 
     if (api.puede('catalogo.ver')) {
-      lista.add(Kpi(etiqueta: 'Mi saldo', valor: dinero(_n(datos['miSaldo'])), nota: 'cuentas por pagar'));
-      lista.add(Kpi(
-          etiqueta: 'Mis pedidos',
-          valor: '${(datos['misPedidos'] as List?)?.length ?? 0}',
-          nota: 'últimos registrados'));
+      // Saldo = compras a crédito aún no pagadas (cuentas por cobrar); un pedido suma deuda recién al venderse a crédito.
+      final deudas = _n(datos['misDeudas']).toInt();
+      final pedidos = _n(datos['misPedidosTotal'] ?? (datos['misPedidos'] as List?)?.length).toInt();
+      lista.add(abre(Kpi(etiqueta: 'Mi saldo', valor: dinero(_n(datos['miSaldo'])),
+          nota: deudas == 0 ? 'estás al día' : '$deudas ${deudas == 1 ? 'compra' : 'compras'} a crédito por pagar',
+          tono: deudas > 0 ? TantaColors.stateDanger : TantaColors.stateOk), const EstadoCuenta()));
+      lista.add(abre(Kpi(etiqueta: 'Mis pedidos', valor: '$pedidos', nota: 'en total · toca para verlos'),
+          MisPedidos(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>())));
     }
 
     return lista;

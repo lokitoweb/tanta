@@ -49,7 +49,7 @@ class Panel extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: TantaColors.surfaceCard,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: TantaColors.borderSubtle),
       ),
       child: child,
@@ -248,7 +248,7 @@ class _EsqueletoState extends State<Esqueleto> with SingleTickerProviderStateMix
               Container(
                 height: widget.alto,
                 margin: const EdgeInsets.only(bottom: 10),
-                decoration: BoxDecoration(color: TantaColors.cream300, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: TantaColors.cream300, borderRadius: BorderRadius.circular(8)),
               ),
           ]),
         ),
@@ -317,7 +317,7 @@ class Aparecer extends StatelessWidget {
 
 /// Se encoge un poco al tocar: respuesta táctil en tarjetas y accesos.
 class Pulsable extends StatefulWidget {
-  const Pulsable({super.key, required this.child, required this.onTap, this.radio = 14});
+  const Pulsable({super.key, required this.child, required this.onTap, this.radio = 8});
   final Widget child;
   final VoidCallback? onTap;
   final double radio;
@@ -342,44 +342,6 @@ class _PulsableState extends State<Pulsable> {
           onTap: widget.onTap,
           onHighlightChanged: _set,
           child: widget.child,
-        ),
-      ),
-    );
-  }
-}
-
-/// Acceso rápido del panel: icono en círculo y nombre debajo (una fila horizontal).
-class AccesoRapido extends StatelessWidget {
-  const AccesoRapido({super.key, required this.icono, required this.titulo, required this.onTap});
-  final IconData icono;
-  final String titulo;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: titulo,
-      child: Pulsable(
-        onTap: onTap,
-        child: Ink(
-          width: 98,
-          padding: const EdgeInsets.fromLTRB(8, 12, 8, 10),
-          decoration: BoxDecoration(
-            color: TantaColors.surfaceCard,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: TantaColors.borderSubtle),
-          ),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Container(
-              width: 38, height: 38,
-              decoration: const BoxDecoration(color: TantaColors.cream200, shape: BoxShape.circle),
-              child: Icon(icono, size: 20, color: TantaColors.ink800),
-            ),
-            const SizedBox(height: 8),
-            Text(titulo, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, height: 1.15, fontWeight: FontWeight.w600, color: TantaColors.textPrimary)),
-          ]),
         ),
       ),
     );

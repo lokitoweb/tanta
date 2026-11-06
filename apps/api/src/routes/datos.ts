@@ -438,15 +438,18 @@ export async function rutasDatos(app: FastifyInstance) {
          FROM core.pedido WHERE cliente_id = $1 ORDER BY creado_en DESC LIMIT 10`,
         [vinculo.cliente_id],
       );
-      const deuda = await uno<{ saldo: string }>(
-        `SELECT coalesce(sum(saldo),0) AS saldo FROM core.cuenta_por_cobrar
-         WHERE cliente_id = $1 AND estado IN ('PENDIENTE','PARCIAL')`,
+      const deuda = await uno<{ saldo: string; n: string; pedidos: string }>(
+        `SELECT coalesce(sum(saldo),0) AS saldo, count(*) AS n,
+           (SELECT count(*) FROM core.pedido WHERE cliente_id = $1) AS pedidos
+         FROM core.cuenta_por_cobrar WHERE cliente_id = $1 AND estado IN ('PENDIENTE','PARCIAL')`,
         [vinculo.cliente_id],
       );
       p.misPedidos = mios.map((m) => ({
         codigo: m.codigo, estado: m.estado, total: num(m.total), fechaEntrega: m.fecha_entrega,
       }));
       p.miSaldo = num(deuda?.saldo);
+      p.misDeudas = Number(deuda?.n ?? 0);
+      p.misPedidosTotal = Number(deuda?.pedidos ?? 0);
     }
 
     return reply.send(p);

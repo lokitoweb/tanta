@@ -1036,7 +1036,9 @@ class _MisPedidosState extends State<MisPedidos> {
             trailing: Text(dinero(((p['total'] as num?) ?? 0).toDouble()), style: const TextStyle(fontWeight: FontWeight.w700))),
         const SizedBox(height: 12),
         Row(children: [
-          if (cancelable) Expanded(child: OutlinedButton(onPressed: () => _cancelar(p), child: const Text('Cancelar'))),
+          if (cancelable) Expanded(child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: TantaColors.stateDanger, side: const BorderSide(color: TantaColors.stateDanger)),
+            icon: const Icon(Icons.close), label: const Text('Cancelar'), onPressed: () => _cancelar(p))),
           if (cancelable) const SizedBox(width: 8),
           Expanded(child: FilledButton.icon(icon: const Icon(Icons.replay), label: const Text('Repetir'), onPressed: () {
             repetirPedido(p, widget.productos);

@@ -67,7 +67,7 @@ class _TarjetaOp extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: TantaColors.surfaceCard,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: TantaColors.borderSubtle),
       ),
       child: Column(
