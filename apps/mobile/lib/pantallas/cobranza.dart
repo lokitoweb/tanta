@@ -88,6 +88,7 @@ class _CobranzaState extends State<Cobranza> {
         content: Text('Pago de ${dinero(monto)} registrado$textoQueda'),
         backgroundColor: TantaColors.stateOk,
         duration: const Duration(seconds: 6),
+        persist: false, // con botón también se cierra solo
         action: SnackBarAction(
           label: 'Recibo PDF',
           textColor: Colors.white,

@@ -74,7 +74,7 @@ class _PedidosState extends State<Pedidos> {
 
   void _aviso(String texto, {Color? color, SnackBarAction? accion}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto), backgroundColor: color, action: accion, duration: const Duration(seconds: 6)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto), backgroundColor: color, action: accion, persist: false, duration: const Duration(seconds: 6)));
   }
 
   /// Pide un texto (motivo u observación) y devuelve null si se cancela.

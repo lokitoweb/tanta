@@ -175,10 +175,10 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
       if (api.puede('cobranza.ver'))
         _Pestana('Cobranza', Icons.account_balance_wallet_outlined, Icons.account_balance_wallet,
             const Cobranza()),
-      if (api.puede('inventario.ver'))
+      if (trabajaAlmacen(api))
         _Pestana('Almacén', Icons.inventory_2_outlined, Icons.inventory_2,
             Almacen(datos: _datos)),
-      if (api.puede('catalogo.ver'))
+      if (esTienda(api, _datos))
         _Pestana('Catálogo', Icons.bakery_dining_outlined, Icons.bakery_dining,
             Catalogo(datos: _datos)),
       // Todos los roles: datos, contraseña, privacidad y eliminar cuenta (exigido por las tiendas).
@@ -500,8 +500,8 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('pedidos.ver')) chip('Pedidos', Icons.receipt_long_outlined),
       if (api.puede('cobranza.ver')) chip('Cobranza', Icons.account_balance_wallet_outlined),
       if (api.puede('produccion.ver')) chip('Producción', Icons.local_fire_department_outlined),
-      if (api.puede('inventario.ver')) chip('Almacén', Icons.inventory_2_outlined),
-      if (api.puede('catalogo.ver')) chip('Catálogo', Icons.bakery_dining_outlined),
+      if (trabajaAlmacen(api)) chip('Almacén', Icons.inventory_2_outlined),
+      if (esTienda(api, datos)) chip('Catálogo', Icons.bakery_dining_outlined),
     ];
   }
 
@@ -512,7 +512,7 @@ class _PanelInicio extends StatelessWidget {
       final ops = ((datos['ops'] as List?) ?? const []).where((o) => o['estado'] != 'TERMINADA').take(5);
       return [const _Fila('Órdenes pendientes'), for (final o in ops) _Fila(txt(o['producto']), detalle: '${o['codigo']} · ${o['estado']}', valor: '${o['cantidad']} u')];
     }
-    if (api.puede('inventario.ver')) {
+    if (trabajaAlmacen(api)) {
       final ins = ((datos['insumos'] as List?) ?? const []).where((i) => i['estado'] == 'BAJO_MINIMO').take(5);
       return [const _Fila('Insumos por reponer'), for (final i in ins) _Fila(txt(i['nombre']), detalle: 'mínimo ${i['minimo']}', valor: '${i['stock']} ${i['unidad']}')];
     }
@@ -520,7 +520,7 @@ class _PanelInicio extends StatelessWidget {
       final ps = ((datos['pedidos'] as List?) ?? const []).take(5);
       return [const _Fila('Pedidos recientes'), for (final p in ps) _Fila('${txt(p['cliente'])} · ${txt(p['codigo'])}', estado: txt(p['estado']), valor: dinero(_n(p['total']).toDouble()))];
     }
-    if (api.puede('catalogo.ver')) {
+    if (esTienda(api, datos)) {
       final ps = ((datos['misPedidos'] as List?) ?? const []).take(5);
       final productos = (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>();
       return [const _Fila('Mis últimos pedidos'), for (final p in ps) _Fila(txt(p['codigo']), detalle: p['observacion'] == null ? '' : 'Revisa: ${txt(p['observacion'])}', estado: txt(p['estado']), valor: dinero(_n(p['total']).toDouble()), abrir: MisPedidos(productos: productos))];
@@ -571,7 +571,7 @@ class _PanelInicio extends StatelessWidget {
       ));
     }
 
-    if (api.puede('inventario.ver')) {
+    if (trabajaAlmacen(api)) {
       final insumos = (datos['insumos'] as List?) ?? const [];
       lista.add(Kpi(
         etiqueta: 'Insumos críticos',
@@ -603,3 +603,11 @@ class _Fila {
   final String titulo, detalle, estado, valor;
   final Widget? abrir;
 }
+
+/// Trabaja el almacén: mueve stock, atiende requisiciones o verifica compras (se asigna en Sistema → Roles).
+/// Consultar el stock (inventario.ver) no basta: el vendedor lo consulta al vender, pero no gestiona el almacén.
+bool trabajaAlmacen(Api api) => api.puede('inventario.mover') || api.puede('requisiciones.atender') || api.puede('compras.verificar');
+
+/// Tienda para pedir: una cuenta de cliente (el servidor envía su saldo) con permiso de catálogo.
+/// El personal no compra para sí: registra pedidos de sus clientes desde Pedidos.
+bool esTienda(Api api, Map<String, dynamic> datos) => api.puede('catalogo.ver') && datos.containsKey('miSaldo');
