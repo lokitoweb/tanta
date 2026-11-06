@@ -64,6 +64,13 @@ test('pedido del cliente (sin forma de pago: se cobra al entregar): avisa al Ven
   assert.ok(await esperarAviso(ven, 'Cambio de planes'), 'el vendedor sabe que se canceló y por qué');
 });
 
+test('catálogo del cliente: recibe categorías para listar productos, sin las ventas del negocio', async () => {
+  const d = (await api(await login('mfernandez'), 'GET', '/datos')).b;
+  assert.ok(d.categorias.length > 0);
+  assert.deepEqual(Object.keys(d.categorias[0]).sort(), ['id', 'nombre']);
+  assert.ok(d.productos.every((p) => d.categorias.some((c) => c.id === p.categoriaId)), 'ningún producto queda sin categoría');
+});
+
 test('centro de notificaciones: no leídas y marcar como leídas, solo las propias', async () => {
   const ven = await login('cmedina');
   const n = await api(ven, 'GET', '/notificaciones');

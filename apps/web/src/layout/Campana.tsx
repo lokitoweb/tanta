@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/core/api';
+import { useCerrarAfuera } from '@/ui/useCerrarAfuera';
 import { Icon } from '@/ui/icons';
 
 // Ícono y tono por tipo de aviso; uno nuevo cae en la campana gris.
@@ -28,6 +29,7 @@ interface Aviso { id: number; tipo: string; titulo: string; cuerpo: string; ruta
 /** A11: avisos del usuario (pedidos nuevos, ventas, stock, aprobaciones). Se refresca cada 30 s. */
 export function Campana() {
   const [abierto, setAbierto] = useState(false);
+  const ref = useCerrarAfuera(abierto, () => setAbierto(false));
   const [datos, setDatos] = useState<{ noLeidas: number; avisos: Aviso[] }>({ noLeidas: 0, avisos: [] });
   const navegar = useNavigate();
   const cargar = () => api<typeof datos>('/notificaciones').then(setDatos).catch(() => {});
@@ -47,7 +49,7 @@ export function Campana() {
   const todas = async () => { await api('/notificaciones/leidas', { method: 'POST', body: {} }).catch(() => {}); void cargar(); };
 
   return (
-    <div className="cuenta">
+    <div className="cuenta" ref={ref}>
       <button className="campana" onClick={() => { setAbierto((v) => !v); if (!abierto) void cargar(); }} aria-expanded={abierto} aria-haspopup="menu"
         aria-label={datos.noLeidas ? `${datos.noLeidas} notificaciones sin leer` : 'Notificaciones'}>
         <Icon name="bell" size={18} />

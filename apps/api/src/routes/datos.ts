@@ -427,7 +427,8 @@ export async function rutasDatos(app: FastifyInstance) {
       const k = p.kpis as Record<string, unknown>;
       for (const c of ['ventasNetas', 'tickets', 'ticketPromedio', 'variacionVentas', 'mermaValorizada', 'mermaPct']) delete k[c];
       p.dias = [];
-      p.categorias = [];
+      // Sin sus ventas: el catálogo arma la lista de productos por categoría.
+      p.categorias = payload.categorias.map((c) => ({ id: c.id, nombre: c.nombre }));
       p.topProductos = [];
     }
 

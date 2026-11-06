@@ -1075,7 +1075,6 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .cuenta__txt { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; text-align: left; }
 .cuenta__txt b { font-size: 0.8125rem; font-weight: 600; color: var(--tanta-text-primary); white-space: nowrap; }
 .cuenta__txt small { font-size: 0.6875rem; color: var(--tanta-text-muted); }
-.cuenta__fondo { position: fixed; inset: 0; z-index: 30; cursor: default; }
 .cuenta__menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 31; min-width: 240px; padding: 6px;
   background: var(--tanta-surface-card); border: 1px solid var(--tanta-border-subtle); border-radius: 10px;

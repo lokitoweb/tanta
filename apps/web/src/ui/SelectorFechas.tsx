@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '@/ui/icons';
+import { useCerrarAfuera } from './useCerrarAfuera';
 
 /** Rango en ISO (AAAA-MM-DD), ambos días incluidos. */
 export interface Rango { desde: string; hasta: string }
@@ -33,6 +34,7 @@ export function etiquetaRango(r: Rango): string {
  */
 export function SelectorFechas({ valor, onChange }: { valor: Rango; onChange: (r: Rango) => void }) {
   const [abierto, setAbierto] = useState(false);
+  const ref = useCerrarAfuera(abierto, () => setAbierto(false));
   const [borrador, setBorrador] = useState<Rango>(valor);
   const [eligiendoFin, setEligiendoFin] = useState(false);
   const [mes, setMes] = useState(() => { const d = deIso(valor.hasta); return new Date(d.getFullYear(), d.getMonth(), 1); });
@@ -51,7 +53,7 @@ export function SelectorFechas({ valor, onChange }: { valor: Rango; onChange: (r
   const dias = Array.from({ length: 42 }, (_, i) => new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i));
 
   return (
-    <div className="fechas">
+    <div className="fechas" ref={ref}>
       <button type="button" className="fechas__boton" onClick={abrir} aria-haspopup="dialog" aria-expanded={abierto}>
         <Icon name="clock" size={15} />
         <b>{etiquetaRango(valor)}</b>
@@ -61,7 +63,6 @@ export function SelectorFechas({ valor, onChange }: { valor: Rango; onChange: (r
       </button>
       {abierto && (
         <>
-          <button className="cuenta__fondo" aria-label="Cerrar" onClick={() => setAbierto(false)} />
           <div className="fechas__panel" role="dialog" aria-label="Elegir rango de fechas">
             <div className="fechas__atajos">
               <p>Accesos rápidos</p>

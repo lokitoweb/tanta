@@ -4,11 +4,13 @@ import { useApp } from '@/core/app-state';
 import { Avatar, BrandMark } from '@/ui/primitives';
 import { Icon, type NombreIcono } from '@/ui/icons';
 import { fechaCorta } from '@/core/fecha';
+import { useCerrarAfuera } from '@/ui/useCerrarAfuera';
 import { Campana } from './Campana';
 
 export function AppShell() {
   const { rol, sesion, navegacionVisible, cerrarSesion, dataset } = useApp();
   const [menu, setMenu] = useState(false);
+  const refCuenta = useCerrarAfuera(menu, () => setMenu(false));
   const [menuMovil, setMenuMovil] = useState(false);
   // Preferencia de cada usuario en su navegador; sin almacenamiento, el menú arranca colapsado.
   const [fijo, setFijo] = useState(() => { try { return localStorage.getItem('tanta.menu.fijo') === '1'; } catch { return false; } });
@@ -102,7 +104,7 @@ export function AppShell() {
               <span className="chip__txt">En línea</span>
             </span>
             <Campana />
-            <div className="cuenta">
+            <div className="cuenta" ref={refCuenta}>
               <button className="cuenta__boton" onClick={() => setMenu((v) => !v)} aria-expanded={menu} aria-haspopup="menu">
                 <Avatar nombre={sesion.usuario.nombre} fotoUrl={sesion.usuario.fotoUrl} />
                 <span className="cuenta__txt">
@@ -112,8 +114,6 @@ export function AppShell() {
                 <Icon name="down" size={14} />
               </button>
               {menu && (
-                <>
-                  <button className="cuenta__fondo" aria-label="Cerrar menú" onClick={() => setMenu(false)} />
                   <div className="cuenta__menu" role="menu">
                     <div className="cuenta__cabeza">
                       <b>{sesion.usuario.nombre}</b>
@@ -127,7 +127,6 @@ export function AppShell() {
                       <Icon name="logout" size={16} /> Cerrar sesión
                     </button>
                   </div>
-                </>
               )}
             </div>
           </div>
