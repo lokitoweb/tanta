@@ -751,18 +751,23 @@ export async function rutasOperaciones(app: FastifyInstance) {
   app.get('/cxc', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'cobranza.ver')) return;
     const filas = await q<Record<string, string>>(
-      `SELECT x.id, c.nombre AS cliente, x.monto, x.saldo, x.vence_en::text AS vence_en, x.estado,
-              (current_date - x.vence_en) AS dias
+      `SELECT x.id, x.cliente_id, c.nombre AS cliente, x.monto, x.saldo, x.vence_en::text AS vence_en, x.estado,
+              (current_date - x.vence_en) AS dias,
+              coalesce(v.serie || '-' || lpad(v.correlativo::text, 8, '0'), v.codigo, 'Documento') AS documento
        FROM core.cuenta_por_cobrar x
        JOIN core.cliente c ON c.id = x.cliente_id
+       LEFT JOIN core.venta v ON v.id = x.venta_id
        WHERE x.estado IN ('PENDIENTE','PARCIAL') AND x.saldo > 0
        ORDER BY x.vence_en`,
     );
     return reply.send(filas.map((f) => ({
       id: f.id,
+      clienteId: f.cliente_id,
       cliente: f.cliente,
+      documento: f.documento,
       monto: num(f.monto),
       saldo: num(f.saldo),
+      pagado: Number((num(f.monto) - num(f.saldo)).toFixed(2)),
       venceEn: f.vence_en,
       diasVencido: num(f.dias),
       vencida: num(f.dias) > 0,

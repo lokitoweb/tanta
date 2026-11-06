@@ -88,6 +88,26 @@ test('CP-27 / CP-28: pago parcial, varios documentos y pago mayor al saldo', asy
   assert.ok(cierre.b.porMedio.some((m) => m.medio === 'TRANSFERENCIA' && m.monto >= 120));
 });
 
+test('Pago con dos formas (efectivo + Yape) y pago parcial que deja la compra en la cartera', async () => {
+  const t = await login('cmedina');
+  const cli = cliente();
+  const doc = deuda(cli, 250, 3);
+  const yapeSinOp = await api(t, 'POST', '/cobranza/recibos', { clienteId: cli, pagos: [{ monto: 50, medio: 'EFECTIVO' }, { monto: 50, medio: 'YAPE' }] });
+  assert.equal(yapeSinOp.s, 422, 'Yape sin N.° de operación');
+  assert.equal((await api(t, 'POST', '/cobranza/recibos', { clienteId: cli, pagos: [{ monto: 200, medio: 'EFECTIVO' }, { monto: 60, medio: 'EFECTIVO' }] })).s, 422, 'la suma supera el saldo');
+  const r = await api(t, 'POST', '/cobranza/recibos', { clienteId: cli, cxcIds: [doc], pagos: [{ monto: 60, medio: 'EFECTIVO' }, { monto: 40, medio: 'YAPE', referencia: 'Y-123456' }] });
+  assert.equal(r.s, 201, JSON.stringify(r.b));
+  assert.equal(r.b.monto, 100);
+  assert.deepEqual(r.b.pagos.map((p) => `${p.medio} ${p.monto}`).sort(), ['EFECTIVO 60', 'YAPE 40']);
+  assert.equal(sql(`SELECT estado || ' ' || saldo::numeric(10,2) FROM core.cuenta_por_cobrar WHERE id = '${doc}'`), 'PARCIAL 150.00', 'pagó 100 de 250: quedan 150');
+  const cartera = await api(t, 'GET', '/cxc');
+  const fila = cartera.b.find((x) => x.id === doc);
+  assert.ok(fila, 'la compra con pago parcial sigue en la cartera');
+  assert.equal(fila.pagado, 100);
+  assert.equal(fila.saldo, 150);
+  assert.equal(fila.clienteId, cli);
+});
+
 test('CP-34: antigüedad de deuda por días vencidos (5, 20 y 40)', async () => {
   const cli = cliente();
   [5, 20, 40].forEach((d) => deuda(cli, 10, d));

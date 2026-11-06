@@ -1489,3 +1489,12 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   html.imprime-dialogo .edc { position: absolute; left: 0; top: 0; width: 100%; }
   html.imprime-dialogo .edc__cifra--total { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Registrar pago con varias formas de pago: una fila por forma (medio, monto, N.° de operación). */
+.pago-linea { display: grid; grid-template-columns: 1.1fr 0.9fr 1.3fr auto; gap: 10px; align-items: end; }
+.pago-linea__quitar { height: 38px; width: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--tanta-text-muted); }
+.pago-linea__quitar:hover { background: var(--tanta-neutral-100); color: var(--tanta-state-danger); }
+.pago-resumen { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 8px; background: var(--tanta-neutral-50); border: 1px solid var(--tanta-border-subtle); font-size: 0.8125rem; color: var(--tanta-text-secondary); }
+.pago-resumen b { color: inherit; font-variant-numeric: tabular-nums; }
+.t-warn { color: var(--tanta-state-warn); } .t-ok { color: var(--tanta-state-ok); }
+@media (max-width: 640px) { .pago-linea { grid-template-columns: 1fr 1fr; } }

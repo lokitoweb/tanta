@@ -315,6 +315,10 @@ class Api {
   /// Cuentas por cobrar abiertas. El servidor ya filtra por permiso.
   Future<List<dynamic>> cartera() async => await _get('/cxc') as List<dynamic>;
 
+  /// Recibo de cobro: una o varias formas de pago aplicadas a las compras elegidas (las más antiguas primero).
+  Future<Map<String, dynamic>> registrarRecibo(Map<String, dynamic> datos, {String? claveIdempotencia}) async =>
+      await _post('/cobranza/recibos', datos, idempotente: true, claveIdempotencia: claveIdempotencia) as Map<String, dynamic>;
+
   /// Aplica un pago. La clave de idempotencia evita duplicar si se reintenta.
   Future<Map<String, dynamic>> registrarPago({
     required String cxcId,

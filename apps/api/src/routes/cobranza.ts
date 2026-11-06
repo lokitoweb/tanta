@@ -18,12 +18,24 @@ export async function rutasCobranza(app: FastifyInstance) {
   /* ------------------------------------------------------------- recibos */
   // RN-34 / COB-05: un pago del cliente se aplica a los documentos elegidos o, si no se eligen,
   // a los más antiguos primero. Nunca supera el saldo. Genera un recibo con correlativo (COB-08).
+  // Un pago puede venir en varias formas (p. ej. S/ 50 en efectivo + S/ 50 por Yape): «pagos».
+  // «monto/medio/referencia» sueltos = una sola forma (clientes anteriores).
+  const LineaPago = z.object({
+    monto: z.number({ message: 'Indica el monto de cada forma de pago' }).positive('Cada monto debe ser mayor que cero').max(10_000_000),
+    medio: z.string().trim().toUpperCase().min(1, 'Elige la forma de pago').max(20),
+    referencia: z.string().trim().max(60).default(''),
+  });
   const NuevoRecibo = z.object({
     clienteId: z.string().uuid(),
-    monto: z.number().positive().max(10_000_000),
-    medio: z.string().trim().toUpperCase().max(20),
+    monto: z.number().positive().max(10_000_000).optional(),
+    medio: z.string().trim().toUpperCase().max(20).optional(),
     referencia: z.string().trim().max(60).default(''),
+    pagos: z.array(LineaPago).min(1).max(5).optional(),
     cxcIds: z.array(z.string().uuid()).max(100).optional(),
+  }).transform((d, ctx) => {
+    const pagos = d.pagos ?? (d.monto && d.medio ? [{ monto: d.monto, medio: d.medio, referencia: d.referencia }] : []);
+    if (!pagos.length) ctx.addIssue({ code: 'custom', message: 'Indica el monto y la forma de pago.' });
+    return { clienteId: d.clienteId, cxcIds: d.cxcIds, pagos, monto: Number(pagos.reduce((s, x) => s + x.monto, 0).toFixed(2)) };
   });
 
   app.post('/cobranza/recibos', { preHandler: autenticar }, async (req, reply) => {
@@ -31,7 +43,7 @@ export async function rutasCobranza(app: FastifyInstance) {
     const p = NuevoRecibo.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pago inválido.'));
     const d = p.data;
-    try { exigirOperacion(await medioPago(null, d.medio, 'cobranza'), d.referencia); } catch (e) {
+    try { for (const x of d.pagos) exigirOperacion(await medioPago(null, x.medio, 'cobranza'), x.referencia); } catch (e) {
       return reply.code(422).send(error(422, 'MEDIO_INVALIDO', (e as Error).message));
     }
     const clave = req.headers['idempotency-key'] as string | undefined;
@@ -52,22 +64,32 @@ export async function rutasCobranza(app: FastifyInstance) {
             WHERE tipo = 'RECIBO' AND activo RETURNING serie, correlativo_actual AS correlativo`)).rows[0];
         if (!serie) throw fallo(409, 'No hay una serie activa de recibos: configúrala en Parámetros.');
         const num_ = `${serie.serie}-${String(serie.correlativo).padStart(8, '0')}`;
+        // El recibo guarda la forma principal (la de mayor monto); cada forma queda en su línea de cobranza,
+        // así el cierre del día cuadra por forma de pago.
+        const principal = d.pagos.reduce((a, b) => (b.monto > a.monto ? b : a));
         const rec = (await c.query<{ id: string }>(`INSERT INTO core.recibo (numero, cliente_id, monto, medio, referencia, registrado_por, idempotency_key)
-            VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7) RETURNING id`, [num_, d.clienteId, d.monto.toFixed(2), d.medio, d.referencia, req.usuario!.id, clave ?? null])).rows[0];
-        let resto = d.monto;
-        for (const doc of docs) {
-          if (resto <= 0.0001) break;
-          const aplica = Math.min(resto, num(doc.saldo));
-          const saldo = Number((num(doc.saldo) - aplica).toFixed(4));
-          await c.query('UPDATE core.cuenta_por_cobrar SET saldo = $2, estado = $3 WHERE id = $1', [doc.id, saldo.toFixed(4), saldo <= 0.001 ? 'PAGADA' : 'PARCIAL']);
-          await c.query(`INSERT INTO core.cobranza (cxc_id, monto, medio, referencia, registrado_por, recibo_id)
-              VALUES ($1,$2,$3,NULLIF($4,''),$5,$6)`, [doc.id, aplica.toFixed(4), d.medio, d.referencia, req.usuario!.id, rec.id]);
-          resto = Number((resto - aplica).toFixed(4));
+            VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7) RETURNING id`, [num_, d.clienteId, d.monto.toFixed(2), principal.medio,
+            d.pagos.length > 1 ? d.pagos.map((x) => `${x.medio} ${x.monto.toFixed(2)}${x.referencia ? ` (${x.referencia})` : ''}`).join(' + ').slice(0, 200) : principal.referencia,
+            req.usuario!.id, clave ?? null])).rows[0];
+        // Cada forma de pago se aplica a los documentos más antiguos que aún tienen saldo.
+        const saldos = docs.map((x) => ({ id: x.id, saldo: num(x.saldo) }));
+        for (const pago of d.pagos) {
+          let resto = pago.monto;
+          for (const doc of saldos) {
+            if (resto <= 0.0001) break;
+            if (doc.saldo <= 0.0001) continue;
+            const aplica = Number(Math.min(resto, doc.saldo).toFixed(4));
+            doc.saldo = Number((doc.saldo - aplica).toFixed(4));
+            await c.query('UPDATE core.cuenta_por_cobrar SET saldo = $2, estado = $3 WHERE id = $1', [doc.id, doc.saldo.toFixed(4), doc.saldo <= 0.001 ? 'PAGADA' : 'PARCIAL']);
+            await c.query(`INSERT INTO core.cobranza (cxc_id, monto, medio, referencia, registrado_por, recibo_id)
+                VALUES ($1,$2,$3,NULLIF($4,''),$5,$6)`, [doc.id, aplica.toFixed(4), pago.medio, pago.referencia, req.usuario!.id, rec.id]);
+            resto = Number((resto - aplica).toFixed(4));
+          }
         }
         return num_;
       });
       const r = await detalleRecibo(numero);
-      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RECIBO_EMITIDO', entidad: 'recibo', entidadId: numero, detalle: { monto: d.monto, medio: d.medio, documentos: r.aplicaciones.length }, ip: req.ip });
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RECIBO_EMITIDO', entidad: 'recibo', entidadId: numero, detalle: { monto: d.monto, pagos: d.pagos.map((x) => ({ medio: x.medio, monto: x.monto })), documentos: r.aplicaciones.length }, ip: req.ip });
       void emitirEvento('cobro.registrado', r);
       return reply.code(201).send(r);
     } catch (e) {
@@ -83,7 +105,10 @@ export async function rutasCobranza(app: FastifyInstance) {
     const ap = await q<Record<string, string>>(`SELECT coalesce(v.serie || '-' || lpad(v.correlativo::text, 8, '0'), v.codigo, 'Saldo') documento, b.monto, x.saldo
       FROM core.cobranza b JOIN core.recibo r ON r.id = b.recibo_id JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id LEFT JOIN core.venta v ON v.id = x.venta_id
       WHERE r.numero = $1 ORDER BY b.creado_en`, [numero]);
-    return { ...r, monto: num(r!.monto), aplicaciones: ap.map((a) => ({ documento: a.documento, aplicado: num(a.monto), saldo: num(a.saldo) })) };
+    const pagos = await q<Record<string, string>>(`SELECT b.medio, b.referencia, sum(b.monto) monto FROM core.cobranza b JOIN core.recibo r ON r.id = b.recibo_id
+      WHERE r.numero = $1 GROUP BY b.medio, b.referencia ORDER BY sum(b.monto) DESC`, [numero]);
+    return { ...r, monto: num(r!.monto), pagos: pagos.map((p) => ({ medio: p.medio, referencia: p.referencia, monto: num(p.monto) })),
+      aplicaciones: ap.map((a) => ({ documento: a.documento, aplicado: num(a.monto), saldo: num(a.saldo) })) };
   }
 
   app.get('/cobranza/recibos/:numero', { preHandler: autenticar }, async (req, reply) => {

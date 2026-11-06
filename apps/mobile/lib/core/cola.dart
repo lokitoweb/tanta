@@ -93,6 +93,9 @@ class ColaOffline {
     pendientes.value = _items.length;
   }
 
+  /// Clave de idempotencia para enviar ya y, si no hay red, encolar con la misma.
+  String nuevaClave() => _nuevoId();
+
   String _nuevoId() {
     final r = Random.secure();
     final b = List<int>.generate(16, (_) => r.nextInt(256));
@@ -198,6 +201,12 @@ class ColaOffline {
           referencia: op.datos['referencia'] as String?,
           claveIdempotencia: op.clave,
         );
+      case 'recibo':
+        await api.registrarRecibo({
+          'clienteId': op.datos['clienteId'],
+          'cxcIds': op.datos['cxcIds'],
+          'pagos': op.datos['pagos'],
+        }, claveIdempotencia: op.clave);
       case 'pedido':
         await api.cambiarEstadoPedido('${op.datos['codigo']}', '${op.datos['estado']}');
       default:
