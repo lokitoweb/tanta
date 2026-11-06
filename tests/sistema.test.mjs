@@ -28,6 +28,15 @@ test('configuración: pública sin secretos, admin enmascarado, validación', as
   assert.equal(pub.s, 200);
   assert.ok(pub.b.marca.nombreApp && !('cuentaServicio' in (pub.b.firebase ?? {})));
 
+  // Fondos del ingreso: se administran en la marca y salen en la configuración pública, sin pasar del tope.
+  const fondo = '00000000-0000-4000-8000-000000000001';
+  const { fondosIngreso: _f, fondoSegundos: _s, ...marca } = pub.b.marca;
+  assert.equal((await api(sa, 'PUT', '/sistema/config/marca', { ...marca, fondosIngreso: [fondo], fondoSegundos: 9 })).s, 200);
+  const conFondo = (await api(null, 'GET', '/config/publica')).b.marca;
+  assert.deepEqual([conFondo.fondosIngreso, conFondo.fondoSegundos], [[fondo], 9]);
+  assert.equal((await api(sa, 'PUT', '/sistema/config/marca', { ...marca, fondosIngreso: Array(9).fill(fondo) })).s, 422);
+  assert.equal((await api(sa, 'PUT', '/sistema/config/marca', marca)).s, 200);
+
   const wh = await api(sa, 'PUT', '/sistema/config/webhook', { habilitado: false, url: 'https://example.com/hook', secreto: 'abc123', eventos: ['venta.creada'] });
   assert.equal(wh.s, 200);
   assert.equal(wh.b.secreto, '••••••••', 'el secreto nunca vuelve al navegador');

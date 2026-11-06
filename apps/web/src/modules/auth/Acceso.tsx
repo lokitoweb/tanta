@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import demo from '@/config/demo.json';
 import { ApiError, activarMfa, enrolarMfa, login, verificarMfa } from '@/core/api';
 import { Boton } from '@/ui/primitives';
+import { FondosIngreso } from './FondosIngreso';
 import { TarjetaMarca } from './TarjetaMarca';
 import { Recuperar } from './Recuperar';
 import { api, leerConfigPublica, type ConfigPublica } from '@/core/api';
@@ -109,6 +110,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
   return (
     <div className="acceso">
       <aside className="acceso__marca">
+        <FondosIngreso />
         <div className="acceso__top">
           <span className="acceso__eyebrow">Sistema Integral de Gestión</span>
         </div>
@@ -220,16 +222,8 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
                       </button>
                     ))}
                   </div>
-                  <p className="roles__nota">
-                    Los siete perfiles existen en la base de datos con permisos distintos. Un vendedor no
-                    recibe el costo ni el margen: el servidor no se los envía.
-                  </p>
                 </fieldset>
               )}
-
-              <p className="acceso__legal">
-                Al ingresar aceptas la política de privacidad (Ley 29733). Los accesos quedan auditados.
-              </p>
             </form>
           )}
 

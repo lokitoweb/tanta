@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, leerConfigPublica, urlApi } from '@/core/api';
 import { imagenABase64 } from '@/core/imagen';
 import { relativa } from '@/core/format';
+import { InputNumero } from '@/ui/InputNumero';
 import { Boton, Encabezado, Insignia, PilaEsqueleto, Segmentado, Tarjeta, TablaEsqueleto, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { ActivacionApp, leerArchivoFirebase, type ArchivoFirebase } from './Vinculos';
 
@@ -19,6 +20,7 @@ const MODULOS: Array<[string, string, string]> = [
   ['catalogo', 'Catálogo', 'Pedidos del cliente y repetir pedido'],
 ];
 const dominioActual = () => window.location.origin;
+const MAX_FONDOS = 8;
 
 const EVENTOS: Array<[string, string]> = [
   ['venta.creada', 'Venta registrada'], ['cobro.registrado', 'Cobro registrado'], ['pedido.estado', 'Cambio de estado de pedido'],
@@ -151,6 +153,21 @@ export function Configuracion() {
           </div>
           <p className="dialogo__nota">El ícono que aparece en la pantalla del celular lo fija la tienda al publicar cada versión; este ícono se usa dentro de la app y para generar el de la próxima publicación.</p>
           <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('marca')} disabled={guardando}>Guardar marca</Boton></div>
+        </Tarjeta>
+      )}
+
+      {tab === 'marca' && (
+        <Tarjeta>
+          <TarjetaTitulo titulo="Fondos de la pantalla de ingreso" subtitulo="Fotos que rotan detrás de la tarjeta, en este orden. Sin fotos propias se usan los 3 fondos incluidos."
+            accion={<Insignia tono="info">{(marca.fondosIngreso as string[] | undefined)?.length ?? 0} / {MAX_FONDOS}</Insignia>} />
+          <EditorFondos ids={(marca.fondosIngreso as string[] | undefined) ?? []} onIds={(ids) => campo('marca', 'fondosIngreso', ids)} onError={(t) => setAviso({ tono: 'danger', texto: t })} />
+          <div className="form form--2col">
+            <Campo etiqueta="Segundos por fondo (3 a 30)">
+              <InputNumero className="field__input" min={3} max={30} step={1} valor={(marca.fondoSegundos as number | undefined) ?? 7} onValor={(n) => campo('marca', 'fondoSegundos', n === '' ? 7 : n)} />
+            </Campo>
+          </div>
+          <p className="dialogo__nota">Elige fotos con el centro despejado: ahí va la tarjeta (el recuadro claro de cada foto muestra lo que queda tapado). Se reducen solas antes de subirlas.</p>
+          <div className="form__acciones"><Boton variant="primary" onClick={() => void guardar('marca')} disabled={guardando}>Guardar fondos</Boton></div>
         </Tarjeta>
       )}
 
@@ -350,6 +367,43 @@ export function Configuracion() {
 
 function Campo({ etiqueta, children, ancho }: { etiqueta: string; children: ReactNode; ancho?: boolean }) {
   return <label className={`field ${ancho ? 'field--ancho' : ''}`}><span className="field__label">{etiqueta}</span>{children}</label>;
+}
+
+/** Lista ordenada de fondos: agregar varios a la vez, mover y quitar. Se guarda con «Guardar fondos». */
+function EditorFondos({ ids, onIds, onError }: { ids: string[]; onIds: (ids: string[]) => void; onError: (t: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const subir = async (archivos: File[]) => {
+    setSubiendo(true);
+    const nuevos = [...ids];
+    try {
+      for (const f of archivos.slice(0, MAX_FONDOS - ids.length)) {
+        const { id } = await api<{ id: string }>('/sistema/archivos', { method: 'POST', body: { base64: await imagenABase64(f, 1600) } });
+        nuevos.push(id);
+      }
+    } catch (e) { onError(e instanceof Error ? e.message : 'No se pudo subir.'); }
+    onIds(nuevos);
+    setSubiendo(false);
+  };
+  const mover = (i: number, d: number) => { const l = [...ids]; [l[i], l[i + d]] = [l[i + d], l[i]]; onIds(l); };
+  return (
+    <div className="fondos">
+      {ids.map((id, i) => (
+        <figure key={id} className="fondos__item">
+          <div className="fondos__foto"><img src={urlApi(`/archivos/${id}`)} alt={`Fondo ${i + 1}`} /></div>
+          <figcaption>
+            <Boton size="sm" variant="ghost" title="Mover antes" disabled={i === 0} onClick={() => mover(i, -1)}>←</Boton>
+            <Boton size="sm" variant="ghost" title="Mover después" disabled={i === ids.length - 1} onClick={() => mover(i, 1)}>→</Boton>
+            <Boton size="sm" variant="ghost" onClick={() => onIds(ids.filter((x) => x !== id))}>Quitar</Boton>
+          </figcaption>
+        </figure>
+      ))}
+      {ids.length < MAX_FONDOS && (
+        <button type="button" className="fondos__agregar" disabled={subiendo} onClick={() => ref.current?.click()}>{subiendo ? 'Subiendo…' : '+ Agregar fotos'}</button>
+      )}
+      <input ref={ref} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={(e) => { const l = Array.from(e.target.files ?? []); if (l.length) void subir(l); e.target.value = ''; }} />
+    </div>
+  );
 }
 
 function SubirImagen({ etiqueta, id, cuadrado, onId, onError }: { etiqueta: string; id: string | null; cuadrado?: boolean; onId: (id: string | null) => void; onError: (t: string) => void }) {

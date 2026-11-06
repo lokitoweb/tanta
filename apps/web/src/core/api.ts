@@ -40,7 +40,7 @@ export function borrarAcceso(): void {
 export const urlApi = (ruta: string) => BASE + ruta;
 
 export interface ConfigPublica {
-  marca: { nombreApp: string; colorPrimario: string; colorAcento: string; logoId: string | null; iconoId: string | null };
+  marca: { nombreApp: string; colorPrimario: string; colorAcento: string; logoId: string | null; iconoId: string | null; fondosIngreso?: string[]; fondoSegundos?: number };
   movil: { versionActual: string; versionMinima: string };
   legal: { urlPrivacidad: string; urlTerminos: string; correoSoporte: string };
   negocio: { nombre: string; ruc: string; direccion: string; telefono: string; whatsapp: string; email: string; representante: string; claim: string };
