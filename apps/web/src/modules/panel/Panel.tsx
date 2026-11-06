@@ -121,7 +121,7 @@ export function Panel() {
           </div>
 
           <div className="grid grid--12">
-            <Tarjeta className="col-7" padding="none">
+            {vista !== 'CLIENTE' && <Tarjeta className="col-7" padding="none">
               <div className="card__head card__head--padded">
                 <div>
                   <h3 className="card__title">
@@ -190,9 +190,9 @@ export function Panel() {
                   })}
                 </ul>
               )}
-            </Tarjeta>
+            </Tarjeta>}
 
-            <div className="col-5 apilar">
+            <div className={`${vista === 'CLIENTE' ? 'col-12' : 'col-5'} apilar`}>
               <Tarjeta>
                 <TarjetaTitulo titulo="Accesos rápidos" />
                 <div className="accesos">
