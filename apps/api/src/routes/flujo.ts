@@ -5,7 +5,7 @@ import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
-import { medioPago } from './catalogos.js';
+
 import { presentacionesDe } from './operaciones.js';
 
 /**
@@ -67,8 +67,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     // PED-03: recojo en tienda o delivery (con dirección).
     tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).default('RECOJO'),
     direccion: z.string().trim().max(200).default(''),
-    // Sin pasarela: el cliente paga al recibir; indica cómo para que el vendedor lleve vuelto o POS.
-    pagoEntrega: z.string().trim().toUpperCase().max(20).default('EFECTIVO'),
+    // Sin forma de pago: el cliente no paga al pedir. Cómo paga (o si queda debiendo) se registra al entregar.
   }).refine((d) => d.tipoEntrega !== 'DELIVERY' || d.direccion.length >= 5, { message: 'Indica la dirección de entrega.', path: ['direccion'] });
 
   app.post('/pedidos', { preHandler: autenticar }, async (req, reply) => {
@@ -85,11 +84,7 @@ export async function rutasFlujo(app: FastifyInstance) {
 
     try {
       const r = await tx(async (c) => {
-        const pago = await medioPago(c, d.pagoEntrega, 'ventas');
-        const cli = (await c.query<{ nombre: string; estado: string; limite_credito: string; deuda: string; condicion_pago: string }>(
-          `SELECT c.nombre, c.estado, c.limite_credito, c.condicion_pago,
-                  coalesce((SELECT sum(x.saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) deuda
-           FROM core.cliente c WHERE c.id = $1 FOR UPDATE`, [clienteId])).rows[0];
+        const cli = (await c.query<{ nombre: string; estado: string }>('SELECT c.nombre, c.estado FROM core.cliente c WHERE c.id = $1 FOR UPDATE', [clienteId])).rows[0];
         if (!cli || cli.estado !== 'ACTIVO') throw Object.assign(new Error('El cliente no existe o está inactivo.'), { status: 422 });
         const ids = [...new Set(d.items.map((i) => i.productoId))];
         const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; anticipacion_horas: number }>(
@@ -111,21 +106,14 @@ export async function rutasFlujo(app: FastifyInstance) {
           const lento = prods.rows.find((x) => Number(x.anticipacion_horas) === horas)!.nombre;
           throw Object.assign(new Error(`${lento} se pide con ${horas} h de anticipación: elige una entrega posterior.`), { status: 422 });
         }
-        if (pago.es_credito && cli.condicion_pago !== 'CREDITO') throw Object.assign(new Error('Tu cuenta compra al contado: elige cómo pagarás al recibir.'), { status: 422 });
-        // PED-04 / RN-35: con línea de crédito, el pedido no puede superar el saldo disponible.
-        // Solo si paga al crédito: un pedido contra entrega no consume línea.
-        if (pago.es_credito && num(cli.limite_credito) <= 0) throw Object.assign(new Error('Tu cuenta no tiene línea de crédito definida: elige cómo pagarás al recibir.'), { status: 409 });
-        if (pago.es_credito && num(cli.deuda) + total > num(cli.limite_credito) + 0.001) {
-          throw Object.assign(new Error(`Supera la línea de crédito: debe S/ ${num(cli.deuda).toFixed(2)} de S/ ${num(cli.limite_credito).toFixed(2)}.`), { status: 409 });
-        }
         // PED-09: el pedido que registra el vendedor ya queda confirmado; el del cliente espera confirmación (PED-08).
         const estadoInicial = yo?.cliente_id ? 'REGISTRADO' : 'CONFIRMADO';
         const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
         const ped = (await c.query<{ id: string }>(
-          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en, pago_entrega)
-           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END, $13) RETURNING id`,
+          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en)
+           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END) RETURNING id`,
           [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), d.fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
-            estadoInicial, d.tipoEntrega, d.direccion, d.pagoEntrega])).rows[0];
+            estadoInicial, d.tipoEntrega, d.direccion])).rows[0];
         for (const i of lineas) {
           const pr = mapa.get(i.productoId)!;
           await c.query(`INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv, presentacion_codigo, cantidad_presentacion)
@@ -150,14 +138,16 @@ export async function rutasFlujo(app: FastifyInstance) {
     const filas = await q<Record<string, string>>(`
       SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
-             p.tipo_entrega AS "tipoEntrega", p.direccion, p.pago_entrega AS "pagoEntrega", p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
+             p.tipo_entrega AS "tipoEntrega", p.direccion, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
+             p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn",
+             (SELECT sum(x.saldo) FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA') AS "porCobrar",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
                'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion) ORDER BY d.id)
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
       FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
       WHERE ($1::uuid IS NULL OR p.cliente_id = $1)
       GROUP BY p.id ORDER BY p.creado_en DESC LIMIT 200`, [yo?.cliente_id ?? null]);
-    return filas.map((f) => ({ ...f, total: num(f.total), items: (f.items as unknown as Array<Record<string, unknown>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), despachado: num(i.despachado as string),
+    return filas.map((f) => ({ ...f, total: num(f.total), porCobrar: f.porCobrar === null ? null : num(f.porCobrar), items: (f.items as unknown as Array<Record<string, unknown>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), despachado: num(i.despachado as string),
       cantidadPresentacion: i.cantidadPresentacion === null ? null : num(i.cantidadPresentacion as string) })) }));
   });
 
@@ -180,6 +170,23 @@ export async function rutasFlujo(app: FastifyInstance) {
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CANCELADO', entidad: 'pedido', entidadId: codigo, detalle: p.data, ip: req.ip });
     void emitirEvento('pedido.estado', { codigo, de: ped.estado, a: 'CANCELADO' });
     return { codigo, estado: 'CANCELADO' };
+  });
+
+  // El vendedor revisa el pedido y, si algo no cuadra («siempre pides 48 y pediste 4»), le avisa al cliente.
+  // El pedido no se mueve: el cliente lo anula y lo vuelve a hacer, o el vendedor lo confirma tras hablar con él.
+  app.post('/pedidos/:codigo/observar', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'pedidos.gestionar')) return;
+    const { codigo } = req.params as { codigo: string };
+    const p = z.object({ mensaje: z.string().trim().min(5, 'Escribe qué está mal en el pedido (mínimo 5 caracteres).').max(300) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Mensaje inválido.'));
+    const ped = await uno<{ cliente_id: string; cliente: string }>(`UPDATE core.pedido SET observacion_vendedor = $2, observado_en = now(), observado_por = $3
+      WHERE codigo = $1 AND estado IN ('REGISTRADO','CONFIRMADO') RETURNING cliente_id, cliente`, [codigo, p.data.mensaje, req.usuario!.id]);
+    if (!ped) return reply.code(409).send(error(409, 'NO_OBSERVABLE', 'Solo se observa un pedido por confirmar o confirmado (antes de producción).'));
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_OBSERVADO', entidad: 'pedido', entidadId: codigo, detalle: p.data, ip: req.ip });
+    avisar([{ clienteId: ped.cliente_id }], { tipo: 'pedido', titulo: `Revisa tu pedido ${codigo}`,
+      cuerpo: `${req.usuario!.nombre}: ${p.data.mensaje} · Si está mal, anúlalo y vuelve a hacerlo.`, ruta: `/pedidos/${codigo}` });
+    void emitirEvento('pedido.observado', { codigo });
+    return { codigo, observacion: p.data.mensaje };
   });
 
   /* ------------------------------------------------- direcciones (cliente) */

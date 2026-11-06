@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
-import '../core/catalogos.dart';
 import '../core/cola.dart';
 import '../core/comprobante.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
+import 'acciones.dart' show etiquetaPedido, tonoPedido;
+import 'cobranza.dart';
 
 export 'cobranza.dart';
 
-/// Pedidos del vendedor: ve la lista y avanza el estado.
-/// Las transiciones válidas las valida el servidor; aquí solo se ofrecen las que aplican.
+/// Pedidos del vendedor: lista con filtros, detalle completo del pedido y cada paso del flujo
+/// (confirmar, observar, rechazar/anular, listo, despachar, entregar y cobrar). El servidor valida cada transición.
 class Pedidos extends StatefulWidget {
   const Pedidos({super.key, required this.datos});
   final Map<String, dynamic> datos;
@@ -20,229 +21,333 @@ class Pedidos extends StatefulWidget {
 }
 
 class _PedidosState extends State<Pedidos> {
-  late List<Map<String, dynamic>> _pedidos;
+  List<Map<String, dynamic>>? _pedidos;
+  String? _error;
   String? _ocupado;
+  String _filtro = 'activos';
 
-  // RN-26. "Listo" se despacha vendiendo (botón propio); "Registrado" también se puede rechazar.
-  static const _siguiente = <String, String>{
-    'REGISTRADO': 'CONFIRMADO',
-    'CONFIRMADO': 'LISTO',
-    'EN_PRODUCCION': 'LISTO',
-    'DESPACHADO': 'ENTREGADO',
+  static const _filtros = {
+    'activos': 'Activos',
+    'confirmar': 'Por confirmar',
+    'entregar': 'Por entregar',
+    'todos': 'Todos',
   };
 
-  static const _etiqueta = <String, String>{
-    'REGISTRADO': 'Por confirmar',
-    'CONFIRMADO': 'Confirmado',
-    'RECHAZADO': 'Rechazado',
-    'EN_PRODUCCION': 'En producción',
-    'LISTO': 'Listo',
-    'DESPACHADO': 'Despachado',
-    'ENTREGADO': 'Entregado',
-    'CANCELADO': 'Cancelado',
-  };
+  bool _pasa(Map<String, dynamic> p) => switch (_filtro) {
+        'activos' => !['ENTREGADO', 'CANCELADO', 'RECHAZADO'].contains(p['estado']),
+        'confirmar' => p['estado'] == 'REGISTRADO',
+        'entregar' => p['estado'] == 'LISTO' || p['estado'] == 'DESPACHADO',
+        _ => true,
+      };
 
   @override
   void initState() {
     super.initState();
-    _pedidos = ((widget.datos['pedidos'] as List?) ?? const [])
-        .cast<Map<String, dynamic>>()
-        .toList();
+    _cargar();
   }
 
-  Future<void> _avanzar(Map<String, dynamic> p) async {
-    final actual = '${p['estado']}';
-    final destino = _siguiente[actual];
-    if (destino == null) return;
+  /// Lista completa con productos (GET /pedidos): la del panel no trae el detalle.
+  Future<void> _cargar() async {
+    try {
+      final r = await Api.instancia.misPedidos();
+      if (!mounted) return;
+      setState(() { _pedidos = r.cast<Map<String, dynamic>>(); _error = null; });
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Sin conexión: intenta de nuevo');
+    }
+  }
 
-    setState(() => _ocupado = p['codigo'] as String);
+  double _n(Object? v) => (v as num?)?.toDouble() ?? 0;
+  List<Map<String, dynamic>> _items(Map<String, dynamic> p) => ((p['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
 
-    // Primero se guarda en disco: si no hay red, el cambio no se pierde.
-    await ColaOffline.instancia.encolar(
-      'pedido',
-      {'codigo': '${p['codigo']}', 'estado': destino},
-      descripcion: '${p['codigo']} → ${_etiqueta[destino]}',
-    );
-    final enviadas = await ColaOffline.instancia.sincronizar(Api.instancia);
+  /// «2 × paquete x 6 (12 unid)» o «5 unid».
+  String _cantidad(Map<String, dynamic> i) {
+    final pres = '${i['presentacion'] ?? ''}';
+    final unid = _n(i['cantidad']);
+    final u = unid == unid.roundToDouble() ? unid.toStringAsFixed(0) : unid.toStringAsFixed(2);
+    return pres.isNotEmpty && i['cantidadPresentacion'] != null
+        ? '${_n(i['cantidadPresentacion']).toStringAsFixed(0)} × ${pres.toLowerCase()} ($u unid)'
+        : '$u unid';
+  }
 
+  void _aviso(String texto, {Color? color, SnackBarAction? accion}) {
     if (!mounted) return;
-    setState(() {
-      p['estado'] = destino;
-      p['pendiente'] = enviadas == 0;
-    });
-    setState(() => _ocupado = null);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(enviadas > 0
-            ? '${p['codigo']} → ${_etiqueta[destino]}'
-            : 'Sin conexión · guardado, se enviará al volver la red'),
-        backgroundColor: enviadas > 0 ? TantaColors.stateOk : TantaColors.stateWarn,
-        action: destino == 'DESPACHADO'
-            ? SnackBarAction(
-                label: 'Guía PDF',
-                textColor: Colors.white,
-                onPressed: () => compartirComprobante(
-                  titulo: 'Guía de despacho',
-                  numero: '${p['codigo']}',
-                  cliente: '${p['cliente'] ?? '-'}',
-                  lineas: [('Pedido ${p['codigo']}', dinero(((p['total'] as num?) ?? 0).toDouble()))],
-                  total: dinero(((p['total'] as num?) ?? 0).toDouble()),
-                  vendedor: Api.instancia.nombre,
-                ),
-              )
-            : null,
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto), backgroundColor: color, action: accion, duration: const Duration(seconds: 6)));
   }
 
   /// Pide un texto (motivo u observación) y devuelve null si se cancela.
-  Future<String?> _pedirTexto(String titulo, String etiqueta, {bool obligatorio = true}) async {
+  Future<String?> _pedirTexto(String titulo, String etiqueta, {int minimo = 3}) async {
     final c = TextEditingController();
-    return showDialog<String>(context: context, builder: (_) => AlertDialog(
+    return showDialog<String>(context: context, builder: (ctx) => AlertDialog(
       title: Text(titulo),
-      content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: InputDecoration(labelText: etiqueta)),
+      content: TextField(controller: c, autofocus: true, maxLength: 200, maxLines: 3, minLines: 1, decoration: InputDecoration(labelText: etiqueta)),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Volver')),
-        FilledButton(onPressed: () { if (!obligatorio || c.text.trim().length >= 3) Navigator.pop(context, c.text.trim()); }, child: const Text('Confirmar')),
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Volver')),
+        FilledButton(onPressed: () { if (c.text.trim().length >= minimo) Navigator.pop(ctx, c.text.trim()); }, child: const Text('Confirmar')),
       ],
     ));
   }
 
-  Future<void> _rechazar(Map<String, dynamic> p) async {
-    final motivo = await _pedirTexto('Rechazar ${p['codigo']}', 'Motivo del rechazo');
-    if (motivo == null || !mounted) return;
-    final aviso = ScaffoldMessenger.of(context);
+  /// Cambios de estado simples: se guardan primero en el teléfono (sin red no se pierden).
+  Future<void> _cambiar(Map<String, dynamic> p, String destino, {String motivo = ''}) async {
+    setState(() => _ocupado = '${p['codigo']}');
     try {
-      await Api.instancia.cambiarEstadoPedido('${p['codigo']}', 'RECHAZADO', motivo: motivo);
-      setState(() => p['estado'] = 'RECHAZADO');
+      if (motivo.isNotEmpty) {
+        await Api.instancia.cambiarEstadoPedido('${p['codigo']}', destino, motivo: motivo);
+        _aviso('${p['codigo']} → ${etiquetaPedido[destino]}', color: TantaColors.stateOk);
+      } else {
+        await ColaOffline.instancia.encolar('pedido', {'codigo': '${p['codigo']}', 'estado': destino}, descripcion: '${p['codigo']} → ${etiquetaPedido[destino]}');
+        final enviadas = await ColaOffline.instancia.sincronizar(Api.instancia);
+        _aviso(enviadas > 0 ? '${p['codigo']} → ${etiquetaPedido[destino]}' : 'Sin conexión · guardado, se enviará al volver la red',
+            color: enviadas > 0 ? TantaColors.stateOk : TantaColors.stateWarn);
+        if (enviadas == 0) setState(() { p['estado'] = destino; p['pendiente'] = true; });
+      }
+      await _cargar();
     } on ApiException catch (e) {
-      aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
-    }
-  }
-
-  /// VEN-02/05: despachar = vender lo pedido (descuenta stock, libera la reserva y deja el pedido despachado).
-  Future<void> _despachar(Map<String, dynamic> p) async {
-    final forma = await showDialog<String>(context: context, builder: (_) => SimpleDialog(
-      title: Text('Despachar ${p['codigo']}'),
-      children: [for (final m in mediosPago('enVentas'))
-        SimpleDialogOption(onPressed: () => Navigator.pop(context, '${m['codigo']}'), child: Text('${m['nombre']}'))],
-    ));
-    if (forma == null || !mounted) return;
-    var referencia = '';
-    if (requiereOperacion(forma)) {
-      final r = await _pedirTexto('Pago con ${forma.toLowerCase()}', 'N.° de operación');
-      if (r == null || !mounted) return;
-      referencia = r;
-    }
-    final aviso = ScaffoldMessenger.of(context);
-    setState(() => _ocupado = p['codigo'] as String);
-    try {
-      final completo = (await Api.instancia.misPedidos()).cast<Map<String, dynamic>>().firstWhere((x) => x['codigo'] == p['codigo']);
-      final items = ((completo['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
-      final v = await Api.instancia.registrarVenta(
-        items: [for (final i in items) {'productoId': i['productoId'], 'cantidad': i['cantidad']}],
-        formaPago: forma, clienteId: '${completo['clienteId']}', pedidoId: '${completo['id']}', referenciaPago: referencia);
-      setState(() => p['estado'] = 'DESPACHADO');
-      await compartirComprobante(
-        titulo: 'Nota de venta', numero: '${(v['comprobante'] as Map?)?['numero'] ?? v['codigo']}', cliente: '${p['cliente'] ?? '-'}', vendedor: Api.instancia.nombre,
-        total: dinero(((p['total'] as num?) ?? 0).toDouble()),
-        lineas: [for (final i in items) ('${i['cantidad']} × ${i['producto']}', '')]);
-    } on ApiException catch (e) {
-      aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
+      _aviso(e.mensaje, color: TantaColors.stateDanger);
     } catch (_) {
-      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: intenta de nuevo')));
+      _aviso('Sin conexión: intenta de nuevo');
     } finally {
       if (mounted) setState(() => _ocupado = null);
     }
   }
 
-  Color _tono(String estado) => switch (estado) {
-        'ENTREGADO' => TantaColors.stateOk,
-        'LISTO' || 'DESPACHADO' => TantaColors.stateInfo,
-        'EN_PRODUCCION' => TantaColors.stateWarn,
-        'CANCELADO' => TantaColors.stateDanger,
-        _ => TantaColors.textMuted,
-      };
+  Future<void> _observar(Map<String, dynamic> p) async {
+    final m = await _pedirTexto('Observar ${p['codigo']}', '¿Qué está mal? (le llega al cliente)', minimo: 5);
+    if (m == null || !mounted) return;
+    setState(() => _ocupado = '${p['codigo']}');
+    try {
+      await Api.instancia.observarPedido('${p['codigo']}', m);
+      _aviso('Observación enviada a ${p['cliente']}', color: TantaColors.stateOk);
+      await _cargar();
+    } on ApiException catch (e) {
+      _aviso(e.mensaje, color: TantaColors.stateDanger);
+    } catch (_) {
+      _aviso('Sin conexión: intenta de nuevo');
+    } finally {
+      if (mounted) setState(() => _ocupado = null);
+    }
+  }
+
+  /// VEN-02/05: despachar = vender lo pedido «por cobrar» (descuenta stock y libera la reserva).
+  /// Cómo paga el cliente se registra al entregar.
+  Future<void> _despachar(Map<String, dynamic> p) async {
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Despachar ${p['codigo']}'),
+      content: Text('Se registra la venta por ${dinero(_n(p['total']))} a ${p['cliente']} y sale de almacén.\n\nEl pago se registra al entregar: todo, una parte o nada (queda como deuda).'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Despachar')),
+      ],
+    ));
+    if (ok != true || !mounted) return;
+    setState(() => _ocupado = '${p['codigo']}');
+    try {
+      final items = _items(p);
+      final v = await Api.instancia.registrarVenta(
+        // Se despacha en la presentación pedida (paquete x 6): el servidor la convierte a unidades y descarga su empaque.
+        items: [for (final i in items)
+          if ('${i['presentacion'] ?? ''}'.isNotEmpty && i['cantidadPresentacion'] != null)
+            {'productoId': i['productoId'], 'cantidad': i['cantidadPresentacion'], 'presentacion': i['presentacion']}
+          else
+            {'productoId': i['productoId'], 'cantidad': i['cantidad']}],
+        formaPago: 'CREDITO', clienteId: '${p['clienteId']}', pedidoId: '${p['id']}');
+      await _cargar();
+      final alerta = '${v['alertaCredito'] ?? ''}';
+      _aviso(alerta.isEmpty ? '${p['codigo']} despachado · por cobrar ${dinero(_n(p['total']))}' : '${p['codigo']} despachado · $alerta',
+          color: alerta.isEmpty ? TantaColors.stateOk : TantaColors.stateWarn,
+          accion: SnackBarAction(label: 'Guía PDF', textColor: Colors.white, onPressed: () => compartirComprobante(
+            titulo: 'Guía de despacho', numero: '${(v['comprobante'] as Map?)?['numero'] ?? v['codigo']}', cliente: '${p['cliente'] ?? '-'}',
+            vendedor: Api.instancia.nombre, total: dinero(_n(p['total'])),
+            lineas: [for (final i in items) ('${_cantidad(i)} · ${i['producto']}', dinero(_n(i['precio']) * _n(i['cantidad'])))])));
+    } on ApiException catch (e) {
+      _aviso(e.mensaje, color: TantaColors.stateDanger);
+    } catch (_) {
+      _aviso('Sin conexión: el despacho necesita internet');
+    } finally {
+      if (mounted) setState(() => _ocupado = null);
+    }
+  }
+
+  /// Entregar y cobrar: lo que paga en el momento entra por Cobranza; lo que falta queda como deuda.
+  Future<void> _entregar(Map<String, dynamic> p) async {
+    final debe = p['porCobrar'] == null ? _n(p['total']) : _n(p['porCobrar']);
+    final cobro = await mostrarHojaCobro(context, cliente: '${p['cliente']}', detalle: '${p['codigo']}', debe: debe, alEntregar: true);
+    if (cobro == null || !mounted) return;
+    final queda = debe - cobro.monto;
+    final resumen = cobro.pagos.isEmpty ? 'queda ${dinero(debe)} por cobrar' : 'cobrado ${dinero(cobro.monto)}${queda > 0.009 ? ' · queda ${dinero(queda)}' : ' · saldado'}';
+    setState(() => _ocupado = '${p['codigo']}');
+    try {
+      final r = await Api.instancia.entregarPedido('${p['codigo']}', pagos: cobro.pagos, observaciones: cobro.nota);
+      await _cargar();
+      final recibo = (r['recibo'] as Map?)?.cast<String, dynamic>();
+      _aviso('${p['codigo']} entregado · $resumen', color: TantaColors.stateOk,
+          accion: recibo == null ? null : SnackBarAction(label: 'Recibo PDF', textColor: Colors.white, onPressed: () => compartirComprobante(
+            titulo: 'Recibo de cobro', numero: '${recibo['numero']}', cliente: '${p['cliente']}',
+            lineas: lineasRecibo(cobro.pagos, queda), total: dinero(cobro.monto), vendedor: Api.instancia.nombre)));
+    } on ApiException catch (e) {
+      if (e.esDefinitivo) {
+        _aviso(e.mensaje, color: TantaColors.stateDanger);
+      } else {
+        await _entregaSinRed(p, cobro, resumen);
+      }
+    } catch (_) {
+      await _entregaSinRed(p, cobro, resumen);
+    } finally {
+      if (mounted) setState(() => _ocupado = null);
+    }
+  }
+
+  /// Sin señal en la calle: la entrega (con su cobro) se guarda y se envía sola; el servidor no la repite.
+  Future<void> _entregaSinRed(Map<String, dynamic> p, Cobro cobro, String resumen) async {
+    await ColaOffline.instancia.encolar('entrega', {'codigo': '${p['codigo']}', 'pagos': cobro.pagos, 'observaciones': cobro.nota},
+        descripcion: 'Entrega ${p['codigo']} · $resumen');
+    if (!mounted) return;
+    setState(() { p['estado'] = 'ENTREGADO'; p['pendiente'] = true; });
+    _aviso('Sin conexión · entrega guardada ($resumen), se enviará al volver la red', color: TantaColors.stateWarn);
+  }
+
+  /// Detalle completo del pedido con las acciones de su estado.
+  Future<void> _detalle(Map<String, dynamic> p) async {
+    final gestiona = Api.instancia.puede('pedidos.gestionar');
+    final vende = Api.instancia.puede('ventas.registrar');
+    final estado = '${p['estado']}';
+    final items = _items(p);
+    final obs = '${p['observacion'] ?? ''}';
+    final porCobrar = p['porCobrar'] == null ? null : _n(p['porCobrar']);
+    // Cada acción cierra la hoja y luego se ejecuta.
+    Widget accion(BuildContext ctx, String texto, Future<void> Function() fn, {bool principal = false, bool peligro = false}) {
+      void tocar() { Navigator.pop(ctx); fn(); }
+      return principal
+          ? FilledButton(onPressed: tocar, child: Text(texto))
+          : OutlinedButton(
+              style: peligro ? OutlinedButton.styleFrom(foregroundColor: TantaColors.stateDanger, side: const BorderSide(color: TantaColors.stateDanger)) : null,
+              onPressed: tocar, child: Text(texto));
+    }
+
+    await showModalBottomSheet<void>(context: context, isScrollControlled: true, useSafeArea: true, builder: (ctx) => DraggableScrollableSheet(
+      expand: false, initialChildSize: 0.8, builder: (_, scroll) => ListView(controller: scroll,
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom), children: [
+        Row(children: [
+          Expanded(child: Text('${p['codigo']}', style: Theme.of(ctx).textTheme.titleLarge)),
+          Insignia(etiquetaPedido[estado] ?? estado, tono: tonoPedido(estado), punto: true),
+        ]),
+        Text('${p['cliente']}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Text('Entrega ${fechaCorta('${p['fecha_entrega']}')}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' · ${p['hora_entrega']}'} · '
+            '${p['tipoEntrega'] == 'DELIVERY' ? 'delivery a ${p['direccion']}' : 'recojo en tienda'}', style: const TextStyle(color: TantaColors.textMuted)),
+        if ('${p['observaciones'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Nota del cliente: ${p['observaciones']}')),
+        if (obs.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6),
+            child: Text('Tu observación: $obs', style: const TextStyle(color: TantaColors.stateWarn))),
+        if ('${p['motivo'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Motivo: ${p['motivo']}')),
+        if ('${p['entregaObs'] ?? ''}'.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Entrega: ${p['entregaObs']}')),
+        const Divider(height: 24),
+        for (final i in items)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${i['producto']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text('${_cantidad(i)} · ${dinero(_n(i['precio']))} c/u', style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+            ])),
+            Text(dinero(_n(i['precio']) * _n(i['cantidad']))),
+          ])),
+        const Divider(height: 20),
+        Row(children: [
+          const Expanded(child: Text('Total', style: TextStyle(fontWeight: FontWeight.w700))),
+          Text(dinero(_n(p['total'])), style: estiloDisplay.copyWith(fontSize: 18)),
+        ]),
+        if (porCobrar != null) Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [
+          const Expanded(child: Text('Por cobrar', style: TextStyle(color: TantaColors.textMuted))),
+          Text(porCobrar > 0.009 ? dinero(porCobrar) : 'Pagado', style: TextStyle(fontWeight: FontWeight.w600,
+              color: porCobrar > 0.009 ? TantaColors.stateWarn : TantaColors.stateOk)),
+        ])),
+        const SizedBox(height: 16),
+        if (gestiona && p['pendiente'] != true) Wrap(spacing: 8, runSpacing: 8, children: [
+          if (estado == 'REGISTRADO') accion(ctx, 'Confirmar', () => _cambiar(p, 'CONFIRMADO'), principal: true),
+          if (estado == 'CONFIRMADO' || estado == 'EN_PRODUCCION') accion(ctx, 'Marcar listo', () => _cambiar(p, 'LISTO'), principal: true),
+          if (estado == 'LISTO' && vende) accion(ctx, 'Despachar', () => _despachar(p), principal: true),
+          if (estado == 'DESPACHADO' && Api.instancia.puede('cobranza.registrar')) accion(ctx, 'Entregar y cobrar', () => _entregar(p), principal: true),
+          if (estado == 'REGISTRADO' || estado == 'CONFIRMADO') accion(ctx, 'Observar', () => _observar(p)),
+          if (estado == 'REGISTRADO') accion(ctx, 'Rechazar', () async {
+            final m = await _pedirTexto('Rechazar ${p['codigo']}', 'Motivo (le llega al cliente)');
+            if (m != null) await _cambiar(p, 'RECHAZADO', motivo: m);
+          }, peligro: true),
+          if (['CONFIRMADO', 'EN_PRODUCCION', 'LISTO'].contains(estado)) accion(ctx, 'Anular', () async {
+            final m = await _pedirTexto('Anular ${p['codigo']}', 'Motivo (le llega al cliente)');
+            if (m != null) await _cambiar(p, 'CANCELADO', motivo: m);
+          }, peligro: true),
+        ]),
+      ]),
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
-    final puedeGestionar = Api.instancia.puede('pedidos.gestionar');
+    final pedidos = _pedidos;
+    if (_error != null || pedidos == null) {
+      return RefreshIndicator(onRefresh: _cargar, child: ListView(children: [
+        _error != null ? ErrorReintentar(mensaje: _error!, onReintentar: _cargar) : const Esqueleto(),
+      ]));
+    }
+    final lista = pedidos.where(_pasa).toList();
+    int cuenta(String f) => pedidos.where((p) { final a = _filtro; _filtro = f; final r = _pasa(p); _filtro = a; return r; }).length;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-      children: [
-        TituloSeccion('', subtitulo: '${_pedidos.length} en el período'),
-        const SizedBox(height: 14),
-        if (_pedidos.isEmpty) const VacioMensaje('No hay pedidos en el período', icono: Icons.receipt_long_outlined),
-        ..._pedidos.map((p) {
-          final estado = '${p['estado']}';
-          final siguiente = _siguiente[estado];
-          final ocupado = _ocupado == p['codigo'];
+    return RefreshIndicator(
+      onRefresh: _cargar,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        children: [
+          SizedBox(height: 40, child: ListView(scrollDirection: Axis.horizontal, children: [
+            for (final f in _filtros.entries)
+              Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(
+                label: Text('${f.value} ${cuenta(f.key)}'), selected: _filtro == f.key, onSelected: (_) => setState(() => _filtro = f.key))),
+          ])),
+          const SizedBox(height: 12),
+          if (lista.isEmpty) const VacioMensaje('No hay pedidos con este filtro', icono: Icons.receipt_long_outlined),
+          for (final p in lista) _tarjeta(p),
+        ],
+      ),
+    );
+  }
 
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Panel(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('${p['cliente']}',
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      ),
-                      Insignia(_etiqueta[estado] ?? estado,
-                          tono: estado == 'ENTREGADO'
-                              ? Tono.ok
-                              : estado == 'CANCELADO'
-                                  ? Tono.danger
-                                  : estado == 'EN_PRODUCCION'
-                                      ? Tono.warn
-                                      : Tono.info,
-                          punto: true),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text('${p['codigo']} · entrega ${fechaCorta('${p['fechaEntrega']}')}',
-                      style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Text(dinero((p['total'] as num?)?.toDouble() ?? 0),
-                          style: estiloDisplay.copyWith(fontSize: 16)),
-                      const Spacer(),
-                      if (puedeGestionar && estado == 'REGISTRADO')
-                        TextButton(onPressed: ocupado ? null : () => _rechazar(p), child: const Text('Rechazar')),
-                      if (puedeGestionar && estado == 'LISTO' && Api.instancia.puede('ventas.registrar'))
-                        FilledButton(onPressed: ocupado ? null : () => _despachar(p), child: const Text('Despachar y vender')),
-                      if (puedeGestionar && siguiente != null)
-                        SizedBox(
-                          height: 34,
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: _tono(estado),
-                              minimumSize: const Size(0, 34),
-                              padding: const EdgeInsets.symmetric(horizontal: 14),
-                              textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-                            ),
-                            onPressed: ocupado ? null : () => _avanzar(p),
-                            child: ocupado
-                                ? const SizedBox(
-                                    width: 14, height: 14,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: TantaColors.cream50))
-                                : Text('Marcar ${_etiqueta[siguiente]?.toLowerCase()}'),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ],
+  Widget _tarjeta(Map<String, dynamic> p) {
+    final estado = '${p['estado']}';
+    final items = _items(p);
+    final ocupado = _ocupado == p['codigo'];
+    final observado = '${p['observacion'] ?? ''}'.isNotEmpty && (estado == 'REGISTRADO' || estado == 'CONFIRMADO');
+    final porCobrar = p['porCobrar'] == null ? 0.0 : _n(p['porCobrar']);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Pulsable(
+        radio: 8,
+        onTap: ocupado ? null : () => _detalle(p),
+        child: Panel(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: Text('${p['cliente']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+              if (ocupado) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              else Insignia(p['pendiente'] == true ? 'Por enviar' : etiquetaPedido[estado] ?? estado,
+                  tono: p['pendiente'] == true ? Tono.warn : tonoPedido(estado), punto: true),
+            ]),
+            const SizedBox(height: 2),
+            Text('${p['codigo']} · entrega ${fechaCorta('${p['fecha_entrega']}')}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' ${p['hora_entrega']}'}'
+                '${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}', style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+            if (items.isNotEmpty)
+              Text('${items.take(2).map((i) => '${_cantidad(i)} ${i['producto']}').join(', ')}${items.length > 2 ? ' +${items.length - 2}' : ''}',
+                  maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
+            const SizedBox(height: 6),
+            Row(children: [
+              Text(dinero(_n(p['total'])), style: estiloDisplay.copyWith(fontSize: 16)),
+              const Spacer(),
+              if (observado) const Insignia('Observado', tono: Tono.warn),
+              if (estado == 'ENTREGADO' && porCobrar > 0.009) Insignia('Por cobrar ${dinero(porCobrar)}', tono: Tono.danger),
+              const Icon(Icons.chevron_right, color: TantaColors.textMuted),
+            ]),
+          ]),
+        ),
+      ),
     );
   }
 }

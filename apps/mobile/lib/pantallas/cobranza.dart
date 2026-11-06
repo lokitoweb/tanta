@@ -32,6 +32,7 @@ class _CobranzaState extends State<Cobranza> {
   List<Map<String, dynamic>>? _cuentas;
   String? _error;
   final _abiertos = <String>{};
+  int _version = 0;
 
   @override
   void initState() {
@@ -64,13 +65,9 @@ class _CobranzaState extends State<Cobranza> {
 
   Future<void> _cobrar(_Deudor d, List<Map<String, dynamic>> docs) async {
     final debe = docs.fold<double>(0, (s, c) => s + _d(c['saldo']));
-    final pagos = await showModalBottomSheet<List<Map<String, dynamic>>>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _HojaCobro(cliente: d.nombre, detalle: docs.length == 1 ? '${docs.first['documento'] ?? 'Compra'}' : '${docs.length} compras', debe: debe),
-    );
-    if (pagos == null || !mounted) return;
+    final cobro = await mostrarHojaCobro(context, cliente: d.nombre, detalle: docs.length == 1 ? '${docs.first['documento'] ?? 'Compra'}' : '${docs.length} compras', debe: debe);
+    if (cobro == null || cobro.pagos.isEmpty || !mounted) return;
+    final pagos = cobro.pagos;
     final monto = pagos.fold<double>(0, (s, p) => s + _d(p['monto']));
     final queda = debe - monto;
     final aviso = ScaffoldMessenger.of(context);
@@ -86,6 +83,7 @@ class _CobranzaState extends State<Cobranza> {
       // En línea: se registra al instante y hay número de recibo real.
       final r = await Api.instancia.registrarRecibo(datos, claveIdempotencia: clave);
       await _cargar();
+      setState(() => _version++);
       aviso.showSnackBar(SnackBar(
         content: Text('Pago de ${dinero(monto)} registrado$textoQueda'),
         backgroundColor: TantaColors.stateOk,
@@ -97,10 +95,7 @@ class _CobranzaState extends State<Cobranza> {
             titulo: 'Recibo de cobro',
             numero: '${r['numero']}',
             cliente: d.nombre,
-            lineas: [
-              for (final p in pagos) ('Pago ${'${p['medio']}'.toLowerCase()}${'${p['referencia'] ?? ''}'.isEmpty ? '' : ' · op. ${p['referencia']}'}', dinero(_d(p['monto']))),
-              if (queda > 0.009) ('Saldo pendiente', dinero(queda)),
-            ],
+            lineas: lineasRecibo(pagos, queda),
             total: dinero(monto),
             vendedor: Api.instancia.nombre,
           ),
@@ -156,7 +151,7 @@ class _CobranzaState extends State<Cobranza> {
     final puedeCobrar = Api.instancia.puede('cobranza.registrar');
 
     return RefreshIndicator(
-      onRefresh: _cargar,
+      onRefresh: () async { await _cargar(); setState(() => _version++); },
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
@@ -174,6 +169,7 @@ class _CobranzaState extends State<Cobranza> {
             ]),
           ),
           const SizedBox(height: 14),
+          if (puedeCobrar) ...[MiDia(key: ValueKey(_version)), const SizedBox(height: 14)],
           if (deudores.isEmpty) const VacioMensaje('No hay cuentas por cobrar', icono: Icons.account_balance_wallet_outlined),
           for (final d in deudores) _tarjeta(d, puedeCobrar),
         ],
@@ -259,14 +255,38 @@ class _CobranzaState extends State<Cobranza> {
   }
 }
 
+/// Resultado de la hoja: las formas de pago (vacío = no pagó, queda como deuda) y una nota opcional.
+class Cobro {
+  const Cobro(this.pagos, this.nota);
+  final List<Map<String, dynamic>> pagos;
+  final String nota;
+  double get monto => pagos.fold(0, (s, p) => s + _d(p['monto']));
+}
+
+/// Líneas del recibo PDF: cada forma de pago y, si queda, el saldo pendiente.
+List<(String, String)> lineasRecibo(List<Map<String, dynamic>> pagos, double queda) => [
+      for (final p in pagos) ('Pago ${'${p['medio']}'.toLowerCase()}${'${p['referencia'] ?? ''}'.isEmpty ? '' : ' · op. ${p['referencia']}'}', dinero(_d(p['monto']))),
+      if (queda > 0.009) ('Saldo pendiente', dinero(queda)),
+    ];
+
+/// Abre la hoja de cobro. Con [alEntregar] ofrece «No pagó» y la nota de la entrega (quién recibió).
+Future<Cobro?> mostrarHojaCobro(BuildContext context, {required String cliente, required String detalle, required double debe, bool alEntregar = false}) =>
+    showModalBottomSheet<Cobro>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => HojaCobro(cliente: cliente, detalle: detalle, debe: debe, alEntregar: alEntregar),
+    );
+
 /// Formulario del cobro: una o varias formas de pago (p. ej. efectivo + Yape) que suman lo que se cobra.
-class _HojaCobro extends StatefulWidget {
-  const _HojaCobro({required this.cliente, required this.detalle, required this.debe});
+class HojaCobro extends StatefulWidget {
+  const HojaCobro({super.key, required this.cliente, required this.detalle, required this.debe, this.alEntregar = false});
   final String cliente;
   final String detalle;
   final double debe;
+  final bool alEntregar;
   @override
-  State<_HojaCobro> createState() => _HojaCobroState();
+  State<HojaCobro> createState() => _HojaCobroState();
 }
 
 class _Linea {
@@ -277,8 +297,9 @@ class _Linea {
   double get valor => double.tryParse(monto.text.replaceAll(',', '.')) ?? 0;
 }
 
-class _HojaCobroState extends State<_HojaCobro> {
+class _HojaCobroState extends State<HojaCobro> {
   final _medios = mediosPago('enCobranza');
+  final _nota = TextEditingController();
   late final List<_Linea> _lineas = [_Linea('${_medios.first['codigo']}', widget.debe)];
 
   double get _suma => _lineas.fold(0, (s, l) => s + l.valor);
@@ -309,7 +330,7 @@ class _HojaCobroState extends State<_HojaCobro> {
       child: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            const Expanded(child: Text('Registrar pago', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+            Expanded(child: Text(widget.alEntregar ? 'Entregar y cobrar' : 'Registrar pago', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
             IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close), tooltip: 'Cerrar'),
           ]),
           Text(widget.cliente, style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -336,16 +357,28 @@ class _HojaCobroState extends State<_HojaCobro> {
             const SizedBox(height: 8),
             Text(problema, style: const TextStyle(fontSize: 12.5, color: TantaColors.stateDanger)),
           ],
+          if (widget.alEntregar) ...[
+            const SizedBox(height: 12),
+            TextField(controller: _nota, maxLength: 200, decoration: const InputDecoration(labelText: 'Nota de la entrega (opcional)', hintText: 'Quién recibió, hora…', counterText: '')),
+          ],
           const SizedBox(height: 14),
           FilledButton(
             onPressed: problema != null
                 ? null
-                : () => Navigator.pop(context, [
+                : () => Navigator.pop(context, Cobro([
                       for (final l in _lineas)
                         {'monto': double.parse(l.valor.toStringAsFixed(2)), 'medio': l.medio, 'referencia': l.referencia.text.trim()},
-                    ]),
-            child: Text('Cobrar ${dinero(_suma)}'),
+                    ], _nota.text.trim())),
+            child: Text(widget.alEntregar ? 'Entregar y cobrar ${dinero(_suma)}' : 'Cobrar ${dinero(_suma)}'),
           ),
+          // «Te pago mañana»: se entrega y todo queda como deuda en Cobranza.
+          if (widget.alEntregar) ...[
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context, Cobro(const [], _nota.text.trim())),
+              child: const Text('No pagó: entregar y dejar como deuda'),
+            ),
+          ],
         ]),
       ),
     );
@@ -393,6 +426,131 @@ class _HojaCobroState extends State<_HojaCobro> {
             decoration: InputDecoration(labelText: 'N.° de operación (${nombreMedio(l.medio)})', counterText: ''),
             onChanged: (_) => setState(() {}),
           ),
+        ],
+      ]),
+    );
+  }
+}
+
+/// Caja del vendedor (cada día empieza en cero): lo cobrado hoy por forma de pago y la rendición a caja.
+class MiDia extends StatefulWidget {
+  const MiDia({super.key});
+  @override
+  State<MiDia> createState() => _MiDiaState();
+}
+
+class _MiDiaState extends State<MiDia> {
+  Map<String, dynamic>? _dia;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    try {
+      final d = await Api.instancia.miDia();
+      if (mounted) setState(() => _dia = d);
+    } catch (_) {/* sin red: la tarjeta no se muestra */}
+  }
+
+  String _nombre(String medio) => '${medioPago(medio)?['nombre'] ?? medio}';
+
+  Future<void> _rendir() async {
+    final d = _dia!;
+    final esperado = _d(d['efectivo']);
+    final entregado = TextEditingController(text: esperado.toStringAsFixed(2));
+    final nota = TextEditingController();
+    final porMedio = (d['porMedio'] as Map? ?? const {}).cast<String, dynamic>();
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.of(ctx).viewInsets.bottom + MediaQuery.of(ctx).viewPadding.bottom),
+        child: StatefulBuilder(builder: (ctx, set) {
+          final dif = (double.tryParse(entregado.text.replaceAll(',', '.')) ?? 0) - esperado;
+          return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              const Expanded(child: Text('Rendir mi día', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+              IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close), tooltip: 'Cerrar'),
+            ]),
+            const Text('Lo que cobraste hoy, según el sistema. Entrega el efectivo a la persona encargada de caja.',
+                style: TextStyle(fontSize: 12.5, color: TantaColors.textMuted)),
+            const SizedBox(height: 12),
+            for (final e in porMedio.entries)
+              Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [
+                Expanded(child: Text(_nombre(e.key))),
+                Text(dinero(_d(e.value)), style: const TextStyle(fontWeight: FontWeight.w600)),
+              ])),
+            const Divider(height: 18),
+            Row(children: [
+              const Expanded(child: Text('Total cobrado', style: TextStyle(fontWeight: FontWeight.w700))),
+              Text(dinero(_d(d['total'])), style: const TextStyle(fontWeight: FontWeight.w700)),
+            ]),
+            const SizedBox(height: 14),
+            TextField(controller: entregado, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => set(() {}),
+                decoration: InputDecoration(labelText: 'Efectivo que entregas', prefixText: 'S/ ', helperText: 'Esperado en efectivo: ${dinero(esperado)}')),
+            if (dif.abs() > 0.009)
+              Padding(padding: const EdgeInsets.only(top: 6), child: Text(dif < 0 ? 'Faltan ${dinero(-dif)}' : 'Sobran ${dinero(dif)}',
+                  style: TextStyle(fontSize: 12.5, color: dif < 0 ? TantaColors.stateDanger : TantaColors.stateWarn))),
+            const SizedBox(height: 8),
+            TextField(controller: nota, maxLength: 300, decoration: const InputDecoration(labelText: 'Nota (opcional)', counterText: '')),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enviar rendición')),
+          ]);
+        }),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      await Api.instancia.rendirDia(double.tryParse(entregado.text.replaceAll(',', '.')) ?? 0, nota.text.trim());
+      aviso.showSnackBar(const SnackBar(content: Text('Rendición enviada: caja la confirmará al recibir el dinero'), backgroundColor: TantaColors.stateOk));
+      _cargar();
+    } on ApiException catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(e.mensaje), backgroundColor: TantaColors.stateDanger));
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: la rendición necesita internet')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final d = _dia;
+    if (d == null) return const SizedBox.shrink();
+    final porMedio = (d['porMedio'] as Map? ?? const {}).cast<String, dynamic>();
+    final r = (d['rendicion'] as Map?)?.cast<String, dynamic>();
+    final total = _d(d['total']);
+    final entregas = (d['entregas'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final quedo = entregas.fold<double>(0, (s, e) => s + _d(e['quedaPorCobrar']));
+    final (estado, tono) = r == null
+        ? (total > 0 ? ('Sin rendir', Tono.warn) : ('Sin cobros hoy', Tono.neutral))
+        : r['estado'] == 'RECIBIDA'
+            ? ('Recibida${_d(r['diferencia']).abs() > 0.009 ? ' · dif. ${dinero(_d(r['diferencia']))}' : ''}', _d(r['diferencia']).abs() > 0.009 ? Tono.danger : Tono.ok)
+            : ('Enviada · por recibir', Tono.info);
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Expanded(child: Text('Mi caja de hoy', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+          Insignia(estado, tono: tono, punto: true),
+        ]),
+        const SizedBox(height: 4),
+        Text(dinero(total), style: estiloDisplay.copyWith(fontSize: 22)),
+        if (porMedio.isNotEmpty)
+          Text(porMedio.entries.map((e) => '${_nombre(e.key).toLowerCase()} ${dinero(_d(e.value))}').join(' · '),
+              style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+        if (entregas.isNotEmpty)
+          Text('${entregas.length} ${entregas.length == 1 ? 'entrega' : 'entregas'} hoy${quedo > 0.009 ? ' · quedó por cobrar ${dinero(quedo)}' : ''}',
+              style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+        if (r != null && r['desactualizada'] == true)
+          const Text('Cobraste después de rendir: vuelve a rendir.', style: TextStyle(fontSize: 12, color: TantaColors.stateWarn)),
+        if (total > 0 && r?['estado'] != 'RECIBIDA') ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(onPressed: _rendir, icon: const Icon(Icons.point_of_sale_outlined, size: 18),
+              label: Text(r == null ? 'Rendir mi día' : 'Actualizar rendición')),
         ],
       ]),
     );

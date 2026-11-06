@@ -1014,7 +1014,7 @@ class _MisPedidosState extends State<MisPedidos> {
       expand: false, initialChildSize: 0.75, builder: (_, scroll) => ListView(controller: scroll, padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom), children: [
         Text('${p['codigo']}', style: Theme.of(ctx).textTheme.titleLarge),
         Text('Entrega ${p['fecha_entrega']}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' · ${p['hora_entrega']}'} · ${p['tipoEntrega'] == 'DELIVERY' ? 'delivery a ${p['direccion']}' : 'recojo en tienda'}'),
-        Text('Pago contra entrega: ${nombreMedio('${p['pagoEntrega'] ?? 'EFECTIVO'}').toLowerCase()}'),
+        if ('${p['observacion'] ?? ''}'.isNotEmpty && cancelable) _observacion('${p['observacion']}'),
         const SizedBox(height: 16),
         for (var k = 0; k < pasos.length; k++)
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1051,6 +1051,19 @@ class _MisPedidosState extends State<MisPedidos> {
     _cargar();
   }
 
+  /// El vendedor revisó el pedido y algo no cuadra: el cliente lo ve arriba, con qué hacer.
+  Widget _observacion(String texto) => Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: TantaColors.stateWarnBg, borderRadius: BorderRadius.circular(8)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.report_outlined, color: TantaColors.stateWarn, size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text('El vendedor revisó tu pedido: «$texto»\nSi está mal, cancélalo y vuelve a hacerlo con «Repetir».',
+              style: const TextStyle(fontSize: 13, height: 1.4))),
+        ]),
+      );
+
   Widget _lista_(List<Map<String, dynamic>> l, String vacio) => RefreshIndicator(
     onRefresh: _cargar,
     child: l.isEmpty
@@ -1062,7 +1075,8 @@ class _MisPedidosState extends State<MisPedidos> {
               final p = l[i];
               return ListTile(
                 title: Text('${p['codigo']} · ${dinero(((p['total'] as num?) ?? 0).toDouble())}'),
-                subtitle: Text('${etiquetaPedido[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'),
+                subtitle: Text('${etiquetaPedido[p['estado']] ?? p['estado']} · entrega ${p['fecha_entrega']}${p['tipoEntrega'] == 'DELIVERY' ? ' · delivery' : ''}'
+                    '${'${p['observacion'] ?? ''}'.isNotEmpty && (p['estado'] == 'REGISTRADO' || p['estado'] == 'CONFIRMADO') ? ' · ⚠ revisa la observación' : ''}'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _detalle(p),
               );

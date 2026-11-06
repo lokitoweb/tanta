@@ -445,10 +445,25 @@ class Api {
   /* ------------------------------------------------------- pedidos y OP */
   Future<List<dynamic>> misPedidos() async => await _get('/pedidos') as List<dynamic>;
 
+  /// El cliente no elige forma de pago al pedir: cómo paga (o si queda debiendo) se registra al entregar.
   Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, required String fechaEntrega, String hora = '', String observaciones = '',
-          String tipoEntrega = 'RECOJO', String direccion = '', String pagoEntrega = 'EFECTIVO'}) async =>
+          String tipoEntrega = 'RECOJO', String direccion = ''}) async =>
       await _post('/pedidos', {'items': items, 'fechaEntrega': fechaEntrega, 'horaEntrega': hora, 'observaciones': observaciones,
-        'tipoEntrega': tipoEntrega, 'direccion': direccion, 'pagoEntrega': pagoEntrega}, idempotente: true) as Map<String, dynamic>;
+        'tipoEntrega': tipoEntrega, 'direccion': direccion}, idempotente: true) as Map<String, dynamic>;
+
+  /// El vendedor avisa al cliente que su pedido parece mal hecho (el pedido no se mueve).
+  Future<void> observarPedido(String codigo, String mensaje) async => await _post('/pedidos/$codigo/observar', {'mensaje': mensaje});
+
+  /// Entregar y cobrar en un paso: [pagos] vacío = queda todo como deuda.
+  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = ''}) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos}) as Map<String, dynamic>;
+
+  /// Caja del vendedor: lo cobrado hoy por forma de pago, recibos, entregas y su rendición.
+  Future<Map<String, dynamic>> miDia() async => await _get('/cobranza/mi-dia') as Map<String, dynamic>;
+
+  /// Rinde el día a caja: el servidor calcula lo esperado; aquí solo el efectivo que se entrega.
+  Future<Map<String, dynamic>> rendirDia(double efectivoEntregado, String nota) async =>
+      await _post('/cobranza/rendiciones', {'efectivoEntregado': efectivoEntregado, 'nota': nota}) as Map<String, dynamic>;
 
   /// A09: línea de tiempo del pedido (solo los propios para el cliente).
   Future<List<dynamic>> historialPedido(String codigo) async => await _get('/pedidos/$codigo/historial') as List<dynamic>;

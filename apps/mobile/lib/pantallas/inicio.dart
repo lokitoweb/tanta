@@ -523,7 +523,7 @@ class _PanelInicio extends StatelessWidget {
     if (api.puede('catalogo.ver')) {
       final ps = ((datos['misPedidos'] as List?) ?? const []).take(5);
       final productos = (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>();
-      return [const _Fila('Mis últimos pedidos'), for (final p in ps) _Fila(txt(p['codigo']), estado: txt(p['estado']), valor: dinero(_n(p['total']).toDouble()), abrir: MisPedidos(productos: productos))];
+      return [const _Fila('Mis últimos pedidos'), for (final p in ps) _Fila(txt(p['codigo']), detalle: p['observacion'] == null ? '' : 'Revisa: ${txt(p['observacion'])}', estado: txt(p['estado']), valor: dinero(_n(p['total']).toDouble()), abrir: MisPedidos(productos: productos))];
     }
     return const [];
   }

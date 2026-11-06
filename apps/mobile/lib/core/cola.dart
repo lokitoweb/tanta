@@ -207,6 +207,11 @@ class ColaOffline {
           'cxcIds': op.datos['cxcIds'],
           'pagos': op.datos['pagos'],
         }, claveIdempotencia: op.clave);
+      case 'entrega':
+        // Seguro de reintentar: el servidor solo entrega un pedido «En camino» (no cobra dos veces).
+        await api.entregarPedido('${op.datos['codigo']}',
+            pagos: ((op.datos['pagos'] as List?) ?? const []).cast<Map<String, dynamic>>(),
+            observaciones: '${op.datos['observaciones'] ?? ''}');
       case 'pedido':
         await api.cambiarEstadoPedido('${op.datos['codigo']}', '${op.datos['estado']}');
       default:

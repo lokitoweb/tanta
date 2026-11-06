@@ -35,12 +35,11 @@ const esperarAviso = async (t, texto) => {
   return null;
 };
 
-test('pedido del cliente con pago contra entrega: avisa al Vendedor, al cliente y a Producción', async () => {
+test('pedido del cliente (sin forma de pago: se cobra al entregar): avisa al Vendedor, al cliente y a Producción', async () => {
   const cli = await login('mfernandez'), ven = await login('cmedina'), pro = await login('rquispe');
   const p = await api(cli, 'POST', '/pedidos', { items: [{ productoId: producto(), cantidad: 2 }], fechaEntrega: manana(), horaEntrega: '10:00', tipoEntrega: 'RECOJO', pagoEntrega: 'YAPE', observaciones: 'Sin azúcar' });
   assert.equal(p.s, 201, JSON.stringify(p.b));
   assert.equal(p.b.estado, 'REGISTRADO');
-  assert.equal(sql(`SELECT pago_entrega FROM core.pedido WHERE codigo = '${p.b.codigo}'`), 'YAPE');
 
   // PED-08: el Vendedor (área de pedidos) se entera del pedido nuevo.
   const v = await esperarAviso(ven, p.b.codigo);
@@ -88,13 +87,3 @@ test('una venta avisa a Gerencia (permiso alertas.ventas)', async () => {
   assert.ok(await esperarAviso(ger, v.b.comprobante.numero), 'el gerente recibe la venta');
 });
 
-test('crédito al pedir solo para clientes al crédito', async () => {
-  const cli = await login('mfernandez');
-  const cond = sql("SELECT condicion_pago FROM core.cliente WHERE id = (SELECT cliente_id FROM core.usuario WHERE usuario = 'mfernandez')");
-  const r = await api(cli, 'POST', '/pedidos', { items: [{ productoId: producto(), cantidad: 1 }], fechaEntrega: manana(), pagoEntrega: 'CREDITO' });
-  if (cond === 'CONTADO') assert.equal(r.s, 422);
-  else {
-    assert.ok([201, 409].includes(r.s), JSON.stringify(r.b));
-    if (r.s === 201) await api(cli, 'POST', `/pedidos/${r.b.codigo}/cancelar`, { motivo: 'Prueba automática' });
-  }
-});

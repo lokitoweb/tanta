@@ -7,6 +7,7 @@ import { invalidar } from '../cache.js';
 import { emitirEvento, guardarImagen } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
+import { LineaPago, emitirRecibo, detalleRecibo } from './cobranza.js';
 import { falloImagen, ImagenProducto } from './maestros.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
@@ -354,10 +355,20 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = NuevaVenta.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Venta inválida.'));
 
-    const { items, formaPago, clienteId, descuentoPct, pedidoId, referenciaPago, aprobacionDescuentoId } = parseo.data;
+    const { items, descuentoPct, pedidoId, aprobacionDescuentoId } = parseo.data;
+    let { formaPago, clienteId, referenciaPago } = parseo.data;
     const clave = req.headers['idempotency-key'] as string | undefined;
 
     try {
+      if (pedidoId) {
+        // Despachar un pedido = venderlo «por cobrar» al cliente del pedido. Cómo paga (efectivo, Yape, una parte
+        // o nada) se registra al entregar y entra por Cobranza: el medio que se elija aquí no aplica.
+        const ped = await uno<{ cliente_id: string }>('SELECT cliente_id FROM core.pedido WHERE id = $1', [pedidoId]);
+        if (!ped) throw Object.assign(new Error('El pedido no existe.'), { status: 404 });
+        const credito = await uno<{ codigo: string }>('SELECT codigo FROM core.medio_pago WHERE es_credito AND activo AND en_ventas ORDER BY orden LIMIT 1');
+        if (!credito) throw Object.assign(new Error('Activa el medio «Crédito» en Catálogos: el despacho de pedidos queda por cobrar.'), { status: 409 });
+        formaPago = credito.codigo; clienteId = ped.cliente_id; referenciaPago = '';
+      }
       const medio = await medioPago(null, formaPago, 'ventas');
       exigirOperacion(medio, referenciaPago);
       // Una venta al crédito sin cliente no puede generar cuenta por cobrar.
@@ -561,6 +572,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
           // La cuenta por cobrar se inserta DENTRO de la misma transacción y sin `catch`:
           // si falla, la venta no existe. Antes el error se tragaba y se perdía la deuda.
           let cxcId: string | null = null;
+          let alertaCredito: string | null = null;
           if (medio.es_credito) {
             const cliente = await c.query<{ limite_credito: string; deuda: string; dias_credito: number; condicion_pago: string }>(
               `SELECT c.limite_credito, c.dias_credito, c.condicion_pago,
@@ -572,27 +584,40 @@ export async function rutasOperaciones(app: FastifyInstance) {
             if (cliente.rows.length === 0) {
               throw Object.assign(new Error('CLIENTE_NO_EXISTE'), { status: 404 });
             }
-            // COB-03: solo los clientes con condición "crédito" compran al crédito.
-            if (cliente.rows[0].condicion_pago !== 'CREDITO') {
-              throw Object.assign(new Error('Este cliente compra al contado: cámbialo a crédito en su ficha para venderle a plazo.'), { status: 409 });
-            }
+            const esCredito = cliente.rows[0].condicion_pago === 'CREDITO';
             const limite = Number(cliente.rows[0].limite_credito);
             const deuda = Number(cliente.rows[0].deuda);
-            // RN-35 / MAE-08: un cliente con crédito tiene límite definido; sin límite no hay línea (antes 0 = ilimitado).
-            if (limite <= 0) throw Object.assign(new Error('Este cliente no tiene límite de crédito definido: fíjalo en su ficha para venderle a plazo.'), { status: 409 });
-            if (deuda + totalConIgv > limite + 0.001) {
-              throw Object.assign(new Error(`Límite de crédito excedido: debe S/ ${deuda.toFixed(2)}, límite S/ ${limite.toFixed(2)} y esta venta suma S/ ${totalConIgv.toFixed(2)}.`), { status: 409 });
+            if (pedidoId) {
+              // Pedido: la mercadería ya está pedida y confirmada; el cliente puede pagar al recibir o quedar debiendo.
+              // Pasarse del límite no bloquea la entrega: se avisa (regla que el dueño aún confirma).
+              if (esCredito && limite > 0 && deuda + totalConIgv > limite + 0.001) {
+                alertaCredito = `Si no paga al recibir, supera su límite de crédito: debe S/ ${deuda.toFixed(2)} de S/ ${limite.toFixed(2)}.`;
+              } else if (!esCredito && deuda > 0.009) {
+                alertaCredito = `El cliente compra al contado y ya debe S/ ${deuda.toFixed(2)}: cóbrale al entregar.`;
+              }
+            } else {
+              // COB-03: en una venta directa, solo los clientes con condición "crédito" compran al crédito.
+              if (!esCredito) {
+                throw Object.assign(new Error('Este cliente compra al contado: cámbialo a crédito en su ficha para venderle a plazo.'), { status: 409 });
+              }
+              // RN-35 / MAE-08: un cliente con crédito tiene límite definido; sin límite no hay línea (antes 0 = ilimitado).
+              if (limite <= 0) throw Object.assign(new Error('Este cliente no tiene límite de crédito definido: fíjalo en su ficha para venderle a plazo.'), { status: 409 });
+              if (deuda + totalConIgv > limite + 0.001) {
+                throw Object.assign(new Error(`Límite de crédito excedido: debe S/ ${deuda.toFixed(2)}, límite S/ ${limite.toFixed(2)} y esta venta suma S/ ${totalConIgv.toFixed(2)}.`), { status: 409 });
+              }
             }
 
+            // Vence según sus días de crédito; un cliente al contado debe pagar el mismo día (al recibir).
+            const dias = esCredito ? (Number(cliente.rows[0].dias_credito) > 0 ? Number(cliente.rows[0].dias_credito) : 30) : 0;
             const cx = await c.query<{ id: string }>(
               `INSERT INTO core.cuenta_por_cobrar (cliente_id,venta_id,monto,saldo,vence_en,estado)
                VALUES ($1,$2,$3,$3, current_date + $4::int, 'PENDIENTE') RETURNING id`,
-              [clienteId, ventaId, totalConIgv.toFixed(4), Number(cliente.rows[0].dias_credito) > 0 ? Number(cliente.rows[0].dias_credito) : 30],
+              [clienteId, ventaId, totalConIgv.toFixed(4), dias],
             );
             cxcId = cx.rows[0].id;
           }
 
-          return { codigo, ventaId, ventasNetas: netas, costoVentas: costoTotal, utilidad, margen, cxcId, lineas,
+          return { codigo, ventaId, ventasNetas: netas, costoVentas: costoTotal, utilidad, margen, cxcId, alertaCredito, lineas,
             comprobante: { tipo: 'NOTA_VENTA', serie: serie.serie, correlativo: serie.correlativo,
               numero: `${serie.serie}-${String(serie.correlativo).padStart(8, '0')}`, base, igv: igvMonto, total: totalConIgv } };
         }),
@@ -780,6 +805,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     estado: z.enum(['CONFIRMADO', 'RECHAZADO', 'EN_PRODUCCION', 'LISTO', 'DESPACHADO', 'ENTREGADO', 'CANCELADO']),
     motivo: z.string().trim().max(200).default(''),
     observaciones: z.string().trim().max(250).default(''),
+    // Al entregar: lo que pagó el cliente en ese momento (una o varias formas). Vacío = queda como deuda.
+    pagos: z.array(LineaPago).max(5).default([]),
   }).refine((d) => !['RECHAZADO', 'CANCELADO'].includes(d.estado) || d.motivo.length >= 3, { message: 'Indica el motivo.', path: ['motivo'] });
 
   /** Transiciones permitidas: es una máquina de estados, no un campo libre. */
@@ -802,7 +829,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = CambioPedido.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'ESTADO_INVALIDO', parseo.error.issues[0]?.message ?? 'Estado de pedido inválido.'));
     const destino = parseo.data.estado;
-    const { motivo, observaciones } = parseo.data;
+    const { motivo, observaciones, pagos } = parseo.data;
+    if (pagos.length && destino !== 'ENTREGADO') return reply.code(422).send(error(422, 'PAGO_FUERA_DE_ENTREGA', 'Los pagos se registran al entregar el pedido.'));
+    if (pagos.length && !req.usuario!.permisos.has('cobranza.registrar')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso cobranza.registrar para cobrar al entregar.'));
 
     const pedido = await uno<{ id: string; estado: string; cliente: string }>(
       'SELECT id, estado, cliente FROM core.pedido WHERE codigo = $1', [codigo],
@@ -817,6 +846,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
     // Despachar es vender: se hace con POST /ventas indicando el pedido (descuenta stock y libera la reserva).
     if (destino === 'DESPACHADO') return reply.code(409).send(error(409, 'USA_DESPACHO', 'Despacha el pedido con "Despachar y vender".'));
+    let recibo: string | null = null;
     try {
       await tx(async (c) => {
         // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
@@ -824,9 +854,17 @@ export async function rutasOperaciones(app: FastifyInstance) {
             motivo = CASE WHEN $1 IN ('RECHAZADO','CANCELADO') THEN $4 ELSE motivo END,
             confirmado_en = CASE WHEN $1 = 'CONFIRMADO' THEN now() ELSE confirmado_en END,
             entregado_en = CASE WHEN $1 = 'ENTREGADO' THEN now() ELSE entregado_en END,
-            entrega_obs = CASE WHEN $1 = 'ENTREGADO' THEN $5 ELSE entrega_obs END
-          WHERE id = $2 AND estado = $3 RETURNING id`, [destino, pedido.id, pedido.estado, motivo, observaciones]);
+            entrega_obs = CASE WHEN $1 = 'ENTREGADO' THEN $5 ELSE entrega_obs END,
+            entregado_por = CASE WHEN $1 = 'ENTREGADO' THEN $6::uuid ELSE entregado_por END
+          WHERE id = $2 AND estado = $3 RETURNING id`, [destino, pedido.id, pedido.estado, motivo, observaciones, req.usuario!.id]);
         if (!cambio.rowCount) throw Object.assign(new Error('Otro usuario cambió este pedido. Recarga e intenta de nuevo.'), { status: 409 });
+        if (destino === 'ENTREGADO' && pagos.length) {
+          // Lo que paga al recibir entra por Cobranza (recibo) contra la venta del despacho; lo que falta queda como deuda.
+          const cx = (await c.query<{ id: string; cliente_id: string }>(`SELECT x.id, x.cliente_id FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id
+            WHERE v.pedido_id = $1 AND v.estado = 'CONFIRMADA' AND x.estado IN ('PENDIENTE','PARCIAL')`, [pedido.id])).rows[0];
+          if (!cx) throw Object.assign(new Error('El pedido no tiene saldo por cobrar: registra la entrega sin pago.'), { status: 409 });
+          recibo = await emitirRecibo(c, { clienteId: cx.cliente_id, cxcIds: [cx.id], pagos, usuarioId: req.usuario!.id });
+        }
         const lineas = (await c.query<{ producto_id: string; producto: string; cantidad: string }>(
           'SELECT producto_id, producto, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id, producto ORDER BY producto_id', [pedido.id])).rows;
         if (destino === 'LISTO') {
@@ -856,7 +894,17 @@ export async function rutasOperaciones(app: FastifyInstance) {
     });
     void emitirEvento('pedido.estado', { codigo, de: pedido.estado, a: destino });
     // Los avisos al cliente y a cada área salen del historial del pedido (notificaciones.ts).
-    return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino });
+    if (destino !== 'ENTREGADO') return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino });
+    const saldo = await uno<{ saldo: string }>(`SELECT coalesce(sum(x.saldo), 0) saldo FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id
+      WHERE v.pedido_id = $1 AND v.estado = 'CONFIRMADA'`, [pedido.id]);
+    if (recibo) {
+      const r = await detalleRecibo(recibo);
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RECIBO_EMITIDO', entidad: 'recibo', entidadId: recibo,
+        detalle: { pedido: codigo, pagos: pagos.map((x) => ({ medio: x.medio, monto: x.monto })) }, ip: req.ip });
+      void emitirEvento('cobro.registrado', r);
+      return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino, recibo: r, quedaPorCobrar: num(saldo?.saldo) });
+    }
+    return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino, recibo: null, quedaPorCobrar: num(saldo?.saldo) });
   });
 
   /* ------------------------------------------------ inventario: productos */

@@ -437,7 +437,8 @@ export async function rutasDatos(app: FastifyInstance) {
     );
     if (vinculo?.cliente_id) {
       const mios = await q<Record<string, string>>(
-        `SELECT codigo, estado, total, fecha_entrega::text AS fecha_entrega
+        `SELECT codigo, estado, total, fecha_entrega::text AS fecha_entrega,
+           CASE WHEN estado IN ('REGISTRADO','CONFIRMADO') THEN observacion_vendedor END AS observacion
          FROM core.pedido WHERE cliente_id = $1 ORDER BY creado_en DESC LIMIT 10`,
         [vinculo.cliente_id],
       );
@@ -448,7 +449,7 @@ export async function rutasDatos(app: FastifyInstance) {
         [vinculo.cliente_id],
       );
       p.misPedidos = mios.map((m) => ({
-        codigo: m.codigo, estado: m.estado, total: num(m.total), fechaEntrega: m.fecha_entrega,
+        codigo: m.codigo, estado: m.estado, total: num(m.total), fechaEntrega: m.fecha_entrega, observacion: m.observacion ?? null,
       }));
       p.miSaldo = num(deuda?.saldo);
       p.misDeudas = Number(deuda?.n ?? 0);

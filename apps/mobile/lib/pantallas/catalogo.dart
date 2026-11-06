@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
-import '../core/catalogos.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
@@ -314,9 +313,6 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   DateTime _fecha = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _hora = const TimeOfDay(hour: 9, minute: 0);
   String _tipo = 'RECOJO';
-  // El primer medio de pago contra entrega habilitado; si no queda ninguno sin crédito, el primero de ventas.
-  String _pago = '${(_mediosEntrega.firstOrNull ?? mediosPago('enVentas').first)['codigo']}';
-  static List<Map<String, dynamic>> get _mediosEntrega => mediosPago('enVentas').where((m) => m['esCredito'] != true).toList();
   final _dir = TextEditingController();
   final _obs = TextEditingController();
   bool _enviando = false;
@@ -340,7 +336,7 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
         fechaEntrega: _fecha.toIso8601String().substring(0, 10),
         hora: '${_hora.hour.toString().padLeft(2, '0')}:${_hora.minute.toString().padLeft(2, '0')}',
         tipoEntrega: _tipo, direccion: _tipo == 'DELIVERY' ? _dir.text.trim() : '',
-        observaciones: _obs.text.trim(), pagoEntrega: _pago,
+        observaciones: _obs.text.trim(),
       );
       carrito.value = {};
       nav.popUntil((r) => r.isFirst);
@@ -392,20 +388,14 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
           TextField(controller: _dir, maxLength: 200, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Dirección de entrega')),
         ],
         const SizedBox(height: 16),
-        Text('Pago contra entrega', style: Theme.of(context).textTheme.titleMedium),
-        const Text('Pagas al recibir tu pedido. Elige cómo para que llevemos vuelto o POS.', style: TextStyle(color: TantaColors.textMuted, fontSize: 12.5)),
-        const SizedBox(height: 8),
-        Wrap(spacing: 8, children: [
-          // Medios de ventas del catálogo; el crédito no es pago contra entrega.
-          for (final m in _mediosEntrega)
-            ChoiceChip(label: Text('${m['nombre']}'), selected: _pago == m['codigo'], onSelected: (_) => setState(() => _pago = '${m['codigo']}')),
-        ]),
+        // No se paga al pedir: el vendedor registra el pago (efectivo, Yape, transferencia…) al entregar.
+        const Text('No pagas ahora: pagas al recibir tu pedido.', style: TextStyle(color: TantaColors.textMuted, fontSize: 12.5)),
         const SizedBox(height: 16),
         TextField(controller: _obs, maxLength: 500, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones (opcional)', hintText: 'Ej.: tocar el timbre, sin ajonjolí')),
         const Divider(height: 28),
         _fila('Subtotal', dinero(t.base)),
         _fila('IGV', dinero(t.igv)),
-        _fila('Total a pagar al recibir', dinero(t.total), fuerte: true),
+        _fila('Total', dinero(t.total), fuerte: true),
       ]),
       bottomNavigationBar: SafeArea(child: Padding(
         padding: const EdgeInsets.all(16),

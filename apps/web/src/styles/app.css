@@ -1498,3 +1498,8 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .pago-resumen b { color: inherit; font-variant-numeric: tabular-nums; }
 .t-warn { color: var(--tanta-state-warn); } .t-ok { color: var(--tanta-state-ok); }
 @media (max-width: 640px) { .pago-linea { grid-template-columns: 1fr 1fr; } }
+
+/* Cierre del día y caja: acciones en la cabecera y días anteriores sin recibir. */
+.fila-acciones { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.caja-pendientes { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--tanta-state-warn-bg); font-size: 0.8125rem; }
+.caja-pendientes ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }

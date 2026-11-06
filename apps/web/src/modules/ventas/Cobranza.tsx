@@ -1,29 +1,34 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
-import { useCatalogos } from '@/core/catalogos';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { Dialogo } from '@/ui/Dialogo';
-import { Icon } from '@/ui/icons';
 import { useApp } from '@/core/app-state';
 import { money, num, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, PilaEsqueleto, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Tabla, type Columna } from '@/ui/Tabla';
 import type { Cliente } from '@/core/types';
 import { DialogoEstadoCuenta, type EstadoCuenta } from './EstadoCuenta';
+import { LineasPago, useMediosCobro, type LineaPago } from './LineasPago';
 
-interface Linea { monto: string; medio: string; referencia: string }
-interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }> }
+interface Rendicion { id: string; estado: 'PENDIENTE' | 'RECIBIDA'; total: number; efectivoEsperado: number; efectivoEntregado: number; efectivoRecibido: number | null;
+  nota: string | null; notaCaja: string | null; recibidoPor: string | null; diferencia: number; desactualizada: boolean }
+interface CajaVendedor { vendedorId: string; vendedor: string; porMedio: Record<string, number>; pagos: number; total: number; efectivo: number; rendicion: Rendicion | null }
+interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }>;
+  vendedores: CajaVendedor[]; pendientes: Array<{ fecha: string; vendedor: string; total: number; estado: string }> }
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 export function Cobranza() {
-  const { dataset, puede, refrescarDatos } = useApp();
-  const medios = useCatalogos().mediosPago.filter((m) => m.enCobranza);
+  const { dataset, puede, refrescarDatos, sesion } = useApp();
+  const { nombre: nombreMedio, lineaNueva, revisar, aPagos } = useMediosCobro();
   const k = dataset.kpis;
   const totalAging = dataset.aging.reduce((s, a) => s + a.monto, 0);
   const limiteTotal = dataset.clientes.reduce((s, c) => s + c.limiteCredito, 0);
   const deudores = dataset.clientes.filter((c) => c.saldo > 0);
   // Un pago puede llegar en varias formas (p. ej. efectivo + Yape): una línea por forma, un solo recibo.
-  const [pago, setPago] = useState<{ clienteId: string; lineas: Linea[] } | null>(null);
+  const [pago, setPago] = useState<{ clienteId: string; lineas: LineaPago[] } | null>(null);
+  // Caja: el vendedor rinde su día; la persona encargada de caja recibe y anota lo que llegó.
+  const [rendir, setRendir] = useState<{ efectivo: string; nota: string } | null>(null);
+  const [recibir, setRecibir] = useState<{ v: CajaVendedor; efectivo: string; nota: string } | null>(null);
   const [cierre, setCierre] = useState<Cierre | null>(null);
   const [fecha, setFecha] = useState(hoy());
   const [estado, setEstado] = useState<EstadoCuenta | null>(null);
@@ -33,30 +38,31 @@ export function Cobranza() {
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
 
-  const lineaNueva = (monto: number, medio = medios[0]?.codigo ?? ''): Linea => ({ monto: monto > 0 ? monto.toFixed(2) : '', medio, referencia: '' });
   const abrirPago = (c = deudores[0]) => { setAviso(null); setPago({ clienteId: c?.id ?? '', lineas: [lineaNueva(c?.saldo ?? 0)] }); };
   const cuenta = deudores.find((c) => c.id === pago?.clienteId);
-  const pideOperacion = (medio: string) => !!medios.find((m) => m.codigo === medio)?.requiereOperacion;
-  const nombreMedio = (medio: string) => medios.find((m) => m.codigo === medio)?.nombre ?? medio;
-  const suma = (pago?.lineas ?? []).reduce((s, l) => s + (Number(l.monto) || 0), 0);
-  const queda = (cuenta?.saldo ?? 0) - suma;
-  const problema = !pago || !cuenta ? 'Elige el cliente.'
-    : pago.lineas.some((l) => !(Number(l.monto) > 0)) ? 'Indica el monto de cada forma de pago.'
-    : suma > cuenta.saldo + 0.001 ? `Supera el saldo (${money(cuenta.saldo)}).`
-    : pago.lineas.find((l) => pideOperacion(l.medio) && l.referencia.trim().length < 3) ? `Falta el N.° de operación de ${nombreMedio(pago.lineas.find((l) => pideOperacion(l.medio) && l.referencia.trim().length < 3)!.medio)}.`
-    : null;
-  const cambiarLinea = (i: number, cambio: Partial<Linea>) => pago && setPago({ ...pago, lineas: pago.lineas.map((l, j) => (j === i ? { ...l, ...cambio } : l)) });
-  const agregarLinea = () => {
-    if (!pago) return;
-    const otro = medios.find((m) => !pago.lineas.some((l) => l.medio === m.codigo))?.codigo;
-    setPago({ ...pago, lineas: [...pago.lineas, lineaNueva(Math.max(queda, 0), otro)] });
+  const { suma, queda, problema: falta } = revisar(pago?.lineas ?? [], cuenta?.saldo ?? 0);
+  const problema = !pago || !cuenta ? 'Elige el cliente.' : falta;
+  const mio = cierre?.vendedores.find((v) => v.vendedorId === sesion.usuario.id);
+  const accionCaja = async (fn: () => Promise<string>) => {
+    setGuardando(true);
+    try { const t = await fn(); setRendir(null); setRecibir(null); cargarCierre(); setAviso({ tono: 'ok', texto: t }); }
+    catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo registrar.' }); }
+    finally { setGuardando(false); }
   };
+  const enviarRendicion = () => accionCaja(async () => {
+    await api('/cobranza/rendiciones', { method: 'POST', body: { fecha, efectivoEntregado: Number(rendir!.efectivo), nota: rendir!.nota.trim() } });
+    return 'Rendición enviada: caja la confirmará al recibir el dinero.';
+  });
+  const confirmarRecepcion = () => accionCaja(async () => {
+    const r = await api<{ diferencia: number }>(`/cobranza/rendiciones/${recibir!.v.rendicion!.id}/recibir`, { method: 'POST', body: { efectivoRecibido: Number(recibir!.efectivo), nota: recibir!.nota.trim() } });
+    return `Rendición de ${recibir!.v.vendedor} recibida${Math.abs(r.diferencia) > 0.009 ? ` · diferencia ${money(r.diferencia)}` : ' · cuadra'}.`;
+  });
   const registrar = async () => {
     if (!pago) return;
     setGuardando(true);
     try {
       // RN-34: un recibo se aplica a los documentos más antiguos primero.
-      const pagos = pago.lineas.map((l) => ({ monto: Number(Number(l.monto).toFixed(2)), medio: l.medio, referencia: l.referencia.trim() }));
+      const pagos = aPagos(pago.lineas);
       const r = await api<{ numero: string; aplicaciones: unknown[] }>('/cobranza/recibos', { method: 'POST', conIdempotencia: true, body: { clienteId: pago.clienteId, pagos } });
       setPago(null);
       await refrescarDatos();
@@ -118,28 +124,48 @@ export function Cobranza() {
               <select className="field__input" value={pago.clienteId} onChange={(e) => { const c = deudores.find((x) => x.id === e.target.value); setPago({ clienteId: e.target.value, lineas: [lineaNueva(c?.saldo ?? 0)] }); }}>
                 {deudores.map((c) => <option key={c.id} value={c.id}>{c.nombre} · debe {money(c.saldo)}</option>)}
               </select></label>
-            {pago.lineas.map((l, i) => (
-              <div key={i} className="pago-linea field--ancho">
-                <label className="field"><span className="field__label">{pago.lineas.length > 1 ? `Forma de pago ${i + 1}` : 'Forma de pago'}</span>
-                  <select className="field__input" value={l.medio} onChange={(e) => cambiarLinea(i, { medio: e.target.value })}>{medios.map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}</select></label>
-                <label className="field"><span className="field__label">Monto (S/)</span>
-                  <input className="field__input" type="number" min="0.01" step="0.01" value={l.monto} onChange={(e) => cambiarLinea(i, { monto: e.target.value })} /></label>
-                <label className="field"><span className="field__label">N.° de operación {pideOperacion(l.medio) ? '(obligatorio)' : '(opcional)'}</span>
-                  <input className="field__input" maxLength={60} value={l.referencia} onChange={(e) => cambiarLinea(i, { referencia: e.target.value })} /></label>
-                {pago.lineas.length > 1 && <button type="button" className="pago-linea__quitar" aria-label="Quitar forma de pago" onClick={() => setPago({ ...pago, lineas: pago.lineas.filter((_, j) => j !== i) })}><Icon name="close" size={16} /></button>}
-              </div>
-            ))}
-            {pago.lineas.length < 5 && <div className="field--ancho"><Boton icono="plus" onClick={agregarLinea}>Agregar otra forma de pago</Boton></div>}
-            <div className="pago-resumen field--ancho">
-              <span>Cobras <b>{money(suma)}</b></span>
-              <span className={queda > 0.009 ? 't-warn' : 't-ok'}>{queda > 0.009 ? <>Queda por cobrar <b>{money(queda)}</b></> : 'Cuenta saldada'}</span>
-            </div>
-            {problema && <span className="field__aviso field--ancho">{problema}</span>}
+            <LineasPago lineas={pago.lineas} onChange={(lineas) => setPago({ ...pago, lineas })} debe={cuenta?.saldo ?? 0} />
+            {!cuenta && <span className="field__aviso field--ancho">Elige el cliente.</span>}
           </div>
         ) : <p className="t-muted">No hay cuentas por cobrar pendientes.</p>)}
       </Dialogo>
 
       <DialogoEstadoCuenta estado={estado} onCerrar={() => setEstado(null)} />
+
+      <Dialogo abierto={rendir !== null && !!mio} titulo={`Rendir mi día · ${fecha.split('-').reverse().join('/')}`}
+        descripcion="Lo que cobraste según el sistema. Entrega el efectivo a la persona encargada de caja; ella confirma lo que recibe."
+        onCerrar={() => setRendir(null)}
+        acciones={<><Boton onClick={() => setRendir(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || !(Number(rendir?.efectivo) >= 0) || rendir?.efectivo === ''} onClick={() => void enviarRendicion()}>{guardando ? 'Enviando…' : 'Enviar rendición'}</Boton></>}>
+        {rendir && mio && (
+          <div className="form form--2col form--dialogo">
+            <table className="table table--compacta field--ancho"><tbody>
+              {Object.entries(mio.porMedio).map(([m, x]) => <tr key={m}><td>{nombreMedio(m)}</td><td className="t-right">{money(x)}</td></tr>)}
+              <tr><td><strong>Total cobrado</strong></td><td className="t-right"><strong>{money(mio.total)}</strong></td></tr>
+            </tbody></table>
+            <label className="field"><span className="field__label">Efectivo que entregas (S/)</span>
+              <input className="field__input" type="number" min="0" step="0.01" value={rendir.efectivo} onChange={(e) => setRendir({ ...rendir, efectivo: e.target.value })} />
+              <span className="field__ayuda">Esperado en efectivo: {money(mio.efectivo)}{Math.abs(Number(rendir.efectivo) - mio.efectivo) > 0.009 ? ` · ${Number(rendir.efectivo) < mio.efectivo ? 'faltan' : 'sobran'} ${money(Math.abs(Number(rendir.efectivo) - mio.efectivo))}` : ''}</span></label>
+            <label className="field"><span className="field__label">Nota (opcional)</span>
+              <input className="field__input" maxLength={300} value={rendir.nota} onChange={(e) => setRendir({ ...rendir, nota: e.target.value })} /></label>
+          </div>
+        )}
+      </Dialogo>
+
+      <Dialogo abierto={recibir !== null} titulo={`Recibir rendición · ${recibir?.v.vendedor ?? ''}`}
+        descripcion={recibir ? `Cobró ${money(recibir.v.total)} (${Object.entries(recibir.v.porMedio).map(([m, x]) => `${nombreMedio(m).toLowerCase()} ${money(x)}`).join(' · ')}). Declara ${money(recibir.v.rendicion!.efectivoEntregado)} en efectivo.` : ''}
+        onCerrar={() => setRecibir(null)}
+        acciones={<><Boton onClick={() => setRecibir(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || recibir?.efectivo === '' || !(Number(recibir?.efectivo) >= 0)} onClick={() => void confirmarRecepcion()}>{guardando ? 'Guardando…' : 'Confirmar recepción'}</Boton></>}>
+        {recibir && (
+          <div className="form form--2col form--dialogo">
+            <label className="field"><span className="field__label">Efectivo recibido (S/)</span>
+              <input className="field__input" type="number" min="0" step="0.01" value={recibir.efectivo} onChange={(e) => setRecibir({ ...recibir, efectivo: e.target.value })} />
+              <span className="field__ayuda">Cobró en efectivo {money(recibir.v.efectivo)}{Math.abs(Number(recibir.efectivo) - recibir.v.efectivo) > 0.009 ? ` · diferencia ${money(Number(recibir.efectivo) - recibir.v.efectivo)}` : ' · cuadra'}</span></label>
+            <label className="field"><span className="field__label">Nota de caja (opcional)</span>
+              <input className="field__input" maxLength={300} value={recibir.nota} onChange={(e) => setRecibir({ ...recibir, nota: e.target.value })} /></label>
+            {recibir.v.rendicion?.desactualizada && <span className="field__aviso field--ancho">Cobró después de rendir: lo cobrado hoy ya no coincide con su rendición.</span>}
+          </div>
+        )}
+      </Dialogo>
 
       <div className="grid grid--auto">
         <Kpi label="Total por cobrar" valor={money(k.porCobrar)} nota={`${dataset.clientes.filter((c) => c.saldo > 0).length} clientes`} icono="wallet" />
@@ -177,15 +203,51 @@ export function Cobranza() {
         </Tarjeta>
 
         <Tarjeta className="col-12">
-          <TarjetaTitulo titulo="Cierre del día" subtitulo={`COB-09 · cobrado ${money(cierre?.total ?? 0)} por forma de pago y vendedor`}
-            accion={<input className="field__input" type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} />} />
+          <TarjetaTitulo titulo="Cierre del día y caja" subtitulo={`COB-09 · cobrado ${money(cierre?.total ?? 0)} · cada vendedor rinde su día y caja lo recibe`}
+            accion={<div className="fila-acciones">
+              {mio && mio.total > 0 && mio.rendicion?.estado !== 'RECIBIDA' && puede('cobranza.registrar') &&
+                <Boton variant="primary" icono="wallet" onClick={() => setRendir({ efectivo: (mio.rendicion?.efectivoEntregado ?? mio.efectivo).toFixed(2), nota: mio.rendicion?.nota ?? '' })}>{mio.rendicion ? 'Actualizar mi rendición' : 'Rendir mi día'}</Boton>}
+              <input className="field__input" type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} />
+            </div>} />
           {cierreError ? <Vacio titulo="No se pudo cargar" detalle={cierreError} onReintentar={cargarCierre} />
             : cierre === null ? <PilaEsqueleto lineas={3} />
-            : cierre.lineas.length ? (<>
-            <p className="t-muted">{cierre.porMedio.map((m) => `${m.medio.toLowerCase()} ${money(m.monto)}`).join(' · ')}</p>
-            <table className="table table--compacta"><thead><tr><th>Forma de pago</th><th>Vendedor</th><th className="t-right">Pagos</th><th className="t-right">Monto</th></tr></thead>
-              <tbody>{cierre.lineas.map((l, i) => <tr key={i}><td>{l.medio.toLowerCase()}</td><td>{l.vendedor}</td><td className="t-right">{l.pagos}</td><td className="t-right">{money(l.monto)}</td></tr>)}</tbody></table>
+            : cierre.vendedores.length ? (<>
+            <p className="t-muted">{cierre.porMedio.map((m) => `${nombreMedio(m.medio).toLowerCase()} ${money(m.monto)}`).join(' · ')}</p>
+            <div className="table-wrap"><table className="table table--compacta">
+              <thead><tr><th>Vendedor</th><th>Cobrado por forma de pago</th><th className="t-right">Total</th><th className="t-right">Efectivo</th><th className="t-right">Entregó</th><th className="t-right">Diferencia</th><th className="t-right">Rendición</th><th /></tr></thead>
+              <tbody>{cierre.vendedores.map((v) => {
+                const r = v.rendicion;
+                return (
+                  <tr key={v.vendedorId}>
+                    <td><strong>{v.vendedor}</strong><div className="t-muted">{v.pagos} cobro(s)</div></td>
+                    <td className="t-muted">{Object.entries(v.porMedio).map(([m, x]) => `${nombreMedio(m).toLowerCase()} ${money(x)}`).join(' · ') || '—'}</td>
+                    <td className="t-right"><strong>{money(v.total)}</strong></td>
+                    <td className="t-right">{money(v.efectivo)}</td>
+                    <td className="t-right">{r ? money(r.efectivoRecibido ?? r.efectivoEntregado) : '—'}</td>
+                    <td className="t-right">{r ? <span className={Math.abs(r.diferencia) > 0.009 ? 't-neg' : 't-ok'}>{Math.abs(r.diferencia) > 0.009 ? money(r.diferencia) : 'Cuadra'}</span> : '—'}</td>
+                    <td className="t-right">
+                      {!r ? <Insignia tono="warn" punto>Sin rendir</Insignia>
+                        : r.estado === 'RECIBIDA' ? <Insignia tono="ok" punto>Recibida{r.recibidoPor ? ` · ${r.recibidoPor}` : ''}</Insignia>
+                        : <Insignia tono="info" punto>Por recibir</Insignia>}
+                      {r?.desactualizada && <div className="t-warn">cobró después de rendir</div>}
+                      {(r?.nota || r?.notaCaja) && <div className="t-muted">{[r?.nota, r?.notaCaja].filter(Boolean).join(' · ')}</div>}
+                    </td>
+                    <td className="t-right">{r?.estado === 'PENDIENTE' && puede('caja.rendiciones') &&
+                      <Boton onClick={() => setRecibir({ v, efectivo: r.efectivoEntregado.toFixed(2), nota: '' })}>Recibir</Boton>}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
           </>) : <p className="t-muted">Sin cobros en esta fecha.</p>}
+          {cierre && cierre.pendientes.length > 0 && (
+            <div className="caja-pendientes">
+              <b>Días anteriores sin recibir en caja</b>
+              <ul>{cierre.pendientes.map((x, i) => (
+                <li key={i}><button type="button" className="enlace" onClick={() => setFecha(x.fecha)}>{x.fecha.split('-').reverse().join('/')}</button>
+                  {' · '}{x.vendedor} · {money(x.total)} · {x.estado === 'PENDIENTE' ? 'rendida, por recibir' : 'sin rendir'}</li>
+              ))}</ul>
+            </div>
+          )}
         </Tarjeta>
 
       </div>
