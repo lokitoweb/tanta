@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { leerConfigPublica, urlApi, type ConfigPublica } from '@/core/api';
 
 // Fondos incluidos: se usan mientras no se suban fotos en Configuración → Marca.
-const INCLUIDOS = ['/ingreso/horno.svg', '/ingreso/vitrina.svg', '/ingreso/mesa.svg'];
+const INCLUIDOS = ['/ingreso/horno.webp', '/ingreso/mesa.webp', '/ingreso/harina.webp'];
 
 /** Fondos del panel de ingreso que se reemplazan con un fundido. Con «reducir movimiento» no rotan solos. */
 export function FondosIngreso() {
@@ -25,7 +25,7 @@ export function FondosIngreso() {
   if (!marca) return null;
   return (
     <div className="fondos-ingreso">
-      {fondos.map((src, i) => <img key={src} src={src} alt="" className={`fondos-ingreso__img ${propios.length ? '' : 'fondos-ingreso__img--incluido'} ${i === actual ? 'is-activo' : ''}`} />)}
+      {fondos.map((src, i) => <img key={src} src={src} alt="" className={`fondos-ingreso__img ${i === actual ? 'is-activo' : ''}`} />)}
       {fondos.length > 1 && (
         <div className="fondos-ingreso__puntos">
           {fondos.map((src, i) => (

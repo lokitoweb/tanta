@@ -1510,8 +1510,6 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   opacity: 0; scale: 1.08; transition: opacity 1400ms ease, scale 9s linear;
 }
 .fondos-ingreso__img.is-activo { opacity: 1; scale: 1; }
-/* Los incluidos son ilustraciones: un leve desenfoque los deja de ambiente, como fondo de foto */
-.fondos-ingreso__img--incluido { filter: blur(1.5px); }
 /* Velo: los textos se leen sobre cualquier foto */
 .acceso__marca::after {
   content: ''; position: absolute; inset: 0; pointer-events: none;

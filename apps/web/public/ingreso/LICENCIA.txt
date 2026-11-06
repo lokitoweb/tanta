@@ -1,0 +1,6 @@
+Fondos de la pantalla de ingreso. Fotos de Unsplash (unsplash.com/license): uso comercial
+gratuito, sin atribución obligatoria. Recortadas y optimizadas en WebP.
+
+horno.webp   https://unsplash.com/es/fotos/pan-integral-en-bandeja-de-madera-marron-ayk9eTUk8K4
+mesa.webp    https://images.unsplash.com/photo-1740396740013-e5636e22c9db
+harina.webp  https://unsplash.com/es/fotos/pan-de-molde-en-la-mesa-QXSvbDkiJmY
