@@ -202,6 +202,11 @@ async function main() {
     await c.query('TRUNCATE core.periodo_costos, core.idempotencia, core.costo_indirecto CASCADE');
 
     await c.query('BEGIN');
+    // TRUNCATE core.insumo CASCADE vacía también las presentaciones de venta (pueden descontar un empaque);
+    // se reponen las de base, que el producto usa por defecto como SKU #1.
+    await c.query(`INSERT INTO core.presentacion_venta (codigo, nombre, equivalencia, orden) VALUES
+      ('UNID', 'Unidad', 1, 1), ('PAQ6', 'Paquete x 6 unid', 6, 2), ('PAQ12', 'Paquete x 12 unid', 12, 3)
+      ON CONFLICT (codigo) DO NOTHING`);
 
     // ---------------------------------------------------------- permisos
     for (const [id, grupo, desc] of PERMISOS) {
