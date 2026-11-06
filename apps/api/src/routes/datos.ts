@@ -403,7 +403,10 @@ export async function rutasDatos(app: FastifyInstance) {
     }
 
     const puede = (perm: string) => u.permisos.has(perm);
-    if (!puede('clientes.ver')) p.clientes = [];
+    // Cobranza necesita la cartera: sin «clientes.ver» se ven solo los clientes con deuda.
+    if (!puede('clientes.ver')) {
+      p.clientes = puede('cobranza.ver') ? (p.clientes as Array<{ saldo: number }>).filter((c) => c.saldo > 0) : [];
+    }
     if (!puede('pedidos.ver')) p.pedidos = [];
     if (!puede('produccion.ver')) p.ops = [];
     if (!puede('recetas.ver')) p.recetas = [];

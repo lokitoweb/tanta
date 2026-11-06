@@ -76,14 +76,14 @@ export function Cobranza() {
       </div>
     ) },
     {
-      key: 'id', header: '', align: 'right',
-      render: (c) => <Boton onClick={() => void api<EstadoCuenta>(`/estado-cuenta?clienteId=${c.id}`).then(setEstado).catch((e) => setAviso({ tono: 'danger', texto: e.message }))}>Estado de cuenta</Boton>,
-    },
-    {
       key: 'estado', header: 'Estado', align: 'right',
       render: (c) => c.vencido > 0
         ? <Insignia tono="danger" punto>Vencido</Insignia>
         : c.saldo > 0 ? <Insignia tono="warn" punto>Al día</Insignia> : <Insignia tono="ok" punto>Sin deuda</Insignia>,
+    },
+    {
+      key: 'id', header: '', align: 'right',
+      render: (c) => <Boton onClick={() => void api<EstadoCuenta>(`/estado-cuenta?clienteId=${c.id}`).then(setEstado).catch((e) => setAviso({ tono: 'danger', texto: e.message }))}>Estado de cuenta</Boton>,
     },
   ];
 
@@ -135,7 +135,18 @@ export function Cobranza() {
       </div>
 
       <div className="grid grid--12">
-        <Tarjeta className="col-5">
+        <Tarjeta className="col-8" padding="none">
+          <div className="card__head card__head--padded">
+            <div>
+              <h3 className="card__title">Cartera por cliente</h3>
+              <p className="card__sub">V-01 · deudas por cobrar con antigüedad</p>
+            </div>
+          </div>
+          <Tabla columnas={columnas} filas={dataset.clientes.filter((c) => c.saldo > 0)} clave={(c) => c.id} buscar="Buscar cliente…"
+            vacio={<Vacio titulo="Sin clientes con deuda" icono="wallet" />} />
+        </Tarjeta>
+
+        <Tarjeta className="col-4">
           <TarjetaTitulo titulo="Antigüedad de saldos" subtitulo="El reporte que evita perder la cartera" />
           <ul className="aging">
             {dataset.aging.map((a) => (
@@ -163,16 +174,6 @@ export function Cobranza() {
           </>) : <p className="t-muted">Sin cobros en esta fecha.</p>}
         </Tarjeta>
 
-        <Tarjeta className="col-7" padding="none">
-          <div className="card__head card__head--padded">
-            <div>
-              <h3 className="card__title">Cartera por cliente</h3>
-              <p className="card__sub">V-01 · deudas por cobrar con antigüedad</p>
-            </div>
-          </div>
-          <Tabla columnas={columnas} filas={dataset.clientes.filter((c) => c.saldo > 0)} clave={(c) => c.id} buscar="Buscar cliente…"
-            vacio={<Vacio titulo="Sin clientes con deuda" icono="wallet" />} />
-        </Tarjeta>
       </div>
     </>
   );
