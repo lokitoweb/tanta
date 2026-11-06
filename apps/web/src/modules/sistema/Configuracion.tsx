@@ -3,7 +3,7 @@ import { api, leerConfigPublica, urlApi } from '@/core/api';
 import { imagenABase64 } from '@/core/imagen';
 import { relativa } from '@/core/format';
 import { Boton, Encabezado, Insignia, PilaEsqueleto, Segmentado, Tarjeta, TablaEsqueleto, TarjetaTitulo, Vacio } from '@/ui/primitives';
-import { ActivacionApp, leerArchivoFirebase } from './Vinculos';
+import { ActivacionApp, leerArchivoFirebase, type ArchivoFirebase } from './Vinculos';
 
 type Seccion = 'marca' | 'movil' | 'legal' | 'correo' | 'integraciones';
 type Datos = Record<string, Record<string, unknown>>;
@@ -80,6 +80,7 @@ export function Configuracion() {
   };
 
   const [destinatario, setDestinatario] = useState('');
+  const [avisoFirebase, setAvisoFirebase] = useState<{ tono: 'ok' | 'danger' | 'info'; texto: string } | null>(null);
   const probar = async (ruta: string, ok: (r: Record<string, unknown>) => string, body: Record<string, unknown> = {}) => {
     setAviso(null);
     try { setAviso({ tono: 'ok', texto: ok(await api(ruta, { method: 'POST', body })) }); }
@@ -93,13 +94,23 @@ export function Configuracion() {
     </>
   );
   const { marca, movil, legal, firebase, webhook, correo } = cfg as Record<string, Record<string, never>>;
-  const cargarFirebase = async (archivo?: File) => {
+  // El resultado de subir un archivo se muestra junto a los botones (el aviso general queda arriba, fuera de la vista).
+  const cargarFirebase = async (archivo: File | undefined, esperado: ArchivoFirebase) => {
     if (!archivo) return;
+    setAvisoFirebase(null);
     try {
-      const datos = await leerArchivoFirebase(archivo);
-      setCfg((c) => c && { ...c, firebase: { ...c.firebase, ...datos } });
-      setAviso({ tono: 'info', texto: `${archivo.name} leído: se completaron ${Object.keys(datos).length} campos. Revisa y pulsa «Guardar Firebase».` });
-    } catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'Archivo no válido.' }); }
+      const datos = await leerArchivoFirebase(archivo, esperado);
+      const nuevo = { ...cfg!.firebase, ...datos };
+      setCfg((c) => c && { ...c, firebase: nuevo });
+      if (esperado !== 'cuenta') {
+        setAvisoFirebase({ tono: 'info', texto: `${archivo.name} leído: se completaron ${Object.keys(datos).length} campos. Pulsa «Guardar Firebase».` });
+        return;
+      }
+      // La cuenta de servicio se guarda en el acto (cifrada): no se pierde si se olvida «Guardar».
+      await api('/sistema/config/firebase', { method: 'PUT', body: nuevo });
+      await cargar();
+      setAvisoFirebase({ tono: 'ok', texto: `Cuenta de servicio guardada y cifrada (${JSON.parse(datos.cuentaServicio).client_email}). Ya puedes enviar un push de prueba.` });
+    } catch (e) { setAvisoFirebase({ tono: 'danger', texto: e instanceof Error ? e.message : 'Archivo no válido.' }); }
   };
   const desactualizados = dispositivos.filter((d) => d.desactualizada).length;
 
@@ -271,10 +282,11 @@ export function Configuracion() {
               <div className="field field--ancho">
                 <span className="field__label">Subir archivos de Firebase (se leen aquí y completan los campos)</span>
                 <div className="subida-firebase">
-                  <label className="btn btn--secondary btn--sm">google-services.json (Android)<input type="file" accept=".json,application/json" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0]); e.target.value = ''; }} /></label>
-                  <label className="btn btn--secondary btn--sm">GoogleService-Info.plist (iOS)<input type="file" accept=".plist" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0]); e.target.value = ''; }} /></label>
-                  <label className="btn btn--secondary btn--sm">Cuenta de servicio (.json)<input type="file" accept=".json,application/json" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0]); e.target.value = ''; }} /></label>
+                  <label className="btn btn--secondary btn--sm">google-services.json (Android)<input type="file" accept=".json,application/json" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0], 'android'); e.target.value = ''; }} /></label>
+                  <label className="btn btn--secondary btn--sm">GoogleService-Info.plist (iOS)<input type="file" accept=".plist" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0], 'ios'); e.target.value = ''; }} /></label>
+                  <label className="btn btn--secondary btn--sm">Cuenta de servicio (.json)<input type="file" accept=".json,application/json" hidden onChange={(e) => { void cargarFirebase(e.target.files?.[0], 'cuenta'); e.target.value = ''; }} /></label>
                 </div>
+                {avisoFirebase && <div className={`aviso aviso--${avisoFirebase.tono}`} role="status" style={{ marginTop: 10 }}><span className="aviso__icono">{avisoFirebase.tono === 'danger' ? '!' : '✓'}</span><div><p>{avisoFirebase.texto}</p></div></div>}
               </div>
               <Campo etiqueta="Project ID"><input className="field__input mono" value={firebase.projectId ?? ''} onChange={(e) => campo('firebase', 'projectId', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Sender ID"><input className="field__input mono" value={firebase.senderId ?? ''} onChange={(e) => campo('firebase', 'senderId', e.target.value.trim())} /></Campo>
@@ -290,7 +302,7 @@ export function Configuracion() {
                 </ol>
                 <span>Después, cada persona debe abrir la app, iniciar sesión y aceptar el permiso de notificaciones: su teléfono aparece con Push «Sí» en App móvil → Dispositivos.</span>
               </div>
-              <Campo etiqueta="Cuenta de servicio (JSON) · secreta" ancho>
+              <Campo etiqueta={`Cuenta de servicio (JSON) · secreta · ${firebase.cuentaServicio === '••••••••' ? 'guardada y cifrada ✓' : firebase.cuentaServicio ? 'sin guardar' : 'falta'}`} ancho>
                 <textarea className="field__input mono" rows={4} spellCheck={false} placeholder='{"type":"service_account","project_id":"…","private_key":"…","client_email":"…"}'
                   value={firebase.cuentaServicio ?? ''} onChange={(e) => campo('firebase', 'cuentaServicio', e.target.value)} />
               </Campo>
