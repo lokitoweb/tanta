@@ -1449,3 +1449,43 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .totales-compra { display: grid; grid-template-columns: auto auto; justify-content: end; gap: 4px 16px; margin-top: 12px; text-align: right; }
 .linea-pedido { display: grid; grid-template-columns: 1fr; gap: 6px; }
 @media (min-width: 640px) { .linea-pedido { grid-template-columns: 2fr 1.4fr; } }
+
+/* Estado de cuenta: documento formal (membrete, cliente, resumen, detalle) que también se imprime. */
+.edc { width: min(860px, calc(100vw - 80px)); display: flex; flex-direction: column; gap: 14px; padding-bottom: 6px; }
+.edc__membrete { display: flex; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 2px solid var(--tanta-text-primary); }
+.edc__membrete > div { display: flex; flex-direction: column; gap: 2px; font-size: 0.75rem; color: var(--tanta-text-muted); }
+.edc__empresa { font-size: 1rem; font-weight: 700; color: var(--tanta-text-primary); letter-spacing: 0.01em; }
+.edc__doc { text-align: right; align-items: flex-end; }
+.edc__doc .edc__etiqueta { font-size: 0.875rem; color: var(--tanta-text-primary); }
+.edc__etiqueta { font-size: 0.6875rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--tanta-text-muted); }
+.edc__cliente { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
+.edc__cliente > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--tanta-border-subtle); border-radius: 8px; font-size: 0.8125rem; color: var(--tanta-text-secondary); }
+.edc__cliente strong { font-size: 0.9375rem; color: var(--tanta-text-primary); }
+.edc__resumen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.edc__cifra { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; background: var(--tanta-neutral-50); border: 1px solid var(--tanta-border-subtle); }
+.edc__cifra span { font-size: 0.75rem; color: var(--tanta-text-muted); }
+.edc__cifra b { font-size: 1.125rem; font-variant-numeric: tabular-nums; color: var(--tanta-text-primary); }
+.edc__cifra small { font-size: 0.6875rem; color: var(--tanta-text-muted); }
+.edc__cifra--total { background: var(--tanta-text-primary); border-color: var(--tanta-text-primary); }
+.edc__cifra--total span, .edc__cifra--total small { color: rgba(255,255,255,.7); }
+.edc__cifra--total b { color: #fff; }
+.edc__cifra--danger { background: var(--tanta-state-danger-bg); border-color: transparent; }
+.edc__cifra--danger b { color: var(--tanta-state-danger); }
+.edc__seccion { font-size: 0.75rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--tanta-text-muted); margin: 4px 0 -6px; }
+.edc__tabla td, .edc__tabla th { white-space: nowrap; }
+.edc__tabla tfoot td { font-weight: 650; font-variant-numeric: tabular-nums; }
+.edc .t-mono { font-family: ui-monospace, 'SF Mono', Consolas, monospace; font-size: 0.75rem; }
+.edc__medio { text-transform: capitalize; }
+.edc__vacio { padding: 14px; text-align: center; font-size: 0.8125rem; color: var(--tanta-text-muted); border: 1px dashed var(--tanta-border-default); border-radius: 8px; }
+.edc__nota { font-size: 0.6875rem; color: var(--tanta-text-muted); line-height: 1.5; border-top: 1px solid var(--tanta-border-subtle); padding-top: 10px; }
+@media (max-width: 720px) { .edc__resumen { grid-template-columns: repeat(2, minmax(0, 1fr)); } .edc__cliente { grid-template-columns: 1fr; } }
+/* Imprimir el estado de cuenta: solo el documento, sin la pantalla de fondo ni los botones. */
+@media print {
+  html.imprime-dialogo body * { visibility: hidden; }
+  html.imprime-dialogo .dialogo__fondo { display: block !important; position: absolute; inset: 0; background: none; padding: 0; }
+  html.imprime-dialogo .dialogo { box-shadow: none; max-height: none; overflow: visible; max-width: none; }
+  html.imprime-dialogo .dialogo__cuerpo { overflow: visible; }
+  html.imprime-dialogo .edc, html.imprime-dialogo .edc * { visibility: visible; }
+  html.imprime-dialogo .edc { position: absolute; left: 0; top: 0; width: 100%; }
+  html.imprime-dialogo .edc__cifra--total { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

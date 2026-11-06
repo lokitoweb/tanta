@@ -8,14 +8,9 @@ import { money, num, pct } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, PilaEsqueleto, Progreso, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Tabla, type Columna } from '@/ui/Tabla';
 import type { Cliente } from '@/core/types';
+import { DialogoEstadoCuenta, type EstadoCuenta } from './EstadoCuenta';
 
 interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }> }
-interface EstadoCuenta {
-  cliente: { nombre: string; documento: string; condicion: string };
-  saldo: number; vencido: number;
-  documentos: Array<{ documento: string; fecha: string; vence: string; monto: number; pagado: number; saldo: number; estado: string; diasVencido: number }>;
-  pagos: Array<{ recibo: string; fecha: string; medio: string; referencia: string | null; monto: number }>;
-}
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 export function Cobranza() {
@@ -114,18 +109,8 @@ export function Cobranza() {
           </div>
         ) : <p className="t-muted">No hay cuentas por cobrar pendientes.</p>)}
       </Dialogo>
-      <Dialogo abierto={estado !== null} titulo={`Estado de cuenta · ${estado?.cliente.nombre ?? ''}`}
-        descripcion={estado ? `${estado.cliente.documento} · ${estado.cliente.condicion.toLowerCase()} · saldo ${money(estado.saldo)} · vencido ${money(estado.vencido)}` : ''}
-        onCerrar={() => setEstado(null)} acciones={<Boton onClick={() => setEstado(null)}>Cerrar</Boton>}>
-        {estado && (<>
-          <table className="table table--compacta"><thead><tr><th>Documento</th><th>Vence</th><th className="t-right">Monto</th><th className="t-right">Saldo</th><th className="t-right">Días venc.</th></tr></thead>
-            <tbody>{estado.documentos.map((d, i) => <tr key={i}><td>{d.documento}</td><td>{d.vence}</td><td className="t-right">{money(d.monto)}</td><td className="t-right">{money(d.saldo)}</td><td className="t-right">{d.diasVencido || '—'}</td></tr>)}</tbody></table>
-          <h4>Pagos</h4>
-          {estado.pagos.length ? <table className="table table--compacta"><thead><tr><th>Recibo</th><th>Fecha</th><th>Medio</th><th className="t-right">Monto</th></tr></thead>
-            <tbody>{estado.pagos.map((p, i) => <tr key={i}><td>{p.recibo}</td><td>{p.fecha}</td><td>{p.medio.toLowerCase()}{p.referencia ? ` · ${p.referencia}` : ''}</td><td className="t-right">{money(p.monto)}</td></tr>)}</tbody></table>
-            : <p className="t-muted">Sin pagos registrados.</p>}
-        </>)}
-      </Dialogo>
+
+      <DialogoEstadoCuenta estado={estado} onCerrar={() => setEstado(null)} />
 
       <div className="grid grid--auto">
         <Kpi label="Total por cobrar" valor={money(k.porCobrar)} nota={`${dataset.clientes.filter((c) => c.saldo > 0).length} clientes`} icono="wallet" />
