@@ -4,6 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'api.dart';
 
+/// Aviso push recibido con la app abierta (en segundo plano lo muestra el sistema).
+final avisoPush = ValueNotifier<RemoteMessage?>(null);
+bool _escuchando = false;
+
 /// Lo que la app sabe al abrir, según el servidor.
 class EstadoVersion {
   const EstadoVersion({this.obligatoria = false, this.disponible = false, this.url = '', this.mensaje = ''});
@@ -60,9 +64,15 @@ Future<String?> _tokenPush(Map<String, dynamic>? fb) async {
     );
   }
   final mensajeria = FirebaseMessaging.instance;
-  // iOS y Android 13+ piden permiso explícito; si el usuario lo niega, no hay token y no pasa nada.
+  // iOS y Android 13+ piden permiso explícito («Permitir notificaciones»); si el usuario lo niega, no hay token.
   final permiso = await mensajeria.requestPermission();
   if (permiso.authorizationStatus == AuthorizationStatus.denied) return null;
+  // iOS: también se muestran con la app abierta.
+  await mensajeria.setForegroundNotificationPresentationOptions(alert: true, badge: true, sound: true);
+  if (!_escuchando) {
+    _escuchando = true;
+    FirebaseMessaging.onMessage.listen((m) => avisoPush.value = m);
+  }
   // ponytail: getToken (obsoleto en v17) es el destino que FCM HTTP v1 documenta para "token".
   // Migrar a register()/onRegistered cuando se valide en un dispositivo real que el servidor lo acepta.
   // ignore: deprecated_member_use

@@ -242,7 +242,8 @@ export async function enviarPush(usuarioId: string, titulo: string, cuerpo: stri
     const r = await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}/messages:send`, {
       method: 'POST', signal: AbortSignal.timeout(8000),
       headers: { Authorization: `Bearer ${acceso}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: { token: token_push, notification: { title: titulo, body: cuerpo } } }),
+      body: JSON.stringify({ message: { token: token_push, notification: { title: titulo, body: cuerpo },
+        android: { priority: 'HIGH', notification: { sound: 'default' } }, apns: { payload: { aps: { sound: 'default' } } } } }),
     });
     if (r.ok) enviados++;
     else if (r.status === 404 || r.status === 400) await q('UPDATE core.dispositivo SET token_push = NULL WHERE token_push = $1', [token_push]);
@@ -296,7 +297,7 @@ export async function rutasSistema(app: FastifyInstance) {
       marca, legal: legalPublico, negocio,
       movil: { ...movil, urlApi: dominio && !dominio.endsWith('/api/v1') ? `${dominio}/api/v1` : dominio },
       // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
-      firebase: f.habilitado ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
+      firebase: f.projectId && f.apiKey ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
     };
   });
 

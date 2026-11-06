@@ -5,6 +5,12 @@ import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
 
+/// Abre la tienda o la descarga del APK (solo https).
+Future<void> abrirActualizacion(String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri != null && uri.isScheme('https')) await launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
 /// La versión instalada es menor que la mínima que fijó el superadmin:
 /// la app no deja operar (evita datos con reglas viejas) y lleva a la tienda.
 class ActualizacionObligatoria extends StatelessWidget {
@@ -32,7 +38,7 @@ class ActualizacionObligatoria extends StatelessWidget {
               FilledButton.icon(
                 onPressed: uri != null && uri.isScheme('https') ? () => launchUrl(uri, mode: LaunchMode.externalApplication) : null,
                 icon: const Icon(Icons.download_outlined),
-                label: Text(plataforma == 'ios' ? 'Abrir App Store' : 'Abrir Google Play'),
+                label: Text(plataforma == 'ios' ? 'Abrir App Store' : estado.url.contains('play.google') ? 'Abrir Google Play' : 'Descargar actualización'),
               ),
             ],
           ),

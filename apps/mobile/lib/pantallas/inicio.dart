@@ -13,6 +13,7 @@ import 'ventas.dart';
 import 'catalogo.dart';
 import 'perfil.dart';
 import 'notificaciones.dart';
+import 'actualizar.dart';
 
 /// Contenedor principal: el menú se construye a partir de los permisos que
 /// devuelve el servidor. Si un permiso no está, la pestaña no existe.
@@ -34,6 +35,57 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
   Timer? _espera;
   String? _avisoMostrado;
   late Map<String, dynamic> _datos = widget.datos;
+  late EstadoVersion _version = widget.version;
+  DateTime _ultimaRevision = DateTime.now();
+  String? _versionAvisada;
+
+  /// Al volver a la app (máx. 1 vez por minuto): ¿salió una versión nueva? También renueva el token push.
+  Future<void> _revisarVersion() async {
+    if (DateTime.now().difference(_ultimaRevision) < const Duration(minutes: 1)) return;
+    _ultimaRevision = DateTime.now();
+    final v = await arrancarSesion();
+    if (!mounted) return;
+    setState(() => _version = v);
+    _avisarVersion();
+  }
+
+  /// Ventana «Hay una nueva versión» una vez por versión; si es obligatoria, no deja seguir.
+  void _avisarVersion() {
+    final v = _version;
+    if (!mounted) return;
+    if (v.obligatoria) {
+      Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => ActualizacionObligatoria(estado: v)), (_) => false);
+      return;
+    }
+    if (!v.disponible || _versionAvisada == v.url) return;
+    _versionAvisada = v.url;
+    showDialog<void>(context: context, builder: (ctx) => AlertDialog(
+      icon: const Icon(Icons.system_update_outlined, color: TantaColors.ink800),
+      title: const Text('Nueva versión disponible'),
+      content: Text(v.mensaje.isEmpty ? 'Actualiza Tanta para tener las últimas mejoras.' : v.mensaje),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Más tarde')),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+          onPressed: () { Navigator.pop(ctx); abrirActualizacion(v.url); },
+          child: const Text('Actualizar'),
+        ),
+      ],
+    ));
+  }
+
+  /// Notificación que llega con la app abierta: se muestra arriba como aviso y se recargan los datos.
+  void _alPush() {
+    final m = avisoPush.value;
+    if (m == null || !mounted) return;
+    avisoPush.value = null;
+    final n = m.notification;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text([n?.title, n?.body].whereType<String>().where((t) => t.isNotEmpty).join('\n')),
+      duration: const Duration(seconds: 5),
+    ));
+    _alCambiar();
+  }
 
   /// Vuelve a pedir el resumen (KPIs, últimos pedidos…). Sin red se queda con lo que tenía.
   Future<void> _recargar() async {
@@ -55,6 +107,8 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     ColaOffline.instancia.ultimoAviso.addListener(_avisar);
     Api.instancia.cambios.addListener(_alCambiar);
+    avisoPush.addListener(_alPush);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _avisarVersion());
 
     // Mientras la app está abierta en el mostrador se reintenta cada 20 s.
     // Así el vendedor no tiene que pulsar nada cuando vuelve el WiFi.
@@ -67,6 +121,7 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     _reloj?.cancel();
     _espera?.cancel();
     Api.instancia.cambios.removeListener(_alCambiar);
+    avisoPush.removeListener(_alPush);
     ColaOffline.instancia.ultimoAviso.removeListener(_avisar);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -78,6 +133,7 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     if (estado == AppLifecycleState.resumed) {
       _intentarSync();
       _recargar(); // lo que cambió en otro equipo (pedido confirmado, pago registrado)
+      _revisarVersion();
     }
   }
 
@@ -109,7 +165,7 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     // Cada pestaña existe solo si el servidor confirmó el permiso.
     return [
       _Pestana('Panel', Icons.home_outlined, Icons.home,
-          _PanelInicio(datos: _datos, version: widget.version, irA: _irA, onRecargar: _recargar)),
+          _PanelInicio(datos: _datos, version: _version, irA: _irA, onRecargar: _recargar)),
       if (api.puede('produccion.ver'))
         _Pestana('Producción', Icons.local_fire_department_outlined, Icons.local_fire_department,
             Produccion(datos: _datos)),
@@ -358,6 +414,7 @@ class _PanelInicio extends StatelessWidget {
               leading: const Icon(Icons.system_update_outlined, color: TantaColors.stateInfo),
               title: const Text('Hay una nueva versión', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
               subtitle: Text(version.mensaje, style: const TextStyle(fontSize: 12)),
+              trailing: TextButton(onPressed: () => abrirActualizacion(version.url), child: const Text('Actualizar')),
             ),
           ),
         ],
