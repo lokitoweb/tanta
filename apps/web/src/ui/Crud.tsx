@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { InputNumero } from './InputNumero';
 import { Boton, Buscador, Encabezado, Tarjeta, TablaEsqueleto, Vacio } from './primitives';
 import { Dialogo } from './Dialogo';
 import { TablaReporte, type AccionFila, type ColRep } from './TablaReporte';
@@ -105,6 +106,12 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
     if (c.tipo === 'pct') return v === '' || v === undefined ? '' : String(Math.round(Number(v) * 10000) / 100);
     return v === undefined || v === null ? '' : String(v);
   };
+  // Número que muestra el campo (porcentaje en %, el resto tal cual).
+  const numero = (c: Campo): number | '' => {
+    const v = form?.[c.key];
+    if (v === '' || v === undefined || v === null) return '';
+    return c.tipo === 'pct' ? Math.round(Number(v) * 10000) / 100 : Number(v);
+  };
 
   return (
     <>
@@ -200,10 +207,13 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
                 <select className="field__input" value={valor(c)} onChange={(e) => set(c, e.target.value)}>
                   {c.opciones?.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
                 </select>
+              ) : c.tipo === 'numero' || c.tipo === 'pct' ? (
+                <InputNumero className="field__input" placeholder={c.placeholder} required={c.requerido} disabled={c.soloAlCrear && !!form?.id}
+                  step={c.tipo === 'pct' ? '0.1' : 'any'} min={0}
+                  valor={numero(c)} onValor={(n) => set(c, n === '' ? '' : String(n))} />
               ) : (
                 <input className="field__input" placeholder={c.placeholder} required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id}
-                  type={c.tipo === 'numero' || c.tipo === 'pct' ? 'number' : c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : 'text'}
-                  step={c.tipo === 'pct' ? '0.1' : c.tipo === 'numero' ? 'any' : undefined} min={c.tipo === 'numero' || c.tipo === 'pct' ? 0 : undefined}
+                  type={c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : 'text'}
                   value={valor(c)} onChange={(e) => set(c, e.target.value)} />
               )}
               {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}

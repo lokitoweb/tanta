@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { InputNumero } from '@/ui/InputNumero';
 import { api } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
@@ -210,8 +211,8 @@ export function Compras() {
                     {ant && <span className={`field__ayuda ${delta !== null && delta > 0.0001 ? 'precio-sube' : delta !== null && delta < -0.0001 ? 'precio-baja' : ''}`}>
                       P. anterior {money(ant.precio)} ({ant.fecha}, {ant.proveedor}){delta !== null && Math.abs(delta) > 0.0001 ? ` · ${delta > 0 ? '▲ sube' : '▼ baja'} ${(Math.abs(delta) * 100).toFixed(1)} %` : ''}</span>}</label>
                   <label className="field"><span className="field__label">Precio total de la línea (S/)</span>
-                    <input className="field__input" type="number" min="0" step="any" value={cant > 0 && precio > 0 ? String(Math.round(cant * precio * 100) / 100) : ''}
-                      onChange={(e) => cant > 0 && linea(i, { precioUnitario: String(Math.round(Number(e.target.value) / cant * 10_000) / 10_000) })}
+                    <InputNumero className="field__input" min="0" step="any" valor={cant > 0 && l.precioUnitario !== '' ? Math.round(cant * precio * 100) / 100 : ''}
+                      onValor={(n) => cant > 0 && linea(i, { precioUnitario: n === '' ? '' : String(Math.round(n / cant * 10_000) / 10_000) })}
                       disabled={!(cant > 0)} placeholder={cant > 0 ? '' : 'Primero la cantidad'} /></label>
                   <label className="field"><span className="field__label">Lote (opcional)</span>
                     <input className="field__input" maxLength={40} value={l.lote} onChange={(e) => linea(i, { lote: e.target.value.toUpperCase() })} /></label>

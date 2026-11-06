@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { InputNumero } from '@/ui/InputNumero';
 import { api } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
@@ -303,7 +304,7 @@ function AjustarPrecio({ producto, onCerrar }: { producto: Producto; onCerrar: (
       <FichaCosto producto={producto} receta={receta} igv={igv} />
       <div className="form form--2col form--dialogo" style={{ marginTop: 12 }}>
         <label className="field"><span className="field__label">Margen objetivo para el precio sugerido (%)</span>
-          <input className="field__input" type="number" min={0} max={95} step="0.5" value={margen} onChange={(e) => setMargen(Number(e.target.value))} /></label>
+          <InputNumero className="field__input" min={0} max={95} step="0.5" valor={margen} onValor={(n) => setMargen(n === '' ? 0 : n)} /></label>
       </div>
       <div className="table-wrap"><table className="table table--compacta">
         <thead><tr><th>Presentación</th><th className="t-right">Equiv.</th><th className="t-right">Costo</th><th className="t-right">Sugerido</th><th>Precio con IGV</th><th className="t-right">Margen</th></tr></thead>
@@ -602,7 +603,7 @@ export function AnalisisPrecio({ productos, recetas, igv }: {
         <label className="field"><span className="field__label">Precio sugerido según</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <select className="field__input" style={{ maxWidth: 120 }} value={modo} onChange={(e) => setModo(e.target.value as 'margen' | 'markup')}><option value="margen">Margen</option><option value="markup">Markup</option></select>
-            <input className="field__input" type="number" min={0} max={modo === 'margen' ? 95 : 1000} step="0.5" value={valor} aria-label={modo === 'margen' ? 'Margen objetivo (%)' : 'Markup (%)'} onChange={(e) => setValor(Number(e.target.value))} />
+            <InputNumero className="field__input" min={0} max={modo === 'margen' ? 95 : 1000} step="0.5" valor={valor} aria-label={modo === 'margen' ? 'Margen objetivo (%)' : 'Markup (%)'} onValor={(n) => setValor(n === '' ? 0 : n)} />
           </div></label>
       </div>
       <div style={{ marginTop: 12 }}><FichaCosto producto={p} receta={r} igv={igv} /></div>
