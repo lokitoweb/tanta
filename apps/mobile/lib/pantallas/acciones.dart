@@ -1011,7 +1011,7 @@ class _MisPedidosState extends State<MisPedidos> {
     final cuando = {for (final h in historial.cast<Map>()) '${h['estado']}': DateTime.tryParse('${h['fecha']}')?.toLocal()};
     final actual = pasos.indexOf('${p['estado']}');
     await showModalBottomSheet<void>(context: context, isScrollControlled: true, builder: (ctx) => DraggableScrollableSheet(
-      expand: false, initialChildSize: 0.75, builder: (_, scroll) => ListView(controller: scroll, padding: const EdgeInsets.all(20), children: [
+      expand: false, initialChildSize: 0.75, builder: (_, scroll) => ListView(controller: scroll, padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom), children: [
         Text('${p['codigo']}', style: Theme.of(ctx).textTheme.titleLarge),
         Text('Entrega ${p['fecha_entrega']}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' · ${p['hora_entrega']}'} · ${p['tipoEntrega'] == 'DELIVERY' ? 'delivery a ${p['direccion']}' : 'recojo en tienda'}'),
         Text('Pago contra entrega: ${nombreMedio('${p['pagoEntrega'] ?? 'EFECTIVO'}').toLowerCase()}'),

@@ -419,17 +419,20 @@ class _PanelInicio extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 16),
-        entra(GridView(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 280,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            mainAxisExtent: 108,
-          ),
-          children: _kpis(context, api, datos, k),
-        )),
+        entra(LayoutBuilder(builder: (_, c) {
+          // Columnas de hasta 280 px; la última fila, si queda incompleta, reparte todo el ancho.
+          final kpis = _kpis(context, api, datos, k);
+          const sep = 12.0;
+          final cols = ((c.maxWidth + sep) / (280 + sep)).ceil().clamp(1, 6);
+          final resto = kpis.length % cols;
+          double ancho(int i) {
+            final n = resto != 0 && i >= kpis.length - resto ? resto : cols;
+            return ((c.maxWidth - sep * (n - 1)) / n).floorToDouble(); // sin redondeo que haga saltar de fila
+          }
+          return Wrap(spacing: sep, runSpacing: sep, children: [
+            for (var i = 0; i < kpis.length; i++) SizedBox(width: ancho(i), height: 108, child: kpis[i]),
+          ]);
+        })),
         if (accesos.isNotEmpty) ...[
           const SizedBox(height: 22),
           entra(const TituloSeccion('Accesos rápidos')),
@@ -577,7 +580,7 @@ class _PanelInicio extends StatelessWidget {
       ));
     }
 
-    if (api.puede('catalogo.ver')) {
+    if (datos.containsKey('miSaldo')) {
       // Saldo = compras a crédito aún no pagadas (cuentas por cobrar); un pedido suma deuda recién al venderse a crédito.
       final deudas = _n(datos['misDeudas']).toInt();
       final pedidos = _n(datos['misPedidosTotal'] ?? (datos['misPedidos'] as List?)?.length).toInt();

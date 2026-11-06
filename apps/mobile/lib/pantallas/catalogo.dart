@@ -61,7 +61,7 @@ class _CatalogoState extends State<Catalogo> {
         final peso = p['pesoMasaG'] as num?;
         final anticipacion = (p['anticipacionHoras'] as num?) ?? 0;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 28 + MediaQuery.of(ctx).viewPadding.bottom),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${p['nombre']}', style: estiloDisplay.copyWith(fontSize: 22)),
             const SizedBox(height: 4),
