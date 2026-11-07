@@ -1492,6 +1492,18 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .pago-linea { display: grid; grid-template-columns: 1.1fr 0.9fr 1.3fr auto; gap: 10px; align-items: end; }
 .pago-linea__quitar { height: 38px; width: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--tanta-text-muted); }
 .pago-linea__quitar:hover { background: var(--tanta-neutral-100); color: var(--tanta-state-danger); }
+.avisos-destino { display: flex; flex-wrap: wrap; gap: 8px 20px; border: 0; margin: 0; padding: 0; font-size: 0.875rem; }
+.avisos-destino legend { padding: 0; margin-bottom: 6px; }
+.avisos-destino label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.avisos-clientes { display: grid; gap: 2px; max-height: 280px; overflow-y: auto; }
+.avisos-clientes label { display: flex; align-items: center; gap: 10px; padding: 8px 4px; font-size: 0.875rem; cursor: pointer; }
+.avisos-clientes label.is-sin-app { color: var(--tanta-text-secondary); cursor: default; }
+.avisos-clientes label span:first-of-type { flex: 1; }
+.avisos-enviados { list-style: none; margin: 0; padding: 0; max-height: 480px; overflow-y: auto; }
+.avisos-enviados li { padding: 10px 0; font-size: 0.8125rem; overflow-wrap: anywhere; }
+.avisos-enviados li + li { border-top: 1px solid var(--tanta-border-subtle); }
+.avisos-enviados p { margin: 2px 0 4px; color: var(--tanta-text-secondary); }
+.avisos-enviados small { color: var(--tanta-text-secondary); }
 .cobro-compras { border: 1px solid var(--tanta-border-subtle); border-radius: 8px; margin: 0; padding: 4px 12px 6px; max-height: 240px; overflow-y: auto; }
 .cobro-compras legend { padding: 0 6px; }
 .cobro-compra { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; font-size: 0.8125rem; }

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q, tx, num } from '../db.js';
-import { autenticar, error } from '../seguridad.js';
+import { autenticar, exigir, error } from '../seguridad.js';
+import { auditar } from '../auditoria.js';
 import { emitirEvento, enviarPush } from './sistema.js';
 
 /**
@@ -68,7 +69,47 @@ export async function despacharAvisosPedido(): Promise<number> {
   return cambios.length;
 }
 
+const NuevoAviso = z.object({
+  titulo: z.string().trim().min(3, 'Escribe un título.').max(80),
+  cuerpo: z.string().trim().min(5, 'Escribe el mensaje.').max(300),
+  todos: z.boolean(),
+  clienteIds: z.array(z.string().uuid()).max(2000).default([]),
+}).refine((d) => d.todos || d.clienteIds.length > 0, { message: 'Elige al menos un cliente.', path: ['clienteIds'] });
+
 export async function rutasNotificaciones(app: FastifyInstance) {
+  // Promociones y comunicados: clientes activos con cuántas cuentas de la app tienen, y lo ya enviado.
+  app.get('/avisos-clientes', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'clientes.avisar')) return;
+    const clientes = await q<Record<string, string>>(`SELECT c.id, c.nombre,
+        (SELECT count(*) FROM core.usuario u WHERE u.cliente_id = c.id AND u.estado = 'ACTIVO') cuentas
+      FROM core.cliente c WHERE c.estado = 'ACTIVO' ORDER BY c.nombre`);
+    const historial = await q<Record<string, string>>(`SELECT a.id, a.titulo, a.cuerpo, a.todos, a.clientes, a.usuarios, u.nombre enviado_por, a.creado_en::text fecha
+      FROM core.aviso_cliente a JOIN core.usuario u ON u.id = a.enviado_por ORDER BY a.creado_en DESC LIMIT 50`);
+    return {
+      clientes: clientes.map((c) => ({ id: c.id, nombre: c.nombre, cuentas: num(c.cuentas) })),
+      historial: historial.map((a) => ({ id: a.id, titulo: a.titulo, cuerpo: a.cuerpo, todos: Boolean(a.todos), clientes: num(a.clientes), usuarios: num(a.usuarios), enviadoPor: a.enviado_por, fecha: a.fecha })),
+    };
+  });
+
+  // Límite por minuto: un doble envío o una cuenta comprometida no inunda a los clientes.
+  app.post('/avisos-clientes', { preHandler: autenticar, config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+    if (!exigir(req, reply, 'clientes.avisar')) return;
+    const p = NuevoAviso.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Aviso inválido.'));
+    const d = p.data;
+    // Solo cuentas activas de clientes activos; los ids que no corresponden simplemente no reciben nada.
+    const cuentas = await q<{ id: string; cliente_id: string }>(`SELECT u.id, u.cliente_id FROM core.usuario u JOIN core.cliente c ON c.id = u.cliente_id
+      WHERE u.estado = 'ACTIVO' AND c.estado = 'ACTIVO' AND ($1 OR c.id = ANY($2::uuid[]))`, [d.todos, d.clienteIds]);
+    if (!cuentas.length) return reply.code(422).send(error(422, 'SIN_DESTINATARIOS', 'Ningún cliente elegido tiene cuenta en la app.'));
+    const clientes = new Set(cuentas.map((c) => c.cliente_id)).size;
+    const fila = await q<{ id: string }>(`INSERT INTO core.aviso_cliente (titulo, cuerpo, todos, clientes, usuarios, enviado_por) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [d.titulo, d.cuerpo, d.todos, clientes, cuentas.length, req.usuario!.id]);
+    await notificar(cuentas.map((c) => ({ usuarioId: c.id })), { tipo: 'promocion', titulo: d.titulo, cuerpo: d.cuerpo, ruta: '/catalogo' });
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'AVISO_CLIENTES', entidad: 'aviso_cliente', entidadId: fila[0].id,
+      detalle: { titulo: d.titulo, todos: d.todos, clientes, usuarios: cuentas.length }, ip: req.ip });
+    return reply.code(201).send({ id: fila[0].id, clientes, usuarios: cuentas.length });
+  });
+
   app.get('/notificaciones', { preHandler: autenticar }, async (req) => {
     const filas = await q<Record<string, string>>(`SELECT id, tipo, titulo, cuerpo, ruta, leida_en IS NOT NULL leida, creado_en::text fecha
       FROM core.notificacion WHERE usuario_id = $1 ORDER BY id DESC LIMIT 100`, [req.usuario!.id]);

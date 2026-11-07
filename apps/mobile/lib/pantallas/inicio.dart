@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'acciones.dart';
+import 'avisos_clientes.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -195,6 +196,7 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     if (ruta.startsWith('/almacen/compras') && api.puede('compras.verificar')) pantalla = const VerificarCompras();
     if (ruta.startsWith('/almacen/conteos')) pantalla = Conteos(datos: _datos);
     if (pantalla != null) { Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla!)); return; }
+    if (ruta.startsWith('/catalogo')) _irA('Catálogo');
     if (ruta.startsWith('/ventas/pedidos')) _irA('Pedidos');
     if (ruta.startsWith('/almacen')) _irA('Almacén');
     if (ruta.startsWith('/ventas/cobranza')) _irA('Cobranza');
@@ -493,6 +495,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
       if (api.puede('compras.registrar')) accion('Registrar compra', Icons.local_shipping_outlined, NuevaCompra(datos: datos)),
       if (api.puede('caja.abrir')) accion('Caja chica', Icons.point_of_sale_outlined, const CajaChica()),
+      if (api.puede('clientes.avisar')) accion('Avisos a clientes', Icons.campaign_outlined, const AvisosClientes()),
       if (api.puede('compras.verificar')) accion('Verificar compras', Icons.fact_check_outlined, const VerificarCompras()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, MisPedidos(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>())),

@@ -87,6 +87,29 @@ test('centro de notificaciones: no leídas y marcar como leídas, solo las propi
   assert.equal((await api(ven, 'GET', '/notificaciones')).b.noLeidas, 0, 'marcar todo deja 0 pendientes');
 });
 
+test('avisos a clientes: solo con permiso, a todos o a los elegidos, y queda en el historial', async () => {
+  const adm = await login('lbermudez'), cli = await login('mfernandez');
+  assert.equal((await api(await login('cmedina'), 'GET', '/avisos-clientes')).s, 403, 'el vendedor no tiene el permiso');
+  assert.equal((await api(cli, 'POST', '/avisos-clientes', { titulo: 'Falso', cuerpo: 'Mensaje falso', todos: true })).s, 403, 'un cliente no puede enviar');
+  const d = (await api(adm, 'GET', '/avisos-clientes')).b;
+  const maria = d.clientes.find((c) => c.nombre === 'María Fernández'), sinApp = d.clientes.find((c) => c.cuentas === 0);
+  assert.equal((await api(adm, 'POST', '/avisos-clientes', { titulo: 'Sin nadie', cuerpo: 'Sin destino', todos: false })).s, 422, 'hay que elegir clientes');
+  assert.equal((await api(adm, 'POST', '/avisos-clientes', { titulo: 'Sin app', cuerpo: 'No tiene cuenta', todos: false, clienteIds: [sinApp.id] })).s, 422);
+
+  const marca = randomUUID().slice(0, 8);
+  const r = await api(adm, 'POST', '/avisos-clientes', { titulo: `2x1 ${marca}`, cuerpo: '<b>Solo</b> este sábado', todos: false, clienteIds: [maria.id] });
+  assert.equal(r.s, 201, JSON.stringify(r.b));
+  assert.equal(r.b.clientes, 1);
+  const a = await esperarAviso(cli, marca);
+  assert.ok(a, 'el cliente lo recibe');
+  assert.equal(a.aviso.tipo, 'promocion');
+  assert.equal(a.aviso.ruta, '/catalogo');
+  assert.equal(a.aviso.cuerpo, '<b>Solo</b> este sábado', 'se guarda como texto');
+  assert.ok(!(await api(await login('cmedina'), 'GET', '/notificaciones')).b.avisos.some((x) => x.titulo.includes(marca)), 'el personal no lo recibe');
+  assert.ok((await api(adm, 'GET', '/avisos-clientes')).b.historial.some((x) => x.titulo.includes(marca) && x.enviadoPor), 'queda en el historial');
+  assert.equal(sql(`SELECT count(*) FROM audit.evento WHERE accion = 'AVISO_CLIENTES' AND entidad_id = '${r.b.id}'`), '1', 'queda en auditoría');
+});
+
 test('una venta avisa a Gerencia (permiso alertas.ventas)', async () => {
   const ger = await login('osquilcate');
   const v = await api(await login('cmedina'), 'POST', '/ventas', { items: [{ productoId: sql('SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1'), cantidad: 1 }], formaPago: 'EFECTIVO' });

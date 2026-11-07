@@ -8,7 +8,7 @@ import { Icon } from '@/ui/icons';
 const TIPO: Record<string, { icono: Parameters<typeof Icon>[0]['name']; tono: string }> = {
   cobranza: { icono: 'wallet', tono: 'danger' }, compra: { icono: 'truck', tono: 'info' }, stock: { icono: 'alert', tono: 'warn' },
   venta: { icono: 'ledger', tono: 'ok' }, pedido: { icono: 'clipboard', tono: 'info' }, conteo: { icono: 'box', tono: 'warn' },
-  descuento: { icono: 'tag', tono: 'warn' }, requisicion: { icono: 'sack', tono: 'info' },
+  promocion: { icono: 'tag', tono: 'ok' }, descuento: { icono: 'tag', tono: 'warn' }, requisicion: { icono: 'sack', tono: 'info' },
 };
 
 /** «hace 5 min», «ayer»; más de una semana, la fecha. */

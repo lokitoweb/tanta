@@ -60,7 +60,7 @@ class _NotificacionesState extends State<Notificaciones> {
   bool _soloNoLeidas = false;
 
   static const _iconos = {
-    'pedido': Icons.receipt_long_outlined, 'venta': Icons.point_of_sale_outlined, 'stock': Icons.inventory_2_outlined,
+    'pedido': Icons.receipt_long_outlined, 'promocion': Icons.campaign_outlined, 'venta': Icons.point_of_sale_outlined, 'stock': Icons.inventory_2_outlined,
     'requisicion': Icons.assignment_outlined, 'descuento': Icons.percent, 'conteo': Icons.fact_check_outlined,
   };
 

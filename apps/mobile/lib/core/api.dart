@@ -313,6 +313,9 @@ class Api {
       }, idempotente: true) as Map<String, dynamic>;
 
   /// Cuentas por cobrar abiertas. El servidor ya filtra por permiso.
+  Future<Map<String, dynamic>> avisosClientes() async => await _get('/avisos-clientes') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> enviarAvisoClientes(String titulo, String cuerpo, bool todos, List<String> clienteIds) async =>
+      await _post('/avisos-clientes', {'titulo': titulo, 'cuerpo': cuerpo, 'todos': todos, 'clienteIds': clienteIds}) as Map<String, dynamic>;
   Future<List<dynamic>> cartera() async => await _get('/cxc') as List<dynamic>;
 
   /// Recibo de cobro: una o varias formas de pago aplicadas a las compras elegidas (las más antiguas primero).
