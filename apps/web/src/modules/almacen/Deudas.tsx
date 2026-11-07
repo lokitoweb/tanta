@@ -1,3 +1,4 @@
+import { VerComprobante } from '@/ui/VerComprobante';
 import { useEffect, useState } from 'react';
 import { api, urlApi } from '@/core/api';
 import { imagenABase64 } from '@/core/imagen';
@@ -113,7 +114,7 @@ export function Deudas() {
                 <tr key={p.codigo}>
                   <td>{p.codigo}</td><td>{new Date(p.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
                   <td>{p.caja === 'CHICA' ? `Chica ${p.apertura ?? ''}` : 'Grande'}</td>
-                  <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}{p.comprobanteUrl && <> · <a href={urlApi(p.comprobanteUrl)} target="_blank" rel="noreferrer">comprobante</a></>}</td>
+                  <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}{p.comprobanteUrl && <> · <VerComprobante url={p.comprobanteUrl} texto="comprobante" /></>}</td>
                   <td className="t-right">{money(p.monto)}</td>
                   <td>{p.estado === 'VIGENTE' ? <Insignia tono="ok">Vigente</Insignia> : <Insignia tono="neutral">Anulado</Insignia>}</td>
                   <td>{paga && p.estado === 'VIGENTE' && !pago && !anular && <Boton onClick={() => setAnular({ codigo: p.codigo, motivo: '' })}>Anular</Boton>}</td>

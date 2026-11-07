@@ -164,6 +164,33 @@ class Api {
     return _decodificar(r);
   }
 
+  /// Comprobante privado: bytes de la imagen, pedidos con la sesión.
+  Future<Uint8List> archivoPrivado(String ruta) async {
+    final r = await _binario(() => http.get(Uri.parse('$base$ruta'), headers: _cabeceras()));
+    return r.bodyBytes;
+  }
+
+  /// Excel real: el servidor arma el .xlsx con las filas que el usuario ya ve.
+  Future<Uint8List> excel(String nombre, List<Map<String, dynamic>> filas) async {
+    final r = await _binario(() => http.post(Uri.parse('$base/exportar/excel'), headers: {..._cabeceras(conCuerpo: true), 'Content-Type': 'application/json'},
+        body: jsonEncode({'nombre': nombre, 'filas': filas})));
+    return r.bodyBytes;
+  }
+
+  Future<http.Response> _binario(Future<http.Response> Function() pedir) async {
+    late http.Response r;
+    try {
+      r = await pedir().timeout(_limite);
+      if (r.statusCode == 401 && await _refrescar()) r = await pedir().timeout(_limite);
+    } on ApiException {
+      rethrow;
+    } catch (_) {
+      throw SinConexion();
+    }
+    if (r.statusCode >= 400) throw ApiException(r.statusCode, r.statusCode == 404 ? 'No se encontró el archivo o no tienes acceso' : 'No se pudo obtener el archivo');
+    return r;
+  }
+
   Future<dynamic> _post(
     String ruta,
     Map<String, dynamic> cuerpo, {

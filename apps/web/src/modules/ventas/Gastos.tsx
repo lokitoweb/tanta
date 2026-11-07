@@ -1,5 +1,6 @@
+import { VerComprobante } from '@/ui/VerComprobante';
 import { useEffect, useState } from 'react';
-import { api, urlApi } from '@/core/api';
+import { api } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
 import { money } from '@/core/format';
 import { ComprobanteInput } from '@/modules/almacen/Deudas';
@@ -77,7 +78,7 @@ export function Gastos() {
           : lista.length === 0 ? <Vacio titulo="Aún no hay gastos registrados" icono="wallet" /> : (
             <div className="table-wrap"><table className="table">
               <thead><tr><th>Código</th><th>Fecha</th><th>Documento</th><th>Tipo</th><th>Glosa</th><th>Autorizó</th><th className="t-right">Monto</th><th>Estado</th></tr></thead>
-              <tbody>{lista.map((g) => <tr key={g.codigo}><td>{g.codigo}{g.comprobanteUrl && <div><a className="enlace" href={urlApi(g.comprobanteUrl)} target="_blank" rel="noreferrer">Ver imagen</a></div>}</td>
+              <tbody>{lista.map((g) => <tr key={g.codigo}><td>{g.codigo}{g.comprobanteUrl && <div><VerComprobante url={g.comprobanteUrl} texto="Ver imagen" titulo={`Gasto ${g.codigo}`} /></div>}</td>
                 <td>{g.fecha.split('-').reverse().join('/')}</td><td>{[g.docTipo, g.docSerie, g.docNumero].filter(Boolean).join(' ') || '—'}</td><td>{g.tipoGastoNombre}</td><td>{g.concepto}</td><td>{g.autorizadoPor}</td>
                 <td className="t-right"><strong>{money(g.monto)}</strong></td><td><Insignia tono={g.estado === 'VIGENTE' ? 'ok' : 'danger'} punto>{g.estado === 'VIGENTE' ? 'Vigente' : 'Anulado'}</Insignia></td></tr>)}</tbody>
             </table></div>

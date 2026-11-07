@@ -1,3 +1,4 @@
+import 'visor_comprobante.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -806,7 +807,10 @@ class _EstadoCuentaState extends State<EstadoCuenta> {
                     for (final p in pagos) ListTile(contentPadding: EdgeInsets.zero,
                         title: Text('${p['recibo']} · ${'${p['medio']}'.toLowerCase()}'),
                         subtitle: Text('${p['fecha']}'),
-                        trailing: Text(dinero((p['monto'] as num).toDouble()))),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                          BotonComprobante(url: p['comprobanteUrl'] as String?),
+                          Text(dinero((p['monto'] as num).toDouble())),
+                        ])),
                   ]),
       ),
     );

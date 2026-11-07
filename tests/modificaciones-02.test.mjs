@@ -4,6 +4,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { inflateRawSync } from 'node:zlib';
 import { sql } from './_sql.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
@@ -136,7 +137,18 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   // Entrega con pago y voucher: recién ahí entra a cobranza.
   const e = await api(ven, 'PATCH', `/pedidos/${p.b.codigo}/estado`, { estado: 'ENTREGADO', voucher: PNG, pagos: [{ monto: 1, medio: 'YAPE', referencia: 'V-123456' }] });
   assert.equal(e.s, 200, JSON.stringify(e.b));
-  assert.match(e.b.recibo.comprobante_url ?? e.b.recibo.comprobanteUrl ?? '', /^\/archivos\//, 'el voucher queda en el recibo');
+  const urlVoucher = e.b.recibo.comprobante_url ?? e.b.recibo.comprobanteUrl ?? '';
+  assert.match(urlVoucher, /^\/comprobantes\//, 'el voucher queda en el recibo');
+  // Privado: sin sesión no se ve, tampoco por la ruta pública; lo ve el dueño y quien tiene permiso.
+  const id = urlVoucher.split('/').pop();
+  const ver = (t) => fetch(B + urlVoucher, t ? { headers: { Authorization: 'Bearer ' + t } } : {});
+  assert.equal((await ver()).status, 401, 'sin sesión');
+  assert.equal((await fetch(`${B}/archivos/${id}`)).status, 404, 'la ruta pública no lo entrega');
+  const visto = await ver(ven);
+  assert.equal(visto.status, 200);
+  assert.equal(visto.headers.get('cache-control'), 'private, no-store');
+  assert.equal((await ver(cli)).status, 200, 'el cliente ve su propio voucher');
+  assert.equal((await ver(await login('jramos'))).status, 404, 'Almacén no lo ve');
 });
 
 test('Cobranza: el voucher es opcional, y un archivo que no es imagen se rechaza', async () => {
@@ -230,4 +242,46 @@ test('Reporte V-03: pedidos pagados y con deuda por cobrar', async () => {
   assert.equal(r.s, 200, JSON.stringify(r.b));
   assert.ok(r.b.filas.length > 0);
   assert.ok(r.b.filas.every((f) => ['Pagado', 'Deuda por cobrar', 'Por entregar', 'Anulado'].includes(f.situacion)));
+});
+
+test('Comprobante real: una foto de 700 KB pasa el límite del servidor y queda privada', async () => {
+  const t = await login('cmedina');
+  const cli = sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago) VALUES ('T-${randomUUID().slice(0, 8)}', 'Cliente foto', 30, 1000, 'CREDITO') RETURNING id) SELECT id FROM c`);
+  sql(`INSERT INTO core.cuenta_por_cobrar (cliente_id, monto, saldo, estado, vence_en) VALUES ('${cli}', 100, 100, 'PENDIENTE', current_date)`);
+  const png = Buffer.concat([Buffer.from(PNG.split(',')[1], 'base64'), Buffer.alloc(700_000, 7)]);
+  const r = await api(t, 'POST', '/cobranza/recibos', { clienteId: cli, voucher: 'data:image/png;base64,' + png.toString('base64'), pagos: [{ monto: 10, medio: 'EFECTIVO' }] });
+  assert.equal(r.s, 201, JSON.stringify(r.b));
+});
+
+test('Excel real: .xlsx con números, texto escapado y sin fórmulas; exige sesión', async () => {
+  const cuerpo = { nombre: 'Prueba <ñ>', filas: [{ Cliente: '=HYPERLINK("x") & <b>', Total: 1234.5 }, { Cliente: 'Ana', Total: 2 }] };
+  const sin = await fetch(B + '/exportar/excel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+  assert.equal(sin.status, 401);
+  const r = await fetch(B + '/exportar/excel', { method: 'POST', headers: { Authorization: 'Bearer ' + await login('cmedina'), 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type'), /spreadsheetml/);
+  const zip = Buffer.from(await r.arrayBuffer());
+  assert.equal(zip.toString('latin1', 0, 2), 'PK');
+  // Se recorre el ZIP como lo hace Excel: por sus cabeceras locales.
+  const partes = new Map();
+  for (let i = 0; zip.readUInt32LE(i) === 0x04034b50;) {
+    const largo = zip.readUInt32LE(i + 18), n = zip.readUInt16LE(i + 26), inicio = i + 30 + n;
+    partes.set(zip.toString('utf8', i + 30, inicio), inflateRawSync(zip.subarray(inicio, inicio + largo)).toString('utf8'));
+    i = inicio + largo;
+  }
+  for (const p of ['[Content_Types].xml', 'xl/workbook.xml', 'xl/styles.xml']) assert.ok(partes.has(p), p);
+  const hoja = partes.get('xl/worksheets/sheet1.xml');
+  assert.ok(hoja.includes('<v>1234.5</v>'), 'los números son números');
+  assert.ok(hoja.includes('=HYPERLINK(&quot;x&quot;) &amp; &lt;b&gt;'), 'el texto va escapado');
+  assert.ok(!hoja.includes('<f>'), 'nunca hay fórmulas');
+  assert.ok(partes.get('xl/workbook.xml').includes('Prueba &lt;ñ&gt;'));
+});
+
+test('Instalación nueva: la semilla trae todos los permisos, menús y parámetros de las migraciones', async () => {
+  for (const p of ['clientes.avisar', 'despacho.ver', 'despacho.gestionar', 'gastos.registrar', 'promociones.gestionar', 'caja.rendiciones']) {
+    assert.equal(sql(`SELECT count(*) FROM core.permiso WHERE id = '${p}'`), '1', p);
+  }
+  assert.equal(sql("SELECT count(*) FROM core.rol WHERE id = 'DESPACHO'"), '1');
+  assert.equal(sql("SELECT count(*) FROM core.navegacion WHERE ruta IN ('/ventas/despacho','/ventas/gastos','/ventas/promociones','/ventas/avisos','/produccion/hoja','/gerencia/punto-equilibrio')"), '6');
+  assert.equal(sql("SELECT count(*) FROM core.parametro WHERE clave = 'hora_corte_mismo_dia'"), '1');
 });

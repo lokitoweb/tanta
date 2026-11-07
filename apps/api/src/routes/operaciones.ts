@@ -854,7 +854,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     CANCELADO: [],
   };
 
-  app.patch('/pedidos/:codigo/estado', { preHandler: autenticar }, async (req, reply) => {
+  app.patch('/pedidos/:codigo/estado', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     if (!exigir(req, reply, 'pedidos.gestionar')) return;
     const { codigo } = req.params as { codigo: string };
     const parseo = CambioPedido.safeParse(req.body);
@@ -879,7 +879,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (destino === 'DESPACHADO') return reply.code(409).send(error(409, 'USA_DESPACHO', 'Despacha el pedido con "Despachar y vender".'));
     let recibo: string | null = null;
     try {
-      const comprobanteId = voucher && pagos.length ? await guardarImagen(voucher, req.usuario!.id) : null;
+      const comprobanteId = voucher && pagos.length ? await guardarImagen(voucher, req.usuario!.id, true) : null;
       await tx(async (c) => {
         // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
         const cambio = await c.query(`UPDATE core.pedido SET estado = $1,

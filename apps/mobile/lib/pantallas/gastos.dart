@@ -4,6 +4,7 @@ import '../core/catalogos.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
 import 'cobranza.dart' show BotonVoucher;
+import 'visor_comprobante.dart';
 
 /// Gastos de caja chica (menú, gasolina, distribución): salen de la caja abierta y entran a la liquidación diaria.
 class Gastos extends StatefulWidget {
@@ -114,7 +115,10 @@ class _GastosState extends State<Gastos> {
               contentPadding: EdgeInsets.zero,
               title: Text('${g['concepto']}'),
               subtitle: Text('${g['codigo']} · ${fechaCorta('${g['fecha']}')} · ${g['tipoGastoNombre']} · autorizó ${g['autorizadoPor']}'),
-              trailing: Text(dinero((g['monto'] as num).toDouble()), style: const TextStyle(fontWeight: FontWeight.w700)),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                BotonComprobante(url: g['comprobanteUrl'] as String?),
+                Text(dinero((g['monto'] as num).toDouble()), style: const TextStyle(fontWeight: FontWeight.w700)),
+              ]),
             ),
         ]),
       );

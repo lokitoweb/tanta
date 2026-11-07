@@ -160,12 +160,13 @@ function mimeReal(b: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | null {
   return null;
 }
 
-export async function guardarImagen(base64: string, usuarioId: string): Promise<string> {
+/** `privado`: comprobantes; no salen por /archivos, solo por /comprobantes con sesión y permiso. */
+export async function guardarImagen(base64: string, usuarioId: string, privado = false): Promise<string> {
   const datos = Buffer.from(base64.replace(/^data:[^,]+,/, ''), 'base64');
   const mime = mimeReal(datos);
   if (!mime) throw Object.assign(new Error('Solo imágenes PNG, JPEG o WebP.'), { status: 415, codigo: 'IMAGEN_INVALIDA' });
   if (datos.length > 1_048_576) throw Object.assign(new Error('La imagen supera 1 MB.'), { status: 413, codigo: 'IMAGEN_GRANDE' });
-  const f = await uno<{ id: string }>('INSERT INTO core.archivo (mime, datos, creado_por) VALUES ($1,$2,$3) RETURNING id', [mime, datos, usuarioId]);
+  const f = await uno<{ id: string }>('INSERT INTO core.archivo (mime, datos, creado_por, privado) VALUES ($1,$2,$3,$4) RETURNING id', [mime, datos, usuarioId, privado]);
   return f!.id;
 }
 
@@ -316,13 +317,30 @@ export async function rutasSistema(app: FastifyInstance) {
   app.get('/archivos/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     if (!z.string().uuid().safeParse(id).success) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Archivo no encontrado.'));
-    const f = await uno<{ mime: string; datos: Buffer }>('SELECT mime, datos FROM core.archivo WHERE id = $1', [id]);
+    const f = await uno<{ mime: string; datos: Buffer }>('SELECT mime, datos FROM core.archivo WHERE id = $1 AND NOT privado', [id]);
     if (!f) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Archivo no encontrado.'));
     // El id es inmutable (un archivo nuevo = id nuevo): se puede cachear para siempre.
     return reply.header('Content-Type', f.mime).header('Cache-Control', 'public, max-age=31536000, immutable')
       .header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', "default-src 'none'")
       // Imágenes públicas que también carga la app móvil (otro origen): el resto del API sigue same-site.
       .header('Cross-Origin-Resource-Policy', 'cross-origin').send(f.datos);
+  });
+
+  // Comprobante privado: lo ve quien tiene permiso sobre su documento, o el cliente dueño del recibo. A los demás se les responde como si no existiera.
+  app.get('/comprobantes/:id', { preHandler: autenticar }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const u = req.usuario!;
+    const noExiste = () => reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Comprobante no encontrado.'));
+    if (!z.string().uuid().safeParse(id).success) return noExiste();
+    const permite = await uno(`SELECT 1 WHERE
+        EXISTS (SELECT 1 FROM core.recibo r LEFT JOIN core.usuario y ON y.id = $2 WHERE r.comprobante_id = $1 AND ($3 OR y.cliente_id = r.cliente_id))
+        OR EXISTS (SELECT 1 FROM core.pago_compra WHERE comprobante_id = $1 AND $4)
+        OR EXISTS (SELECT 1 FROM core.pago_costo WHERE comprobante_id = $1 AND ($5 OR usuario_id = $2))`,
+      [id, u.id, u.permisos.has('cobranza.ver'), ['compras.pagar', 'deudas.ver', 'compras.ver'].some((p) => u.permisos.has(p)), ['compras.pagar', 'costos.ver'].some((p) => u.permisos.has(p))]);
+    const f = permite && await uno<{ mime: string; datos: Buffer }>('SELECT mime, datos FROM core.archivo WHERE id = $1 AND privado', [id]);
+    if (!f) return noExiste();
+    return reply.header('Content-Type', f.mime).header('Cache-Control', 'private, no-store')
+      .header('X-Content-Type-Options', 'nosniff').header('Content-Security-Policy', "default-src 'none'").send(f.datos);
   });
 
   /* ------------------------------------------------- configuración (admin) */

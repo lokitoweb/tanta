@@ -74,7 +74,7 @@ export async function emitirRecibo(c: Cliente, d: { clienteId: string; cxcIds?: 
 
 export async function detalleRecibo(numero: string) {
   const r = await uno<Record<string, string>>(`SELECT r.numero, r.monto, r.medio, r.referencia, r.creado_en::text fecha, c.nombre cliente, u.nombre vendedor,
-      CASE WHEN r.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || r.comprobante_id END comprobante_url
+      CASE WHEN r.comprobante_id IS NULL THEN NULL ELSE '/comprobantes/' || r.comprobante_id END comprobante_url
     FROM core.recibo r JOIN core.cliente c ON c.id = r.cliente_id LEFT JOIN core.usuario u ON u.id = r.registrado_por WHERE r.numero = $1`, [numero]);
   const ap = await q<Record<string, string>>(`SELECT coalesce(v.serie || '-' || lpad(v.correlativo::text, 8, '0'), v.codigo, 'Saldo') documento, b.monto, x.saldo
     FROM core.cobranza b JOIN core.recibo r ON r.id = b.recibo_id JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id LEFT JOIN core.venta v ON v.id = x.venta_id
@@ -139,7 +139,7 @@ export async function rutasCobranza(app: FastifyInstance) {
     return { clienteId: d.clienteId, cxcIds: d.cxcIds, voucher: d.voucher, pagos, monto: Number(pagos.reduce((s, x) => s + x.monto, 0).toFixed(2)) };
   });
 
-  app.post('/cobranza/recibos', { preHandler: autenticar }, async (req, reply) => {
+  app.post('/cobranza/recibos', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     if (!exigir(req, reply, 'cobranza.registrar')) return;
     const p = NuevoRecibo.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pago inválido.'));
@@ -150,7 +150,7 @@ export async function rutasCobranza(app: FastifyInstance) {
       if (previo) return reply.code(201).send(await detalleRecibo(previo.numero));
     }
     try {
-      const comprobanteId = d.voucher ? await guardarImagen(d.voucher, req.usuario!.id) : null;
+      const comprobanteId = d.voucher ? await guardarImagen(d.voucher, req.usuario!.id, true) : null;
       const numero = await tx((c) => emitirRecibo(c, { ...d, usuarioId: req.usuario!.id, clave, comprobanteId }));
       const r = await detalleRecibo(numero);
       await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RECIBO_EMITIDO', entidad: 'recibo', entidadId: numero, detalle: { monto: d.monto, pagos: d.pagos.map((x) => ({ medio: x.medio, monto: x.monto })), documentos: r.aplicaciones.length }, ip: req.ip });
@@ -290,7 +290,7 @@ export async function rutasCobranza(app: FastifyInstance) {
       WHERE x.cliente_id = $1 AND x.estado <> 'ANULADA' ORDER BY x.creado_en DESC LIMIT 300`, [clienteId]);
     const pagos = await q<Record<string, string>>(`
       SELECT coalesce(r.numero, '—') recibo, (b.creado_en AT TIME ZONE 'America/Lima')::date::text fecha, b.medio, b.referencia, b.monto,
-             CASE WHEN r.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || r.comprobante_id END "comprobanteUrl"
+             CASE WHEN r.comprobante_id IS NULL THEN NULL ELSE '/comprobantes/' || r.comprobante_id END "comprobanteUrl"
       FROM core.cobranza b JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id LEFT JOIN core.recibo r ON r.id = b.recibo_id
       WHERE x.cliente_id = $1 ORDER BY b.creado_en DESC LIMIT 300`, [clienteId]);
     const doc = documentos.map((x) => ({ documento: x.documento, fecha: x.fecha, vence: x.vence, monto: num(x.monto), pagado: num(x.pagado), saldo: num(x.saldo), estado: x.estado, diasVencido: num(x.dias_vencido) }));

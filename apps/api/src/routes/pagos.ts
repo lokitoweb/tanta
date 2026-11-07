@@ -110,7 +110,7 @@ export async function rutasPagos(app: FastifyInstance) {
              CASE WHEN k.vence_pago IS NULL THEN NULL ELSE k.vence_pago - (now() AT TIME ZONE 'America/Lima')::date END dias,
              coalesce((SELECT json_agg(json_build_object('codigo', g.codigo, 'fecha', g.fecha_pago, 'caja', g.caja, 'medio', g.medio_pago, 'monto', g.monto,
                'nroOperacion', g.nro_operacion, 'estado', g.estado, 'autoriza', u.nombre, 'motivoAnulacion', g.motivo_anulacion, 'apertura', a.codigo,
-               'comprobanteUrl', CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || g.comprobante_id END) ORDER BY g.fecha_pago)
+               'comprobanteUrl', CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/comprobantes/' || g.comprobante_id END) ORDER BY g.fecha_pago)
                FROM core.pago_compra g JOIN core.usuario u ON u.id = g.usuario_autoriza LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id WHERE g.compra_id = k.id), '[]') pagos
       FROM core.compra k JOIN core.proveedor pr ON pr.id = k.proveedor_id
       WHERE k.estado = 'VERIFICADA' AND ($1::text IS NULL OR k.estado_pago = $1)
@@ -133,10 +133,10 @@ export async function rutasPagos(app: FastifyInstance) {
     comprobante: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
   });
   /** Guarda el comprobante (si llega) antes de la transacción: una imagen inválida no deja el pago a medias. */
-  const comprobante = async (img: string | null, usuarioId: string) => (img ? guardarImagen(img, usuarioId) : null);
+  const comprobante = async (img: string | null, usuarioId: string) => (img ? guardarImagen(img, usuarioId, true) : null);
 
   // RN-10 a RN-13: Administración decide caja y medio; varios pagos por compra; nunca más que el saldo.
-  app.post('/compras/:codigo/pagos', { preHandler: autenticar }, async (req, reply) => {
+  app.post('/compras/:codigo/pagos', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     if (!exigir(req, reply, 'compras.pagar')) return;
     const { codigo } = req.params as { codigo: string };
     const p = Pago.safeParse(req.body);
@@ -238,7 +238,7 @@ export async function rutasPagosCostos(app: FastifyInstance) {
       SELECT g.codigo, g.concepto, k.codigo cif, g.fecha_operacion::text fecha, g.periodo_mes, g.periodo_anio, g.monto, g.caja, a.codigo apertura,
              g.medio_pago, g.nro_operacion, g.estado, g.motivo_anulacion, u.nombre usuario, g.creado_en::text creado_en,
              g.tipo_gasto, t.nombre tipo_gasto_nombre, g.doc_tipo, g.doc_serie, g.doc_numero, g.autorizado_por,
-             CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || g.comprobante_id END comprobante_url
+             CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/comprobantes/' || g.comprobante_id END comprobante_url
       FROM core.pago_costo g JOIN core.usuario u ON u.id = g.usuario_id LEFT JOIN core.costo_indirecto k ON k.id = g.costo_indirecto_id
       LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id LEFT JOIN core.tipo_gasto t ON t.codigo = g.tipo_gasto
       WHERE ($1::int IS NULL OR g.periodo_anio = $1) AND ($2::int IS NULL OR g.periodo_mes = $2) AND ($3::uuid IS NULL OR g.usuario_id = $3)
@@ -249,7 +249,7 @@ export async function rutasPagosCostos(app: FastifyInstance) {
       tipoGasto: f.tipo_gasto, tipoGastoNombre: f.tipo_gasto_nombre, docTipo: f.doc_tipo, docSerie: f.doc_serie, docNumero: f.doc_numero, autorizadoPor: f.autorizado_por }));
   });
 
-  app.post('/pagos-costos', { preHandler: autenticar }, async (req, reply) => {
+  app.post('/pagos-costos', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     // Quien solo registra gastos paga desde caja chica y debe indicar tipo, glosa y autorización.
     const soloGastos = !req.usuario!.permisos.has('compras.pagar') && req.usuario!.permisos.has('gastos.registrar');
     if (!soloGastos && !exigir(req, reply, 'compras.pagar')) return;
@@ -264,7 +264,7 @@ export async function rutasPagosCostos(app: FastifyInstance) {
       if (previo) return reply.code(201).send({ codigo: previo.codigo, repetido: true });
     }
     return responder(reply, 'PAGO_INVALIDO', async () => {
-      const comprobanteId = d.comprobante ? await guardarImagen(d.comprobante, req.usuario!.id) : null;
+      const comprobanteId = d.comprobante ? await guardarImagen(d.comprobante, req.usuario!.id, true) : null;
       const r = await tx(async (c) => {
         const medio = await medioPago(c, d.medio, 'compras');
         if (d.tipoGasto && !(await c.query('SELECT 1 FROM core.tipo_gasto WHERE codigo = $1 AND activo', [d.tipoGasto])).rowCount) throw fallo(422, 'El tipo de gasto no existe o está inactivo.');

@@ -1,3 +1,4 @@
+import { VerComprobante } from '@/ui/VerComprobante';
 import { useEffect, useState } from 'react';
 import { api, urlApi } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
@@ -160,7 +161,7 @@ export function PagosCostos() {
                 <td>{p.concepto}{p.cif && <><br /><small className="t-muted">{p.cif}</small></>}</td>
                 <td>{p.fecha}</td>
                 <td>{p.caja === 'CHICA' ? `Caja chica ${p.apertura ?? ''}` : 'Caja grande'}</td>
-                <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}{p.comprobanteUrl && <> · <a href={urlApi(p.comprobanteUrl)} target="_blank" rel="noreferrer">comprobante</a></>}</td>
+                <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}{p.comprobanteUrl && <> · <VerComprobante url={p.comprobanteUrl} texto="comprobante" /></>}</td>
                 <td className="t-right">{money(p.monto)}</td><td>{p.usuario}</td>
                 <td>{p.estado === 'VIGENTE' ? <Insignia tono="ok">Vigente</Insignia> : <Insignia tono="neutral">Anulado</Insignia>}</td>
                 <td>{paga && p.estado === 'VIGENTE' && <Boton size="sm" onClick={() => setAnular({ codigo: p.codigo, motivo: '' })}>Anular</Boton>}</td>

@@ -96,6 +96,19 @@ interface Opciones {
   reintentar?: boolean;
 }
 
+/** Archivo binario con la sesión (comprobantes privados, Excel): GET, o POST si lleva cuerpo. */
+export async function apiArchivo(ruta: string, cuerpo?: unknown, reintentar = true): Promise<Blob> {
+  const acceso = leerAcceso();
+  const res = await fetch(`${BASE}${ruta}`, {
+    method: cuerpo === undefined ? 'GET' : 'POST', credentials: 'include',
+    headers: { ...(acceso ? { Authorization: `Bearer ${acceso}` } : {}), ...(cuerpo === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+  }).catch(() => { throw new ApiError(0, 'SIN_CONEXION', 'No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.'); });
+  if (res.status === 401 && reintentar && await refrescar()) return apiArchivo(ruta, cuerpo, false);
+  if (!res.ok) throw new ApiError(res.status, 'ARCHIVO', res.status === 404 ? 'No se encontró el archivo o no tienes acceso.' : `No se pudo obtener el archivo (${res.status}).`);
+  return res.blob();
+}
+
 export async function api<T>(ruta: string, op: Opciones = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, conIdempotencia, sinAuth, reintentar = true } = op;
 

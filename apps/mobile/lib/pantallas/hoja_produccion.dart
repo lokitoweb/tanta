@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/api.dart';
@@ -11,18 +9,18 @@ double _n(Object? v) => (v as num?)?.toDouble() ?? 0;
 String _c(num v) => v == v.roundToDouble() ? '${v.toInt()}' : v.toStringAsFixed(2);
 String _dma(String x) => x.split('-').reversed.join('/');
 
-/// Excel (CSV con BOM, como en la web): una columna por cliente.
+/// Excel real (.xlsx), igual que en la web: una columna por cliente. Se comparte con la app que el usuario elija.
 Future<void> compartirHoja(String nombre, List<Map<String, dynamic>> clientes, List<Map<String, dynamic>> filas) async {
-  String celda(Object? v) => '"${'${v ?? ''}'.replaceAll('"', '""')}"';
-  final lineas = [
-    ['Pedido', for (final c in clientes) c['nombre'], 'Pedido sistema'].map(celda).join(';'),
-    for (final f in filas)
-      [f['producto'], for (final c in clientes) (f['porCliente'] as Map)[c['id']] ?? '', f['pedido']].map(celda).join(';'),
-  ];
-  final bytes = Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode(lineas.join('\r\n'))]);
+  final bytes = await Api.instancia.excel(nombre, [
+    for (final f in filas) {
+      'Pedido': f['producto'],
+      for (final c in clientes) '${c['nombre']}': (f['porCliente'] as Map)[c['id']] ?? '',
+      'Pedido sistema': f['pedido'],
+    },
+  ]);
   await SharePlus.instance.share(ShareParams(
-    files: [XFile.fromData(bytes, mimeType: 'text/csv', name: '$nombre.csv')],
-    fileNameOverrides: ['$nombre.csv'],
+    files: [XFile.fromData(bytes, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: '$nombre.xlsx')],
+    fileNameOverrides: ['$nombre.xlsx'],
   ));
 }
 

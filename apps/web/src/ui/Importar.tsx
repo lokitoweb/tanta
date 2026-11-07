@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Boton } from './primitives';
 import { Dialogo } from './Dialogo';
-import { exportarExcel } from '@/core/exportar';
+import { exportarCsv } from '@/core/exportar';
 
 /**
  * Carga masiva desde la plantilla: Excel → «Guardar como CSV». El servidor valida cada fila y
@@ -76,7 +76,7 @@ export function Importar({ titulo, descripcion, plantilla, numericas, enviar, on
         acciones={<Boton onClick={() => setAbierto(false)}>Cerrar</Boton>}>
         <div className="form">
           <div className="campo-imagen">
-            <Boton icono="download" onClick={() => exportarExcel('plantilla', [plantilla])}>Descargar plantilla</Boton>
+            <Boton icono="download" onClick={() => exportarCsv('plantilla', [plantilla])}>Descargar plantilla</Boton>
             <label className="btn btn--primary btn--md">{cargando ? 'Importando…' : 'Elegir archivo CSV'}
               <input type="file" accept=".csv,text/csv" hidden disabled={cargando} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void subir(f); }} />
             </label>

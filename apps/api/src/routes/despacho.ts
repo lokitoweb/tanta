@@ -4,6 +4,7 @@ import { q, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { notificar } from './notificaciones.js';
+import { libroExcel } from '../xlsx.js';
 
 /**
  * Despacho y promociones. Cargar un pedido a la móvil es el mismo POST /ventas de siempre (descuenta stock, genera la
@@ -30,6 +31,17 @@ const Promocion = z.object({
 }).refine((d) => d.hasta >= d.desde, { message: 'La fecha final no puede ser anterior a la inicial.', path: ['hasta'] });
 
 export async function rutasDespacho(app: FastifyInstance) {
+  // Excel real desde cualquier pantalla: recibe solo las filas que el usuario ya ve y las devuelve como .xlsx; no consulta datos.
+  const Exportar = z.object({ nombre: z.string().trim().min(1).max(80), filas: z.array(z.record(z.string(), z.unknown())).max(100_000) });
+  app.post('/exportar/excel', { preHandler: autenticar, bodyLimit: 20_000_000, config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    const p = Exportar.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'No se pudo armar el Excel.'));
+    const archivo = p.data.nombre.replace(/[^\p{L}\p{N}._-]+/gu, '-');
+    return reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', `attachment; filename="${encodeURIComponent(archivo)}.xlsx"`)
+      .header('Cache-Control', 'no-store').send(libroExcel(p.data.nombre, p.data.filas));
+  });
+
   /* ---------------------------------------------------------------- despacho */
   app.get('/despacho', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'despacho.ver')) return;

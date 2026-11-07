@@ -1512,6 +1512,7 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .promo h3 { margin: 6px 0 2px; font-size: 0.9375rem; }
 .promo p { margin: 0; font-size: 0.8125rem; }
 .promo small { color: var(--tanta-text-secondary); }
+.visor-comprobante { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 8px; object-fit: contain; }
 .cobro-compras { border: 1px solid var(--tanta-border-subtle); border-radius: 8px; margin: 0; padding: 4px 12px 6px; max-height: 240px; overflow-y: auto; }
 .cobro-compras legend { padding: 0 6px; }
 .cobro-compra { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; font-size: 0.8125rem; }
