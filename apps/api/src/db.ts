@@ -17,6 +17,12 @@ export const pool = new Pool({
   // pg ya devuelve `numeric` como string: el dinero nunca pasa por un float.
 });
 
+// Si PostgreSQL se reinicia, pg emite 'error' en las conexiones abiertas: sin estos oyentes,
+// ese evento cierra todo el proceso. El pool abre conexiones nuevas cuando la base vuelve.
+const conexionPerdida = (e: Error) => console.error('Conexión con PostgreSQL perdida:', e.message);
+pool.on('error', conexionPerdida); // la conexión estaba libre
+pool.on('connect', (c) => c.on('error', conexionPerdida)); // la conexión estaba en uso (transacción)
+
 export type Cliente = pg.PoolClient;
 
 /** Ejecuta una consulta y devuelve las filas ya tipadas. */
@@ -39,7 +45,7 @@ export async function tx<T>(fn: (c: Cliente) => Promise<T>): Promise<T> {
     await c.query('COMMIT');
     return r;
   } catch (e) {
-    await c.query('ROLLBACK');
+    await c.query('ROLLBACK').catch(() => {}); // sin conexión ya no hay qué revertir: importa el error original
     throw e;
   } finally {
     c.release();

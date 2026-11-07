@@ -124,3 +124,10 @@ test('roles editables en caliente', async () => {
   await api(sa, 'PUT', '/sistema/roles/VENDEDOR/permisos', { permisos: actuales });
   assert.equal((await api(await login('cmedina'), 'GET', '/cxc')).s, 200);
 });
+
+test('si PostgreSQL corta las conexiones, la API sigue viva y se reconecta', async () => {
+  assert.ok(await login('cmedina'), 'hay conexiones abiertas');
+  sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'tanta-api' AND datname = current_database()");
+  await new Promise((ok) => setTimeout(ok, 500));
+  assert.ok(await login('cmedina'), 'la API responde con conexiones nuevas');
+});

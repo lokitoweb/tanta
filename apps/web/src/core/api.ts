@@ -124,7 +124,7 @@ export async function api<T>(ruta: string, op: Opciones = {}): Promise<T> {
 
   if (!res.ok) {
     let codigo = 'ERROR';
-    let mensaje = `Error ${res.status}`;
+    let mensaje = res.status >= 500 ? 'El sistema no está disponible por el momento. Intenta de nuevo en unos minutos.' : `Error ${res.status}`;
     try {
       const problema = await res.json();
       codigo = problema.codigo ?? codigo;
