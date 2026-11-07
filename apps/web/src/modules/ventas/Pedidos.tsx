@@ -1,3 +1,5 @@
+import { InputNumero } from '@/ui/InputNumero';
+import { ComprobanteInput } from '@/modules/almacen/Deudas';
 import { Paginador, usePaginado } from '@/ui/Paginador';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
@@ -9,6 +11,8 @@ import { Dialogo } from '@/ui/Dialogo';
 import { NuevoPedido } from './NuevoPedido';
 import { LineasPago, useMediosCobro, type LineaPago } from './LineasPago';
 
+const aNumero = (x: string): number | '' => (x === '' ? '' : Number(x));
+
 interface Item { productoId: string; producto: string; cantidad: number; precio: number; presentacion?: string | null; cantidadPresentacion?: number | null }
 /** «2 Paquete x 6 (12 unid)» o «5 unid». */
 const cantidadTxt = (i: Item) => (i.presentacion && i.cantidadPresentacion ? `${i.cantidadPresentacion} × ${i.presentacion.toLowerCase()} (${i.cantidad} unid)` : String(i.cantidad));
@@ -17,7 +21,7 @@ interface Pedido { id: string; codigo: string; clienteId: string; cliente: strin
 
 const ESTADOS: Record<string, { label: string; tono: 'info' | 'warn' | 'ok' | 'danger' | 'neutral' }> = {
   REGISTRADO: { label: 'Por confirmar', tono: 'neutral' }, CONFIRMADO: { label: 'Confirmado', tono: 'info' },
-  EN_PRODUCCION: { label: 'En producción', tono: 'warn' }, LISTO: { label: 'Listo', tono: 'info' }, DESPACHADO: { label: 'Despachado', tono: 'info' },
+  EN_PRODUCCION: { label: 'En producción', tono: 'warn' }, LISTO: { label: 'Listo', tono: 'info' }, DESPACHADO: { label: 'En tránsito', tono: 'info' },
   ENTREGADO: { label: 'Entregado', tono: 'ok' }, RECHAZADO: { label: 'Rechazado', tono: 'danger' }, CANCELADO: { label: 'Cancelado', tono: 'danger' },
 };
 // RN-26: siguiente paso natural. Un confirmado con stock puede pasar directo a Listo (reserva el stock).
@@ -39,7 +43,9 @@ export function Pedidos() {
   const [pago, setPago] = useState({ descuento: '0' });
   const { lineaNueva, revisar, aPagos, nombre: nombreMedio } = useMediosCobro();
   // Entregar y cobrar: lo que paga al recibir (una o varias formas); «no pagó» = todo queda como deuda.
-  const [entrega, setEntrega] = useState<{ lineas: LineaPago[]; nota: string } | null>(null);
+  const [entrega, setEntrega] = useState<{ lineas: LineaPago[]; nota: string; voucher: string | null } | null>(null);
+  // El vendedor corrige lo pedido antes de producción (el total lo recalcula el servidor).
+  const [corregir, setCorregir] = useState<Array<{ productoId: string; producto: string; cantidad: string }> | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [motivo, setMotivo] = useState<{ destino: 'RECHAZADO' | 'CANCELADO' | 'OBSERVAR'; texto: string } | null>(null);
@@ -91,10 +97,15 @@ export function Pedidos() {
   const entregar = (p: Pedido, conPago: boolean) => accion(async () => {
     const pagos = conPago && entrega ? aPagos(entrega.lineas) : [];
     const r = await api<{ recibo: { numero: string } | null; quedaPorCobrar: number }>(`/pedidos/${p.codigo}/estado`, {
-      method: 'PATCH', body: { estado: 'ENTREGADO', motivo: '', observaciones: entrega?.nota.trim() ?? '', pagos } });
+      method: 'PATCH', body: { estado: 'ENTREGADO', motivo: '', observaciones: entrega?.nota.trim() ?? '', pagos, voucher: pagos.length ? entrega?.voucher ?? null : null } });
     return `${p.codigo} entregado${r.recibo ? ` · recibo ${r.recibo.numero} (${pagos.map((x) => `${nombreMedio(x.medio).toLowerCase()} ${money(x.monto)}`).join(' + ')})` : ' · sin pago'}${r.quedaPorCobrar > 0.009 ? ` · queda ${money(r.quedaPorCobrar)} por cobrar en Cobranza` : ' · saldado'}`;
   });
 
+  const guardarCorreccion = (p: Pedido) => accion(async () => {
+    const r = await api<{ total: number }>(`/pedidos/${p.codigo}/items`, { method: 'PUT', body: { items: corregir!.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad) })) } });
+    setCorregir(null);
+    return `${p.codigo} corregido · nuevo total ${money(r.total)} · el cliente recibió el aviso`;
+  });
   const gestiona = puede('pedidos.gestionar');
   const pagPedidos = usePaginado(filas, 25);
   return (
@@ -110,7 +121,7 @@ export function Pedidos() {
       <div className="grid grid--auto">
         <Tarjeta className="mini-stat"><span>Por producir</span><b>{porEstado('EN_PRODUCCION') + porEstado('REGISTRADO')}</b></Tarjeta>
         <Tarjeta className="mini-stat"><span>Listos para despacho</span><b>{porEstado('LISTO')}</b></Tarjeta>
-        <Tarjeta className="mini-stat"><span>En reparto</span><b>{porEstado('DESPACHADO')}</b></Tarjeta>
+        <Tarjeta className="mini-stat"><span>En tránsito</span><b>{porEstado('DESPACHADO')}</b></Tarjeta>
         <Tarjeta className="mini-stat"><span>Entregados</span><b>{porEstado('ENTREGADO')}</b></Tarjeta>
       </div>
 
@@ -148,13 +159,15 @@ export function Pedidos() {
       {nuevo && <NuevoPedido elegirCliente={puede('pedidos.gestionar')} onCerrar={(c) => { setNuevo(false); if (c) { setAviso({ tono: 'ok', texto: `Pedido ${c} registrado` }); void cargar(); } }} />}
 
       <Dialogo abierto={sel !== null} titulo={`Pedido ${sel?.codigo ?? ''}`} descripcion={sel ? `${sel.cliente} · entrega ${sel.fecha_entrega}${sel.hora_entrega ? ' ' + sel.hora_entrega : ''} · ${ESTADOS[sel.estado]?.label}` : ''}
-        onCerrar={() => setSel(null)}
+        onCerrar={() => { setSel(null); setCorregir(null); }}
         acciones={sel && gestiona ? <>
+          {['REGISTRADO', 'CONFIRMADO'].includes(sel.estado) && !corregir && <Boton onClick={() => setCorregir(sel.items.map((i) => ({ productoId: i.productoId, producto: i.producto, cantidad: String(i.cantidad) })))} disabled={ocupado}>Corregir</Boton>}
+          {corregir && <Boton variant="primary" onClick={() => void guardarCorreccion(sel)} disabled={ocupado || !corregir.length || corregir.some((i) => !(Number(i.cantidad) > 0))}>Guardar corrección</Boton>}
           {['REGISTRADO', 'CONFIRMADO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'OBSERVAR', texto: '' })} disabled={ocupado}>Observar</Boton>}
           {sel.estado === 'REGISTRADO' && <Boton onClick={() => setMotivo({ destino: 'RECHAZADO', texto: '' })} disabled={ocupado}>Rechazar</Boton>}
           {['CONFIRMADO', 'EN_PRODUCCION', 'LISTO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'CANCELADO', texto: '' })} disabled={ocupado}>Anular pedido</Boton>}
           {SIGUIENTE[sel.estado] && <Boton variant="primary" onClick={() => void avanzar(sel, SIGUIENTE[sel.estado])} disabled={ocupado}>{sel.estado === 'REGISTRADO' ? 'Confirmar' : 'Marcar listo'}</Boton>}
-          {sel.estado === 'DESPACHADO' && !entrega && <Boton variant="primary" onClick={() => setEntrega({ lineas: [lineaNueva(debeEntrega(sel))], nota: '' })} disabled={ocupado}>Entregar y cobrar</Boton>}
+          {sel.estado === 'DESPACHADO' && !entrega && <Boton variant="primary" onClick={() => setEntrega({ lineas: [lineaNueva(debeEntrega(sel))], nota: '', voucher: null })} disabled={ocupado}>Entregar y cobrar</Boton>}
           {sel.estado === 'DESPACHADO' && entrega && <>
             <Boton onClick={() => void entregar(sel, false)} disabled={ocupado}>No pagó: dejar como deuda</Boton>
             {puede('cobranza.registrar') && <Boton variant="primary" onClick={() => void entregar(sel, true)} disabled={ocupado || !!revisionEntrega?.problema}>Entregar y cobrar {money(revisionEntrega?.suma ?? 0)}</Boton>}
@@ -167,7 +180,13 @@ export function Pedidos() {
               {sel.items.map((i, k) => <tr key={k}><td>{i.producto}</td><td className="t-right">{i.presentacion ? cantidadTxt(i) : num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
               <tr><td><strong>Total</strong></td><td /><td className="t-right"><strong>{money(sel.total)}</strong></td></tr>
             </tbody></table>
-            <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Delivery a: ${sel.direccion}` : 'Recojo en tienda'}{sel.porCobrar != null ? ` · por cobrar ${money(sel.porCobrar)}` : ' · se cobra al entregar'}</p>
+            {corregir && <div className="form form--2col form--dialogo">
+              {corregir.map((i, k) => <div key={i.productoId} className="pago-linea field--ancho">
+                <label className="field"><span className="field__label">{i.producto}</span><InputNumero className="field__input" valor={aNumero(i.cantidad)} onValor={(n) => { const v = String(n); setCorregir(corregir.map((x, j) => (j === k ? { ...x, cantidad: v } : x))); }} /></label>
+                {corregir.length > 1 && <button type="button" className="pago-linea__quitar" aria-label={`Quitar ${i.producto}`} onClick={() => setCorregir(corregir.filter((_, j) => j !== k))}>×</button>}
+              </div>)}
+            </div>}
+            <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Entrega en: ${sel.direccion}` : 'Recojo en tienda'}{(sel as Pedido & { vehiculo?: string | null }).vehiculo ? ` · móvil ${(sel as Pedido & { vehiculo?: string | null }).vehiculo}` : ''}{sel.porCobrar != null ? ` · por cobrar ${money(sel.porCobrar)}` : ' · se cobra al entregar'}</p>
             {sel.observaciones && <p className="dialogo__nota">Nota del cliente: {sel.observaciones}</p>}
             {sel.observacion && <p className="dialogo__nota t-warn">Observación enviada al cliente: {sel.observacion}</p>}
             {sel.motivo && <p className="dialogo__nota">Motivo: {sel.motivo}</p>}
@@ -196,6 +215,7 @@ export function Pedidos() {
             {sel.estado === 'DESPACHADO' && entrega && (
               <div className="form form--2col form--dialogo">
                 <p className="dialogo__nota field--ancho">Debe {money(debeEntrega(sel))}. Registra lo que pagó al recibir; lo que falte queda como deuda en Cobranza.</p>
+                {puede('cobranza.registrar') && <ComprobanteInput valor={entrega.voucher} onChange={(voucher) => setEntrega({ ...entrega, voucher })} onError={(texto) => setAviso({ tono: 'danger', texto })} />}
                 {puede('cobranza.registrar') && <LineasPago lineas={entrega.lineas} onChange={(lineas) => setEntrega({ ...entrega, lineas })} debe={debeEntrega(sel)} />}
                 <label className="field field--ancho"><span className="field__label">Nota de la entrega (quién recibió, hora…)</span>
                   <input className="field__input" maxLength={200} value={entrega.nota} onChange={(e) => setEntrega({ ...entrega, nota: e.target.value })} /></label>

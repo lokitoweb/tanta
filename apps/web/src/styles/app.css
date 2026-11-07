@@ -1504,6 +1504,14 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .avisos-enviados li + li { border-top: 1px solid var(--tanta-border-subtle); }
 .avisos-enviados p { margin: 2px 0 4px; color: var(--tanta-text-secondary); }
 .avisos-enviados small { color: var(--tanta-text-secondary); }
+.liquidacion { margin-top: 14px; font-size: 0.8125rem; }
+.liquidacion > b { display: block; margin-bottom: 6px; }
+.hoja__titulo { margin: 16px 0 6px; font-size: 0.875rem; }
+.promos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.promo { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--tanta-border-subtle); border-radius: 12px; background: var(--tanta-state-ok-bg, var(--tanta-neutral-50)); }
+.promo h3 { margin: 6px 0 2px; font-size: 0.9375rem; }
+.promo p { margin: 0; font-size: 0.8125rem; }
+.promo small { color: var(--tanta-text-secondary); }
 .cobro-compras { border: 1px solid var(--tanta-border-subtle); border-radius: 8px; margin: 0; padding: 4px 12px 6px; max-height: 240px; overflow-y: auto; }
 .cobro-compras legend { padding: 0 6px; }
 .cobro-compra { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer; font-size: 0.8125rem; }

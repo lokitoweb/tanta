@@ -1,3 +1,4 @@
+import { urlApi } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { fechaLarga, money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
@@ -7,7 +8,7 @@ export interface EstadoCuenta {
   cliente: { nombre: string; documento: string; condicion: string; limiteCredito: number; diasCredito: number };
   saldo: number; vencido: number;
   documentos: Array<{ documento: string; fecha: string; vence: string; monto: number; pagado: number; saldo: number; estado: string; diasVencido: number }>;
-  pagos: Array<{ recibo: string; fecha: string; medio: string; referencia: string | null; monto: number }>;
+  pagos: Array<{ recibo: string; fecha: string; medio: string; referencia: string | null; monto: number; comprobanteUrl?: string | null }>;
 }
 
 /** 2026-11-05 → 05/11/2026 (las fechas llegan como texto de Postgres, sin hora: no pasan por Date para no correr el día). */
@@ -86,7 +87,7 @@ export function DialogoEstadoCuenta({ estado, onCerrar }: { estado: EstadoCuenta
           <div className="table-wrap"><table className="table table--compacta edc__tabla">
             <thead><tr><th>Recibo</th><th>Fecha</th><th>Medio</th><th>N.° de operación</th><th className="t-right">Monto</th></tr></thead>
             <tbody>{pagos.map((p, i) => (
-              <tr key={i}><td className="t-mono">{p.recibo}</td><td>{dma(p.fecha)}</td><td className="edc__medio">{p.medio.toLowerCase()}</td>
+              <tr key={i}><td className="t-mono">{p.recibo}{p.comprobanteUrl && <> · <a className="enlace" href={urlApi(p.comprobanteUrl)} target="_blank" rel="noreferrer">voucher</a></>}</td><td>{dma(p.fecha)}</td><td className="edc__medio">{p.medio.toLowerCase()}</td>
                 <td className="t-muted">{p.referencia || '—'}</td><td className="t-right">{money(p.monto)}</td></tr>
             ))}</tbody>
             <tfoot><tr><td colSpan={4}>Total pagado</td><td className="t-right">{money(suma(pagos, (p) => p.monto))}</td></tr></tfoot>

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { q, tx, uno, num } from '../db.js';
+import { q, tx, uno, num, type Cliente } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
@@ -9,6 +9,7 @@ import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
 import { LineaPago, emitirRecibo, detalleRecibo } from './cobranza.js';
 import { falloImagen, ImagenProducto } from './maestros.js';
+import { liberarPromos, reservarListo } from './flujo.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -49,6 +50,152 @@ export async function presentacionesDe(c: import('pg').PoolClient, items: Array<
     [pedidas.map((i) => i.productoId), pedidas.map((i) => i.presentacion!)]);
   return new Map(r.rows.map((x) => [`${x.producto_id}|${x.codigo}`, {
     equivalencia: Number(x.equivalencia), precio: Number(x.precio_con_igv), nombre: x.nombre, insumoId: x.insumo_id, cantidadInsumo: Number(x.cantidad_insumo ?? 0) }]));
+}
+
+export interface DatosCierre { codigo: string; cantidadProducida: number; unidadesMerma: number; mermaReal: number; motivoMerma: string; usuarioId: string;
+  consumoReal?: Array<{ insumoId: string; cantidad: number }>; motivoMermaTipo?: string; horasHombreReal?: number; horasHornoReal?: number }
+
+/** Cierra una OP dentro de la transacción `c`: ingreso del pan, costo real y, sin requisición, descarga de insumos. */
+export async function cierreOP(c: Cliente, e: DatosCierre) {
+  const { codigo, cantidadProducida, unidadesMerma, mermaReal, motivoMerma } = e;
+  const d = e;
+    const r = await c.query<{ id: string; estado: string; producto_id: string; producto: string; receta_id: string; cantidad: string; lotes: string | null; masa_kg: string | null }>(
+      'SELECT id, estado, producto_id, producto, receta_id, cantidad, lotes, masa_kg FROM core.orden_produccion WHERE codigo = $1 FOR UPDATE',
+      [codigo],
+    );
+    const op = r.rows[0];
+    if (!op) throw Object.assign(new Error('OP_NO_EXISTE'), { status: 404 });
+    if (op.estado !== 'EN_PROCESO') {
+      throw Object.assign(new Error(op.estado === 'PENDIENTE' ? 'Primero inicia la orden (Pendiente → En proceso).' : 'OP_ESTADO_INVALIDO'), { status: 409 });
+    }
+
+    // Con requisición (RN-27) los insumos ya salieron cuando Almacén los entregó: aquí no se descuentan.
+    const requisicion = (await c.query<{ id: string; estado: string; codigo: string }>('SELECT id, estado, codigo FROM core.requisicion WHERE op_id = $1', [op.id])).rows[0];
+    if (requisicion && requisicion.estado === 'PENDIENTE') {
+      throw Object.assign(new Error(`Almacén aún no entrega los insumos (${requisicion.codigo}).`), { status: 409 });
+    }
+    const receta = (await c.query<{ unidades_teoricas: string; unidades_esperadas: string; horas_hombre_lote: string; horas_horno_lote: string; vida_util_dias: number | null }>(
+      `SELECT r.unidades_teoricas, r.unidades_esperadas, p.horas_hombre_lote, p.horas_horno_lote, p.vida_util_dias
+       FROM core.receta r JOIN core.producto p ON p.id = r.producto_id WHERE r.id = $1`, [op.receta_id])).rows[0];
+    const lotes = op.lotes !== null ? Number(op.lotes) : cantidadProducida / Math.max(Number(receta?.unidades_esperadas ?? 0), 1e-9);
+    // Unidades buenas + merma no superan lo preparado (lotes × unidades teóricas), con 5 % de holgura.
+    if (op.lotes !== null && cantidadProducida + unidadesMerma > lotes * Number(receta?.unidades_teoricas ?? 0) * 1.05 + 1) {
+      throw Object.assign(new Error(`Buenas + merma (${cantidadProducida + unidadesMerma}) superan lo preparado (${Math.round(lotes * Number(receta?.unidades_teoricas ?? 0))} unidades).`), { status: 422 });
+    }
+    const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
+      `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento * core.factor_inventario(d.insumo_id) AS cantidad
+       FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
+      [op.receta_id],
+    );
+
+    const consumidos: Array<{ insumo: string; cantidad: number }> = [];
+    let costoInsumos = 0;
+    if (requisicion) {
+      costoInsumos = Number((await c.query<{ c: string }>('SELECT coalesce(sum(costo_entregado), 0) c FROM core.requisicion_detalle WHERE requisicion_id = $1', [requisicion.id])).rows[0].c);
+      for (const x of d.consumoReal ?? []) {
+        await c.query('UPDATE core.requisicion_detalle SET cant_real_usada = $3 WHERE requisicion_id = $1 AND insumo_id = $2', [requisicion.id, x.insumoId, x.cantidad.toFixed(6)]);
+      }
+    }
+    for (const l of requisicion ? [] : lineas.rows) {
+      const cantidadUsada = Number(l.cantidad) * cantidadProducida * (1 + mermaReal);
+      const ins = await c.query<{ cpp: string; saldo: string }>(
+        `SELECT i.cpp, coalesce((SELECT m.saldo_cantidad FROM core.movimiento_inventario m
+                                 WHERE m.insumo_id = i.id ORDER BY m.id DESC LIMIT 1), i.stock) AS saldo
+         FROM core.insumo i WHERE i.id = $1 FOR UPDATE`,
+        [l.insumo_id],
+      );
+      const cpp = Number(ins.rows[0]?.cpp ?? 0);
+      const saldoActual = Number(ins.rows[0]?.saldo ?? 0);
+      const nuevoSaldo = saldoActual - cantidadUsada;
+      // Política estricta: nunca se entrega lo que no existe. La base también lo impide
+      // con ck_insumo_stock_no_negativo; aquí se devuelve un error de negocio legible.
+      if (nuevoSaldo < -0.000001) {
+        throw Object.assign(
+          new Error(`STOCK_INSUFICIENTE:${l.insumo} (disponible ${saldoActual.toFixed(2)}, requerido ${cantidadUsada.toFixed(2)})`),
+          { status: 409 },
+        );
+      }
+      const valor = -Number((cantidadUsada * cpp).toFixed(4));
+      const valorSaldo = Number((-valor + Number((saldoActual * cpp).toFixed(4))).toFixed(4));
+
+      await c.query(
+        `INSERT INTO core.movimiento_inventario
+           (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
+         VALUES ('CONSUMO_OP','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8)`,
+        [l.insumo_id, codigo, (-cantidadUsada).toFixed(6), cpp.toFixed(6), valor.toFixed(4),
+          nuevoSaldo.toFixed(6), valorSaldo.toFixed(4), cpp.toFixed(6)],
+      );
+      await c.query('UPDATE core.insumo SET stock = $1, actualizado_en = now() WHERE id = $2',
+        [nuevoSaldo.toFixed(6), l.insumo_id]);
+      consumidos.push({ insumo: l.insumo, cantidad: Number(cantidadUsada.toFixed(3)) });
+      costoInsumos += -valor;
+    }
+
+    // RN-28: costo real de la OP = insumos entregados + mano de obra + CIF con las tarifas vigentes.
+    const t = (await c.query<Record<string, string | null>>(`SELECT
+        (SELECT costo_hora_hombre FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) hora,
+        (SELECT tarifa_hora_horno FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) th,
+        (SELECT tarifa_kg_masa FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tk,
+        (SELECT tarifa_unidad FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tu`)).rows[0];
+    // Sin horas hombre propias, la mano de obra se paga por el tiempo de horneado (criterio del dueño).
+    const horasHombre = d.horasHombreReal ?? lotes * (Number(receta?.horas_hombre_lote ?? 0) || Number(receta?.horas_horno_lote ?? 0));
+    const horasHorno = d.horasHornoReal ?? lotes * Number(receta?.horas_horno_lote ?? 0);
+    const costoMo = horasHombre * Number(t.hora ?? 0);
+    const costoCif = horasHorno * Number(t.th ?? 0) + Number(op.masa_kg ?? 0) * Number(t.tk ?? 0) + cantidadProducida * Number(t.tu ?? 0);
+    const costoTotal = costoInsumos + costoMo + costoCif;
+
+    // ingreso del producto terminado al stock
+    const pr = await c.query<{ costo_unitario: string; stock: string; insumo_id: string | null }>(
+      'SELECT costo_unitario, stock, insumo_id FROM core.producto WHERE id = $1 FOR UPDATE', [op.producto_id],
+    );
+    // El pan entra al almacén a su costo real (costo de la OP ÷ unidades buenas); sin unidades, al estándar.
+    const costoProd = cantidadProducida > 0 ? costoTotal / cantidadProducida : Number(pr.rows[0]?.costo_unitario ?? 0);
+    const insumoIntermedio = pr.rows[0]?.insumo_id ?? null;
+
+    if (insumoIntermedio) {
+      // PRO-13: un intermedio (masa madre) entra al almacén de INSUMOS con costo promedio ponderado.
+      const ins = (await c.query<{ stock: string; cpp: string }>('SELECT stock, cpp FROM core.insumo WHERE id = $1 FOR UPDATE', [insumoIntermedio])).rows[0];
+      const st = Math.max(0, Number(ins.stock)), cppAnt = Number(ins.cpp);
+      const nuevoStock = st + cantidadProducida;
+      const nuevoCpp = nuevoStock > 0 ? (st * cppAnt + cantidadProducida * costoProd) / nuevoStock : costoProd;
+      await c.query(
+        `INSERT INTO core.movimiento_inventario
+           (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por)
+         VALUES ('INGRESO_PRODUCCION','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [insumoIntermedio, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6), (cantidadProducida * costoProd).toFixed(4),
+          nuevoStock.toFixed(6), (nuevoStock * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), e.usuarioId],
+      );
+      await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3', [nuevoStock.toFixed(6), nuevoCpp.toFixed(6), insumoIntermedio]);
+    } else {
+      const stockProd = Number(pr.rows[0]?.stock ?? 0);
+      const nuevoStockProd = stockProd + cantidadProducida;
+      await c.query(
+        `INSERT INTO core.movimiento_inventario
+           (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,lote,vence_en)
+         VALUES ('INGRESO_PRODUCCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$8,$2,(now() AT TIME ZONE 'America/Lima')::date + $9::int)`,
+        [op.producto_id, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6),
+          (cantidadProducida * costoProd).toFixed(4), nuevoStockProd.toFixed(6),
+          ((stockProd + cantidadProducida) * costoProd).toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
+      );
+      await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStockProd.toFixed(6), op.producto_id]);
+    }
+
+    await c.query(
+      `UPDATE core.orden_produccion
+       SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3, motivo_merma = $4,
+           unidades_buenas = $3, unidades_merma = $5, motivo_merma_tipo = $6, horas_hombre_real = $7, horas_horno_real = $8,
+           costo_total = $9, costo_unitario_real = $10,
+           fecha_produccion = (now() AT TIME ZONE 'America/Lima')::date,
+           vence_en = (now() AT TIME ZONE 'America/Lima')::date + $11::int
+       WHERE id = $1`,
+      [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma, unidadesMerma.toFixed(4), d.motivoMermaTipo ?? null,
+        horasHombre.toFixed(3), horasHorno.toFixed(3), costoTotal.toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
+    );
+    await c.query('SELECT core.recalcular_costos()');
+
+    return { codigo, estado: 'TERMINADA', producto: op.producto, cantidadProducida, unidadesMerma, consumidos,
+      costoTotal: Number(costoTotal.toFixed(2)), costoUnitario: Number(costoProd.toFixed(4)),
+      desglose: { insumos: Number(costoInsumos.toFixed(2)), manoDeObra: Number(costoMo.toFixed(2)), cif: Number(costoCif.toFixed(2)) } };
 }
 
 export async function rutasOperaciones(app: FastifyInstance) {
@@ -173,145 +320,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
 
     try {
       const resultado = await conIdempotencia(clave, req.usuario!.id, `op-cerrar:${codigo}`, () =>
-        tx(async (c) => {
-          const r = await c.query<{ id: string; estado: string; producto_id: string; producto: string; receta_id: string; cantidad: string; lotes: string | null; masa_kg: string | null }>(
-            'SELECT id, estado, producto_id, producto, receta_id, cantidad, lotes, masa_kg FROM core.orden_produccion WHERE codigo = $1 FOR UPDATE',
-            [codigo],
-          );
-          const op = r.rows[0];
-          if (!op) throw Object.assign(new Error('OP_NO_EXISTE'), { status: 404 });
-          if (op.estado !== 'EN_PROCESO') {
-            throw Object.assign(new Error(op.estado === 'PENDIENTE' ? 'Primero inicia la orden (Pendiente → En proceso).' : 'OP_ESTADO_INVALIDO'), { status: 409 });
-          }
-
-          // Con requisición (RN-27) los insumos ya salieron cuando Almacén los entregó: aquí no se descuentan.
-          const requisicion = (await c.query<{ id: string; estado: string; codigo: string }>('SELECT id, estado, codigo FROM core.requisicion WHERE op_id = $1', [op.id])).rows[0];
-          if (requisicion && requisicion.estado === 'PENDIENTE') {
-            throw Object.assign(new Error(`Almacén aún no entrega los insumos (${requisicion.codigo}).`), { status: 409 });
-          }
-          const receta = (await c.query<{ unidades_teoricas: string; unidades_esperadas: string; horas_hombre_lote: string; horas_horno_lote: string; vida_util_dias: number | null }>(
-            `SELECT r.unidades_teoricas, r.unidades_esperadas, p.horas_hombre_lote, p.horas_horno_lote, p.vida_util_dias
-             FROM core.receta r JOIN core.producto p ON p.id = r.producto_id WHERE r.id = $1`, [op.receta_id])).rows[0];
-          const lotes = op.lotes !== null ? Number(op.lotes) : cantidadProducida / Math.max(Number(receta?.unidades_esperadas ?? 0), 1e-9);
-          // Unidades buenas + merma no superan lo preparado (lotes × unidades teóricas), con 5 % de holgura.
-          if (op.lotes !== null && cantidadProducida + unidadesMerma > lotes * Number(receta?.unidades_teoricas ?? 0) * 1.05 + 1) {
-            throw Object.assign(new Error(`Buenas + merma (${cantidadProducida + unidadesMerma}) superan lo preparado (${Math.round(lotes * Number(receta?.unidades_teoricas ?? 0))} unidades).`), { status: 422 });
-          }
-          const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
-            `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento * core.factor_inventario(d.insumo_id) AS cantidad
-             FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
-            [op.receta_id],
-          );
-
-          const consumidos: Array<{ insumo: string; cantidad: number }> = [];
-          let costoInsumos = 0;
-          if (requisicion) {
-            costoInsumos = Number((await c.query<{ c: string }>('SELECT coalesce(sum(costo_entregado), 0) c FROM core.requisicion_detalle WHERE requisicion_id = $1', [requisicion.id])).rows[0].c);
-            for (const x of d.consumoReal ?? []) {
-              await c.query('UPDATE core.requisicion_detalle SET cant_real_usada = $3 WHERE requisicion_id = $1 AND insumo_id = $2', [requisicion.id, x.insumoId, x.cantidad.toFixed(6)]);
-            }
-          }
-          for (const l of requisicion ? [] : lineas.rows) {
-            const cantidadUsada = Number(l.cantidad) * cantidadProducida * (1 + mermaReal);
-            const ins = await c.query<{ cpp: string; saldo: string }>(
-              `SELECT i.cpp, coalesce((SELECT m.saldo_cantidad FROM core.movimiento_inventario m
-                                       WHERE m.insumo_id = i.id ORDER BY m.id DESC LIMIT 1), i.stock) AS saldo
-               FROM core.insumo i WHERE i.id = $1 FOR UPDATE`,
-              [l.insumo_id],
-            );
-            const cpp = Number(ins.rows[0]?.cpp ?? 0);
-            const saldoActual = Number(ins.rows[0]?.saldo ?? 0);
-            const nuevoSaldo = saldoActual - cantidadUsada;
-            // Política estricta: nunca se entrega lo que no existe. La base también lo impide
-            // con ck_insumo_stock_no_negativo; aquí se devuelve un error de negocio legible.
-            if (nuevoSaldo < -0.000001) {
-              throw Object.assign(
-                new Error(`STOCK_INSUFICIENTE:${l.insumo} (disponible ${saldoActual.toFixed(2)}, requerido ${cantidadUsada.toFixed(2)})`),
-                { status: 409 },
-              );
-            }
-            const valor = -Number((cantidadUsada * cpp).toFixed(4));
-            const valorSaldo = Number((-valor + Number((saldoActual * cpp).toFixed(4))).toFixed(4));
-
-            await c.query(
-              `INSERT INTO core.movimiento_inventario
-                 (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp)
-               VALUES ('CONSUMO_OP','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8)`,
-              [l.insumo_id, codigo, (-cantidadUsada).toFixed(6), cpp.toFixed(6), valor.toFixed(4),
-                nuevoSaldo.toFixed(6), valorSaldo.toFixed(4), cpp.toFixed(6)],
-            );
-            await c.query('UPDATE core.insumo SET stock = $1, actualizado_en = now() WHERE id = $2',
-              [nuevoSaldo.toFixed(6), l.insumo_id]);
-            consumidos.push({ insumo: l.insumo, cantidad: Number(cantidadUsada.toFixed(3)) });
-            costoInsumos += -valor;
-          }
-
-          // RN-28: costo real de la OP = insumos entregados + mano de obra + CIF con las tarifas vigentes.
-          const t = (await c.query<Record<string, string | null>>(`SELECT
-              (SELECT costo_hora_hombre FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) hora,
-              (SELECT tarifa_hora_horno FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) th,
-              (SELECT tarifa_kg_masa FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tk,
-              (SELECT tarifa_unidad FROM core.periodo_costos WHERE estado <> 'CERRADO' ORDER BY anio DESC, mes DESC LIMIT 1) tu`)).rows[0];
-          // Sin horas hombre propias, la mano de obra se paga por el tiempo de horneado (criterio del dueño).
-          const horasHombre = d.horasHombreReal ?? lotes * (Number(receta?.horas_hombre_lote ?? 0) || Number(receta?.horas_horno_lote ?? 0));
-          const horasHorno = d.horasHornoReal ?? lotes * Number(receta?.horas_horno_lote ?? 0);
-          const costoMo = horasHombre * Number(t.hora ?? 0);
-          const costoCif = horasHorno * Number(t.th ?? 0) + Number(op.masa_kg ?? 0) * Number(t.tk ?? 0) + cantidadProducida * Number(t.tu ?? 0);
-          const costoTotal = costoInsumos + costoMo + costoCif;
-
-          // ingreso del producto terminado al stock
-          const pr = await c.query<{ costo_unitario: string; stock: string; insumo_id: string | null }>(
-            'SELECT costo_unitario, stock, insumo_id FROM core.producto WHERE id = $1 FOR UPDATE', [op.producto_id],
-          );
-          // El pan entra al almacén a su costo real (costo de la OP ÷ unidades buenas); sin unidades, al estándar.
-          const costoProd = cantidadProducida > 0 ? costoTotal / cantidadProducida : Number(pr.rows[0]?.costo_unitario ?? 0);
-          const insumoIntermedio = pr.rows[0]?.insumo_id ?? null;
-
-          if (insumoIntermedio) {
-            // PRO-13: un intermedio (masa madre) entra al almacén de INSUMOS con costo promedio ponderado.
-            const ins = (await c.query<{ stock: string; cpp: string }>('SELECT stock, cpp FROM core.insumo WHERE id = $1 FOR UPDATE', [insumoIntermedio])).rows[0];
-            const st = Math.max(0, Number(ins.stock)), cppAnt = Number(ins.cpp);
-            const nuevoStock = st + cantidadProducida;
-            const nuevoCpp = nuevoStock > 0 ? (st * cppAnt + cantidadProducida * costoProd) / nuevoStock : costoProd;
-            await c.query(
-              `INSERT INTO core.movimiento_inventario
-                 (tipo,item_tipo,insumo_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por)
-               VALUES ('INGRESO_PRODUCCION','INSUMO',$1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-              [insumoIntermedio, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6), (cantidadProducida * costoProd).toFixed(4),
-                nuevoStock.toFixed(6), (nuevoStock * nuevoCpp).toFixed(4), nuevoCpp.toFixed(6), req.usuario!.id],
-            );
-            await c.query('UPDATE core.insumo SET stock = $1, cpp = $2, actualizado_en = now() WHERE id = $3', [nuevoStock.toFixed(6), nuevoCpp.toFixed(6), insumoIntermedio]);
-          } else {
-            const stockProd = Number(pr.rows[0]?.stock ?? 0);
-            const nuevoStockProd = stockProd + cantidadProducida;
-            await c.query(
-              `INSERT INTO core.movimiento_inventario
-                 (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,lote,vence_en)
-               VALUES ('INGRESO_PRODUCCION','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$8,$2,(now() AT TIME ZONE 'America/Lima')::date + $9::int)`,
-              [op.producto_id, codigo, cantidadProducida.toFixed(6), costoProd.toFixed(6),
-                (cantidadProducida * costoProd).toFixed(4), nuevoStockProd.toFixed(6),
-                ((stockProd + cantidadProducida) * costoProd).toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
-            );
-            await c.query('UPDATE core.producto SET stock = $1 WHERE id = $2', [nuevoStockProd.toFixed(6), op.producto_id]);
-          }
-
-          await c.query(
-            `UPDATE core.orden_produccion
-             SET estado = 'TERMINADA', terminada_en = now(), avance = 1, merma_real = $2, cantidad_producida = $3, motivo_merma = $4,
-                 unidades_buenas = $3, unidades_merma = $5, motivo_merma_tipo = $6, horas_hombre_real = $7, horas_horno_real = $8,
-                 costo_total = $9, costo_unitario_real = $10,
-                 fecha_produccion = (now() AT TIME ZONE 'America/Lima')::date,
-                 vence_en = (now() AT TIME ZONE 'America/Lima')::date + $11::int
-             WHERE id = $1`,
-            [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma, unidadesMerma.toFixed(4), d.motivoMermaTipo ?? null,
-              horasHombre.toFixed(3), horasHorno.toFixed(3), costoTotal.toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
-          );
-          await c.query('SELECT core.recalcular_costos()');
-
-          return { codigo, estado: 'TERMINADA', producto: op.producto, cantidadProducida, unidadesMerma, consumidos,
-            costoTotal: Number(costoTotal.toFixed(2)), costoUnitario: Number(costoProd.toFixed(4)),
-            desglose: { insumos: Number(costoInsumos.toFixed(2)), manoDeObra: Number(costoMo.toFixed(2)), cif: Number(costoCif.toFixed(2)) } };
-        }),
+        tx((c) => cierreOP(c, { codigo, cantidadProducida, unidadesMerma, mermaReal, motivoMerma, consumoReal: d.consumoReal, motivoMermaTipo: d.motivoMermaTipo,
+          horasHombreReal: d.horasHombreReal, horasHornoReal: d.horasHornoReal, usuarioId: req.usuario!.id })),
       );
 
       await auditar({
@@ -342,6 +352,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
     formaPago: z.string().trim().toUpperCase().max(20).default('EFECTIVO'),
     // COB-02: número de operación obligatorio si el medio lo exige (catálogo).
     referenciaPago: z.string().trim().max(60).default(''),
+    // Despacho: móvil que lleva el pedido y materiales de empaque usados (etiquetas, bolsas…).
+    vehiculoId: z.string().uuid().optional(),
+    empaques: z.array(z.object({ insumoId: z.string().uuid(), cantidad: z.number().positive().max(100_000) })).max(20).default([]),
     // RN-36: un descuento sobre el tope solo con una aprobación vigente del Gerente.
     aprobacionDescuentoId: z.string().uuid().optional(),
     clienteId: z.string().uuid().optional(),
@@ -351,11 +364,13 @@ export async function rutasOperaciones(app: FastifyInstance) {
   });
 
   app.post('/ventas', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'ventas.registrar')) return;
     const parseo = NuevaVenta.safeParse(req.body);
+    // Cargar un pedido a la móvil también es de Despacho; una venta directa, solo de Ventas.
+    const esDespacho = parseo.success && parseo.data.pedidoId && req.usuario!.permisos.has('despacho.gestionar');
+    if (!esDespacho && !exigir(req, reply, 'ventas.registrar')) return;
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Venta inválida.'));
 
-    const { items, descuentoPct, pedidoId, aprobacionDescuentoId } = parseo.data;
+    const { items, descuentoPct, pedidoId, aprobacionDescuentoId, vehiculoId, empaques } = parseo.data;
     let { formaPago, clienteId, referenciaPago } = parseo.data;
     const clave = req.headers['idempotency-key'] as string | undefined;
 
@@ -414,6 +429,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
           });
           // Empaques: se bloquean en orden de id (sin deadlocks) y se valida su stock si se controla.
           const empaque = new Map<string, number>();
+          // Los materiales que el despachador declara se descargan igual que los de la presentación.
+          if (empaques.length && !pedidoId) throw Object.assign(new Error('Los empaques se registran al despachar un pedido.'), { status: 422 });
+          for (const e of empaques) empaque.set(e.insumoId, (empaque.get(e.insumoId) ?? 0) + e.cantidad);
           for (const it of conUnidades) if (it.pres?.insumoId) empaque.set(it.pres.insumoId, (empaque.get(it.pres.insumoId) ?? 0) + it.cantidad * it.pres.cantidadInsumo);
           const insumosEmpaque = new Map((await c.query<{ id: string; nombre: string; stock: string; cpp: string; maneja_stock: boolean; unidad_inventario: string }>(
             'SELECT id, nombre, stock, cpp, maneja_stock, unidad_inventario FROM core.insumo WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE', [[...empaque.keys()]])).rows.map((r) => [r.id, r]));
@@ -423,7 +441,13 @@ export async function rutasOperaciones(app: FastifyInstance) {
           };
           const stockRestante = new Map(prods.rows.map((r) => [r.id, Number(r.stock)]));
           const reservado = new Map(prods.rows.map((r) => [r.id, Number(r.reservado)]));
+          // Una línea en promoción se vende al precio pactado en el pedido, no al de lista.
+          const precioPromo = new Map<string, number>();
           if (pedidoId) {
+            for (const l of (await c.query<{ producto_id: string; precio_con_igv: string }>('SELECT producto_id, precio_con_igv FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL', [pedidoId])).rows) {
+              precioPromo.set(l.producto_id, Number(l.precio_con_igv));
+            }
+            if (vehiculoId && !(await c.query("SELECT 1 FROM core.vehiculo WHERE id = $1 AND activo", [vehiculoId])).rowCount) throw Object.assign(new Error('El vehículo no existe o está inactivo.'), { status: 422 });
             // VEN-02/05: despacho de un pedido listo; no más de lo pedido. Su reserva se libera aquí.
             const ped = (await c.query<{ estado: string }>('SELECT estado FROM core.pedido WHERE id = $1 FOR UPDATE', [pedidoId])).rows[0];
             if (!ped) throw Object.assign(new Error('El pedido no existe.'), { status: 404 });
@@ -451,15 +475,21 @@ export async function rutasOperaciones(app: FastifyInstance) {
                 resto -= toma;
               }
             }
-            await c.query("UPDATE core.pedido SET estado = 'DESPACHADO', despachado_en = now() WHERE id = $1", [pedidoId]);
+            await c.query("UPDATE core.pedido SET estado = 'DESPACHADO', despachado_en = now(), vehiculo_id = coalesce($2, vehiculo_id) WHERE id = $1", [pedidoId, vehiculoId ?? null]);
+            for (const e of empaques) {
+              const ins = insumosEmpaque.get(e.insumoId);
+              if (!ins) throw Object.assign(new Error('Un material de empaque no existe.'), { status: 422 });
+              await c.query('INSERT INTO core.pedido_empaque (pedido_id, insumo_id, insumo, cantidad, registrado_por) VALUES ($1,$2,$3,$4,$5)', [pedidoId, e.insumoId, ins.nombre, e.cantidad, req.usuario!.id]);
+            }
           }
 
           for (const it of conUnidades) {
             const prod = mapa.get(it.productoId);
             if (!prod) throw Object.assign(new Error('El producto no existe o está anulado: no se vende.'), { status: 404 });
             // Precio por unidad: el de la presentación ÷ su equivalencia, o el del producto.
-            const precioUnidad = it.precioUnidad ?? Number(prod.precio_con_igv);
-            const precioLinea = it.pres ? it.pres.precio * it.cantidad : precioUnidad * it.unidades;
+            const promo = precioPromo.get(it.productoId);
+            const precioUnidad = promo ?? it.precioUnidad ?? Number(prod.precio_con_igv);
+            const precioLinea = it.pres && promo === undefined ? it.pres.precio * it.cantidad : precioUnidad * it.unidades;
 
             const netoLinea = Number(((precioLinea * (1 - descuentoPct)) / (1 + igv)).toFixed(4));
             totalConIgv += precioLinea * (1 - descuentoPct);
@@ -807,6 +837,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     observaciones: z.string().trim().max(250).default(''),
     // Al entregar: lo que pagó el cliente en ese momento (una o varias formas). Vacío = queda como deuda.
     pagos: z.array(LineaPago).max(5).default([]),
+    voucher: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
   }).refine((d) => !['RECHAZADO', 'CANCELADO'].includes(d.estado) || d.motivo.length >= 3, { message: 'Indica el motivo.', path: ['motivo'] });
 
   /** Transiciones permitidas: es una máquina de estados, no un campo libre. */
@@ -829,7 +860,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = CambioPedido.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'ESTADO_INVALIDO', parseo.error.issues[0]?.message ?? 'Estado de pedido inválido.'));
     const destino = parseo.data.estado;
-    const { motivo, observaciones, pagos } = parseo.data;
+    const { motivo, observaciones, pagos, voucher } = parseo.data;
     if (pagos.length && destino !== 'ENTREGADO') return reply.code(422).send(error(422, 'PAGO_FUERA_DE_ENTREGA', 'Los pagos se registran al entregar el pedido.'));
     if (pagos.length && !req.usuario!.permisos.has('cobranza.registrar')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso cobranza.registrar para cobrar al entregar.'));
 
@@ -848,6 +879,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (destino === 'DESPACHADO') return reply.code(409).send(error(409, 'USA_DESPACHO', 'Despacha el pedido con "Despachar y vender".'));
     let recibo: string | null = null;
     try {
+      const comprobanteId = voucher && pagos.length ? await guardarImagen(voucher, req.usuario!.id) : null;
       await tx(async (c) => {
         // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
         const cambio = await c.query(`UPDATE core.pedido SET estado = $1,
@@ -863,24 +895,13 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const cx = (await c.query<{ id: string; cliente_id: string }>(`SELECT x.id, x.cliente_id FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id
             WHERE v.pedido_id = $1 AND v.estado = 'CONFIRMADA' AND x.estado IN ('PENDIENTE','PARCIAL')`, [pedido.id])).rows[0];
           if (!cx) throw Object.assign(new Error('El pedido no tiene saldo por cobrar: registra la entrega sin pago.'), { status: 409 });
-          recibo = await emitirRecibo(c, { clienteId: cx.cliente_id, cxcIds: [cx.id], pagos, usuarioId: req.usuario!.id });
+          recibo = await emitirRecibo(c, { clienteId: cx.cliente_id, cxcIds: [cx.id], pagos, usuarioId: req.usuario!.id, comprobanteId });
         }
-        const lineas = (await c.query<{ producto_id: string; producto: string; cantidad: string }>(
-          'SELECT producto_id, producto, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id, producto ORDER BY producto_id', [pedido.id])).rows;
-        if (destino === 'LISTO') {
-          // RN-29 / APT-04: el pedido listo reserva su stock; queda fuera de la venta a terceros.
-          for (const l of lineas) {
-            const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.producto_id])).rows[0];
-            const disponible = num(p.stock) - num(p.reservado);
-            if (disponible + 1e-6 < num(l.cantidad)) {
-              throw Object.assign(new Error(`No hay stock para reservar ${l.producto}: disponible ${disponible.toFixed(0)}, pedido ${num(l.cantidad).toFixed(0)}.`), { status: 409 });
-            }
-            await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [l.producto_id, l.cantidad]);
-          }
-        }
+        if (destino === 'LISTO') await reservarListo(c, pedido.id, true);
         if (pedido.estado === 'LISTO' && destino === 'CANCELADO') {
+          const lineas = (await c.query<{ producto_id: string; cantidad: string }>('SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id ORDER BY producto_id', [pedido.id])).rows;
           for (const l of lineas) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
-        }
+        } else if (['CANCELADO', 'RECHAZADO'].includes(destino)) await liberarPromos(c, pedido.id);
       });
     } catch (e) {
       const err = e as Error & { status?: number };

@@ -307,6 +307,27 @@ const REPORTES: Record<string, Reporte> = {
       return { filas: filas.map((r) => ({ cliente: r.cliente, porVencer: num(r.por_vencer), d0_7: num(r.d0_7), d8_15: num(r.d8_15), d16_30: num(r.d16_30), d30: num(r.d30), total: num(r.total) })) };
     },
   },
+  'V-03': {
+    titulo: 'Ventas por pedidos', permiso: 'cobranza.ver',
+    columnas: [{ key: 'pedido', label: 'Pedido' }, { key: 'cliente', label: 'Cliente' }, { key: 'fecha', label: 'Fecha' }, { key: 'estado', label: 'Estado' },
+      { key: 'total', label: 'Total', tipo: 'dinero' }, { key: 'pagado', label: 'Pagado', tipo: 'dinero' }, { key: 'porCobrar', label: 'Por cobrar', tipo: 'dinero' }, { key: 'situacion', label: 'Situación' }],
+    async calcular(f) {
+      const filas = await q<Record<string, string>>(`
+        SELECT p.codigo pedido, p.cliente, (p.creado_en AT TIME ZONE 'America/Lima')::date::text fecha, p.estado, p.total,
+               coalesce(sum(x.monto - x.saldo), 0) pagado, coalesce(sum(x.saldo), 0) saldo, count(x.id) cuentas
+        FROM core.pedido p LEFT JOIN core.venta v ON v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LEFT JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id
+        WHERE (p.creado_en AT TIME ZONE 'America/Lima')::date BETWEEN $1::date AND $2::date
+        GROUP BY p.id ORDER BY p.creado_en DESC`, [f.desde, f.hasta]);
+      const situacion = (r: Record<string, string>) => ['CANCELADO', 'RECHAZADO'].includes(r.estado) ? 'Anulado'
+        : num(r.cuentas) === 0 ? 'Por entregar' : num(r.saldo) > 0.009 ? 'Deuda por cobrar' : 'Pagado';
+      const lista = filas.map((r) => ({ pedido: r.pedido, cliente: r.cliente, fecha: r.fecha, estado: r.estado, total: num(r.total), pagado: num(r.pagado), porCobrar: num(r.saldo), situacion: situacion(r) }));
+      const suma = (s: string) => lista.filter((x) => x.situacion === s);
+      return { filas: lista, resumen: {
+        pedidos: lista.length, pagados: suma('Pagado').length, montoPagado: suma('Pagado').reduce((a, x) => a + x.total, 0),
+        conDeuda: suma('Deuda por cobrar').length, deuda: lista.reduce((a, x) => a + x.porCobrar, 0),
+      } };
+    },
+  },
   'V-02': {
     titulo: 'Pedidos por cliente', permiso: 'pedidos.ver',
     columnas: [{ key: 'cliente', label: 'Cliente' }, { key: 'pedidos', label: 'Pedidos', tipo: 'num' }, { key: 'monto', label: 'Monto', tipo: 'dinero' }, { key: 'pendientes', label: 'Pendientes', tipo: 'num' }, { key: 'entregados', label: 'Entregados', tipo: 'num' }, { key: 'cumplimiento', label: 'Cumplimiento', tipo: 'pct' }, { key: 'proximaEntrega', label: 'Próxima entrega', tipo: 'fecha' }],
@@ -467,6 +488,47 @@ export async function rutasReportes(app: FastifyInstance) {
    * Dashboard gerencial en vivo (G-01 + G-02 + G-03 + G-09 + G-11 resumidos).
    * La web lo consulta cada 30 s; con la caché de 3 s el costo en la base es mínimo.
    */
+  // Punto de equilibrio: gastos del mes ÷ ganancia por unidad de cada pan. Los costos de producción ya están en el costo del pan: no se cuentan dos veces.
+  app.get('/analisis/punto-equilibrio', { preHandler: autenticar }, async (req, reply) => {
+    if (!req.usuario!.permisos.has('costos.ver')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso costos.ver.'));
+    const hoy = new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+    const anio = Number((req.query as { anio?: string }).anio) || Number(hoy.slice(0, 4));
+    if (anio < 2000 || anio > 2100) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Año inválido.'));
+    const igv = num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'igv'"))?.valor ?? '0.18');
+    const gastos = await q<Record<string, string>>(`SELECT g.periodo_mes mes, coalesce(t.nombre, k.clasificacion, 'Otros') tipo, sum(g.monto) monto
+      FROM core.pago_costo g LEFT JOIN core.costo_indirecto k ON k.id = g.costo_indirecto_id LEFT JOIN core.tipo_gasto t ON t.codigo = g.tipo_gasto
+      WHERE g.estado = 'VIGENTE' AND g.periodo_anio = $1 AND coalesce(k.clasificacion, '') <> 'PRODUCCION' GROUP BY 1, 2`, [anio]);
+    const productos = await q<Record<string, string>>(`SELECT id, nombre, precio_con_igv, costo_unitario FROM core.producto WHERE estado = 'ACTIVO' AND insumo_id IS NULL ORDER BY nombre`);
+    const ventas = await q<Record<string, string>>(`SELECT d.producto_id, extract(month FROM v.creado_en AT TIME ZONE 'America/Lima')::int mes, sum(d.cantidad) cantidad
+      FROM core.venta_detalle d JOIN core.venta v ON v.id = d.venta_id
+      WHERE v.estado = 'CONFIRMADA' AND extract(year FROM v.creado_en AT TIME ZONE 'America/Lima') = $1 GROUP BY 1, 2`, [anio]);
+    const dias = await q<Record<string, string>>(`SELECT d.producto_id, (v.creado_en AT TIME ZONE 'America/Lima')::date::text dia, sum(d.cantidad) cantidad
+      FROM core.venta_detalle d JOIN core.venta v ON v.id = d.venta_id
+      WHERE v.estado = 'CONFIRMADA' AND (v.creado_en AT TIME ZONE 'America/Lima')::date > $1::date - 3 GROUP BY 1, 2`, [hoy]);
+    const ultimoMes = anio === Number(hoy.slice(0, 4)) ? Number(hoy.slice(5, 7)) : 12;
+    const meses = Array.from({ length: ultimoMes }, (_, i) => i + 1).map((mes) => {
+      const delMes = gastos.filter((g) => num(g.mes) === mes);
+      return { mes, gastos: Number(delMes.reduce((s, g) => s + num(g.monto), 0).toFixed(2)), porTipo: delMes.map((g) => ({ tipo: g.tipo, monto: num(g.monto) })) };
+    });
+    const ultimosDias = Array.from({ length: 3 }, (_, i) => new Date(Date.parse(hoy) - (2 - i) * 86_400_000).toISOString().slice(0, 10));
+    return {
+      anio, meses, dias: ultimosDias,
+      productos: productos.map((p) => {
+        const ganancia = Number((num(p.precio_con_igv) / (1 + igv) - num(p.costo_unitario)).toFixed(4));
+        return {
+          id: p.id, nombre: p.nombre, ganancia,
+          meses: meses.map((m) => {
+            const vendido = num(ventas.find((v) => v.producto_id === p.id && num(v.mes) === m.mes)?.cantidad);
+            // Sin ganancia por unidad no hay cantidad que cubra los gastos.
+            const equilibrio = ganancia > 0 ? Math.ceil(m.gastos / ganancia) : null;
+            return { mes: m.mes, vendido, equilibrio, alcanzado: equilibrio !== null && equilibrio > 0 && vendido >= equilibrio };
+          }),
+          dias: ultimosDias.map((d) => num(dias.find((x) => x.producto_id === p.id && x.dia === d)?.cantidad)),
+        };
+      }),
+    };
+  });
+
   app.get('/dashboard', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'dashboard.ver')) return;
     const f = leerFiltros(req.query);

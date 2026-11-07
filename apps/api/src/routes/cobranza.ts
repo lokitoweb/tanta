@@ -6,6 +6,7 @@ import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
+import { guardarImagen } from './sistema.js';
 
 /**
  * Cobranza y ventas del INF-TEC-001 (M07/M08): recibo aplicado a varios documentos (RN-34),
@@ -32,7 +33,7 @@ export type Pago = z.infer<typeof LineaPago>;
  * Emite un recibo dentro de la transacción `c`: lo usan Cobranza (cobrar una deuda) y la entrega del
  * pedido (cobrar al dejar la mercadería). Un solo camino = un solo cálculo, el mismo cierre del día.
  */
-export async function emitirRecibo(c: Cliente, d: { clienteId: string; cxcIds?: string[]; pagos: Pago[]; usuarioId: string; clave?: string }): Promise<string> {
+export async function emitirRecibo(c: Cliente, d: { clienteId: string; cxcIds?: string[]; pagos: Pago[]; usuarioId: string; clave?: string; comprobanteId?: string | null }): Promise<string> {
   for (const x of d.pagos) exigirOperacion(await medioPago(c, x.medio, 'cobranza'), x.referencia);
   const monto = Number(d.pagos.reduce((s, x) => s + x.monto, 0).toFixed(2));
   // Documentos abiertos del cliente, del más antiguo al más nuevo, bloqueados para el cálculo.
@@ -49,10 +50,10 @@ export async function emitirRecibo(c: Cliente, d: { clienteId: string; cxcIds?: 
   // El recibo guarda la forma principal (la de mayor monto); cada forma queda en su línea de cobranza,
   // así el cierre del día cuadra por forma de pago.
   const principal = d.pagos.reduce((a, b) => (b.monto > a.monto ? b : a));
-  const rec = (await c.query<{ id: string }>(`INSERT INTO core.recibo (numero, cliente_id, monto, medio, referencia, registrado_por, idempotency_key)
-      VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7) RETURNING id`, [numero, d.clienteId, monto.toFixed(2), principal.medio,
+  const rec = (await c.query<{ id: string }>(`INSERT INTO core.recibo (numero, cliente_id, monto, medio, referencia, registrado_por, idempotency_key, comprobante_id)
+      VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,$8) RETURNING id`, [numero, d.clienteId, monto.toFixed(2), principal.medio,
       d.pagos.length > 1 ? d.pagos.map((x) => `${x.medio} ${x.monto.toFixed(2)}${x.referencia ? ` (${x.referencia})` : ''}`).join(' + ').slice(0, 200) : principal.referencia,
-      d.usuarioId, d.clave ?? null])).rows[0];
+      d.usuarioId, d.clave ?? null, d.comprobanteId ?? null])).rows[0];
   // Cada forma de pago se aplica a los documentos más antiguos que aún tienen saldo.
   const saldos = docs.map((x) => ({ id: x.id, saldo: num(x.saldo) }));
   for (const pago of d.pagos) {
@@ -72,7 +73,8 @@ export async function emitirRecibo(c: Cliente, d: { clienteId: string; cxcIds?: 
 }
 
 export async function detalleRecibo(numero: string) {
-  const r = await uno<Record<string, string>>(`SELECT r.numero, r.monto, r.medio, r.referencia, r.creado_en::text fecha, c.nombre cliente, u.nombre vendedor
+  const r = await uno<Record<string, string>>(`SELECT r.numero, r.monto, r.medio, r.referencia, r.creado_en::text fecha, c.nombre cliente, u.nombre vendedor,
+      CASE WHEN r.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || r.comprobante_id END comprobante_url
     FROM core.recibo r JOIN core.cliente c ON c.id = r.cliente_id LEFT JOIN core.usuario u ON u.id = r.registrado_por WHERE r.numero = $1`, [numero]);
   const ap = await q<Record<string, string>>(`SELECT coalesce(v.serie || '-' || lpad(v.correlativo::text, 8, '0'), v.codigo, 'Saldo') documento, b.monto, x.saldo
     FROM core.cobranza b JOIN core.recibo r ON r.id = b.recibo_id JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id LEFT JOIN core.venta v ON v.id = x.venta_id
@@ -128,11 +130,13 @@ export async function rutasCobranza(app: FastifyInstance) {
     referencia: z.string().trim().max(60).default(''),
     pagos: z.array(LineaPago).min(1).max(5).optional(),
     cxcIds: z.array(z.string().uuid()).max(100).optional(),
+    // Foto del voucher (Yape, transferencia…), opcional.
+    voucher: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
   }).transform((d, ctx) => {
     // «monto/medio/referencia» sueltos = una sola forma (versiones anteriores de la app).
     const pagos = d.pagos ?? (d.monto && d.medio ? [{ monto: d.monto, medio: d.medio, referencia: d.referencia }] : []);
     if (!pagos.length) ctx.addIssue({ code: 'custom', message: 'Indica el monto y la forma de pago.' });
-    return { clienteId: d.clienteId, cxcIds: d.cxcIds, pagos, monto: Number(pagos.reduce((s, x) => s + x.monto, 0).toFixed(2)) };
+    return { clienteId: d.clienteId, cxcIds: d.cxcIds, voucher: d.voucher, pagos, monto: Number(pagos.reduce((s, x) => s + x.monto, 0).toFixed(2)) };
   });
 
   app.post('/cobranza/recibos', { preHandler: autenticar }, async (req, reply) => {
@@ -146,7 +150,8 @@ export async function rutasCobranza(app: FastifyInstance) {
       if (previo) return reply.code(201).send(await detalleRecibo(previo.numero));
     }
     try {
-      const numero = await tx((c) => emitirRecibo(c, { ...d, usuarioId: req.usuario!.id, clave }));
+      const comprobanteId = d.voucher ? await guardarImagen(d.voucher, req.usuario!.id) : null;
+      const numero = await tx((c) => emitirRecibo(c, { ...d, usuarioId: req.usuario!.id, clave, comprobanteId }));
       const r = await detalleRecibo(numero);
       await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RECIBO_EMITIDO', entidad: 'recibo', entidadId: numero, detalle: { monto: d.monto, pagos: d.pagos.map((x) => ({ medio: x.medio, monto: x.monto })), documentos: r.aplicaciones.length }, ip: req.ip });
       void emitirEvento('cobro.registrado', r);
@@ -253,7 +258,18 @@ export async function rutasCobranza(app: FastifyInstance) {
       LEFT JOIN core.rendicion_cobranza r ON r.vendedor_id = d.registrado_por AND r.fecha = d.fecha
       LEFT JOIN core.usuario u ON u.id = d.registrado_por
       WHERE d.fecha < $1::date AND coalesce(r.estado, 'SIN_RENDIR') <> 'RECIBIDA' ORDER BY d.fecha DESC, u.nombre LIMIT 60`, [fecha]);
-    return { fecha, total: lineas.reduce((s, l) => s + l.monto, 0), porMedio, lineas, vendedores: await resumenDia(fecha),
+    // Liquidación diaria: lo cobrado frente a lo que salió ese día (gastos y pagos a proveedores), por medio de pago.
+    const salidas = await q<Record<string, string>>(`
+      SELECT 'GASTO' origen, g.codigo, g.concepto, coalesce(t.nombre, 'Costo') tipo, g.medio_pago medio, g.monto
+      FROM core.pago_costo g LEFT JOIN core.tipo_gasto t ON t.codigo = g.tipo_gasto WHERE g.estado = 'VIGENTE' AND g.fecha_operacion = $1::date
+      UNION ALL
+      SELECT 'COMPRA', x.codigo, 'Pago de ' || k.codigo, 'Pago a proveedor', x.medio_pago, x.monto
+      FROM core.pago_compra x JOIN core.compra k ON k.id = x.compra_id WHERE x.estado = 'VIGENTE' AND x.fecha_pago = $1::date ORDER BY 1, 2`, [fecha]);
+    const gastos = salidas.map((g) => ({ origen: g.origen, codigo: g.codigo, concepto: g.concepto, tipo: g.tipo, medio: g.medio, monto: num(g.monto) }));
+    const totalIngresos = lineas.reduce((s, l) => s + l.monto, 0), totalGastos = gastos.reduce((s, g) => s + g.monto, 0);
+    const gastosPorMedio = Object.entries(gastos.reduce<Record<string, number>>((a, g) => ({ ...a, [g.medio]: (a[g.medio] ?? 0) + g.monto }), {})).map(([medio, monto]) => ({ medio, monto }));
+    return { fecha, total: totalIngresos, porMedio, lineas, vendedores: await resumenDia(fecha),
+      liquidacion: { ingresos: porMedio, gastos: gastosPorMedio, detalleGastos: gastos, totalIngresos, totalGastos, neto: Number((totalIngresos - totalGastos).toFixed(2)) },
       pendientes: pendientes.map((x) => ({ fecha: x.fecha, vendedorId: x.vendedor_id, vendedor: x.vendedor, total: num(x.total), estado: x.estado ?? 'SIN_RENDIR' })) };
   });
 
@@ -273,7 +289,8 @@ export async function rutasCobranza(app: FastifyInstance) {
       FROM core.cuenta_por_cobrar x LEFT JOIN core.venta v ON v.id = x.venta_id
       WHERE x.cliente_id = $1 AND x.estado <> 'ANULADA' ORDER BY x.creado_en DESC LIMIT 300`, [clienteId]);
     const pagos = await q<Record<string, string>>(`
-      SELECT coalesce(r.numero, '—') recibo, (b.creado_en AT TIME ZONE 'America/Lima')::date::text fecha, b.medio, b.referencia, b.monto
+      SELECT coalesce(r.numero, '—') recibo, (b.creado_en AT TIME ZONE 'America/Lima')::date::text fecha, b.medio, b.referencia, b.monto,
+             CASE WHEN r.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || r.comprobante_id END "comprobanteUrl"
       FROM core.cobranza b JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id LEFT JOIN core.recibo r ON r.id = b.recibo_id
       WHERE x.cliente_id = $1 ORDER BY b.creado_en DESC LIMIT 300`, [clienteId]);
     const doc = documentos.map((x) => ({ documento: x.documento, fecha: x.fecha, vence: x.vence, monto: num(x.monto), pagado: num(x.pagado), saldo: num(x.saldo), estado: x.estado, diasVencido: num(x.dias_vencido) }));

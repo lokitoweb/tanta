@@ -11,6 +11,7 @@ const ETIQUETAS: Record<string, string> = {
   moneda: 'Moneda',
   margen_objetivo_global: 'Margen objetivo global',
   permitir_saldo_negativo: 'Permitir saldo negativo',
+  hora_corte_mismo_dia: 'Hora de corte para entrega el mismo día',
 };
 
 export function Parametros() {

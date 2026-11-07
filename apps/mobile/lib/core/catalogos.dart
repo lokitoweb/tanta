@@ -26,6 +26,8 @@ bool requiereOperacion(String codigo) => medioPago(codigo)?['requiereOperacion']
 bool esCredito(String codigo) => medioPago(codigo)?['esCredito'] == true;
 String nombreMedio(String codigo) => '${medioPago(codigo)?['nombre'] ?? codigo}';
 
+List<Map<String, dynamic>> tiposGasto() => _lista('tiposGasto');
+
 List<Map<String, dynamic>> tiposDocumento() {
   final l = _lista('tiposDocumento');
   return l.isEmpty ? [{'codigo': 'FACTURA', 'nombre': 'Factura', 'creditoFiscal': true}] : l;

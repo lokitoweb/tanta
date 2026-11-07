@@ -15,6 +15,8 @@ import { rutasReportes } from './routes/reportes.js';
 import { rutasCobranza, despacharAlertasCobranza } from './routes/cobranza.js';
 import { rutasAlmacen, rutasAlmacenes, rutasLotes, despacharAlertasStock, despacharAlertasVencimiento } from './routes/almacen.js';
 import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
+import { rutasHojas } from './routes/hojas.js';
+import { rutasDespacho } from './routes/despacho.js';
 import { rutasCompras } from './routes/compras.js';
 import { rutasPagos, rutasPagosCostos, despacharAvisosPago } from './routes/pagos.js';
 import { rutasCatalogos } from './routes/catalogos.js';
@@ -141,6 +143,8 @@ export async function construir() {
     await api.register(rutasAlmacenes);
     await api.register(rutasLotes);
     await api.register(rutasNotificaciones);
+    await api.register(rutasHojas);
+    await api.register(rutasDespacho);
     await api.register(rutasCompras);
     await api.register(rutasPagos);
     await api.register(rutasPagosCostos);

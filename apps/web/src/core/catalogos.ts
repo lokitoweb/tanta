@@ -9,10 +9,11 @@ export interface Unidad { codigo: string; descripcion: string; familia: 'MASA' |
 export interface PresentacionCompra { codigo: string; nombre: string; equivalencia: number; activo: boolean; orden: number }
 export interface PresentacionVenta { codigo: string; nombre: string; equivalencia: number; insumoId: string | null; cantidadInsumo: number | null; activo: boolean; orden: number }
 export interface Banco { codigo: string; nombre: string; activo: boolean; orden: number }
-export interface Catalogos { mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[];
+export interface TipoGasto { codigo: string; nombre: string; activo: boolean; orden: number }
+export interface Catalogos { tiposGasto: TipoGasto[]; mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[];
   presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[] }
 
-const vacio: Catalogos = { mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [] };
+const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [] };
 let cache: Promise<Catalogos> | null = null;
 
 /** Recarga los catálogos (tras editarlos en Maestros → Catálogos). */

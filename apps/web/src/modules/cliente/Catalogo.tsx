@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
 import { NuevoPedido } from '@/modules/ventas/NuevoPedido';
-import { urlApi } from '@/core/api';
+import { api, urlApi } from '@/core/api';
+
+interface Promo { id: string; productoId: string; producto: string; titulo: string; precioConIgv: number; precioNormal: number; hasta: string; disponible: number }
 
 export function Catalogo() {
   const { dataset, puede, refrescarDatos } = useApp();
@@ -12,16 +14,22 @@ export function Catalogo() {
   const [carrito, setCarrito] = useState<Record<string, number>>({});
   const [confirmando, setConfirmando] = useState(false);
   const [registrado, setRegistrado] = useState<string | null>(null);
+  // Promociones: salen del stock disponible, con precio propio (la cantidad la valida el servidor).
+  const [promos, setPromos] = useState<Promo[]>([]);
+  const [enPromo, setEnPromo] = useState<Record<string, number>>({});
+  const cargarPromos = () => api<Promo[]>('/promociones/vigentes').then(setPromos).catch(() => {});
+  useEffect(() => { void cargarPromos(); }, []);
+  const sumarPromo = (x: Promo) => setEnPromo((c) => ({ ...c, [x.id]: Math.min((c[x.id] ?? 0) + 1, x.disponible) }));
 
   const productos = dataset.categorias.flatMap((c) =>
     dataset.productos.filter((p) => p.categoriaId === c.id && p.estado === 'ACTIVO' && !p.insumoId).map((p) => ({ ...p, categoria: c.nombre })),
   );
 
   const lista = cat === 'todas' ? productos : productos.filter((p) => p.categoriaId === cat);
-  const items = Object.values(carrito).reduce((s, n) => s + n, 0);
+  const items = [...Object.values(carrito), ...Object.values(enPromo)].reduce((s, n) => s + n, 0);
   const total = useMemo(
-    () => productos.reduce((s, p) => s + (carrito[p.id] ?? 0) * p.precioConIgv, 0),
-    [carrito, productos],
+    () => productos.reduce((s, p) => s + (carrito[p.id] ?? 0) * p.precioConIgv, 0) + promos.reduce((s, x) => s + (enPromo[x.id] ?? 0) * x.precioConIgv, 0),
+    [carrito, productos, enPromo, promos],
   );
 
   const sumar = (id: string) => setCarrito((c) => ({ ...c, [id]: (c[id] ?? 0) + 1 }));
@@ -33,9 +41,22 @@ export function Catalogo() {
     <>
       <Encabezado
         titulo="Catálogo"
-        descripcion="Elige tus productos y la fecha de entrega al confirmar el pedido"
+        descripcion="Elige tus productos y la cantidad · te lo llevamos a tu tienda"
         acciones={registrado && <Insignia tono="ok" punto>Pedido {registrado} registrado</Insignia>}
       />
+
+      {promos.length > 0 && (
+        <section className="promos" aria-label="Promociones">
+          {promos.map((x) => (
+            <article className="promo" key={x.id}>
+              <div><Insignia tono="ok">Promoción</Insignia><h3>{x.titulo}</h3>
+                <p>{x.producto} · <s>{money(x.precioNormal)}</s> <strong>{money(x.precioConIgv)}</strong></p>
+                <small>Quedan {x.disponible} · hasta el {x.hasta.split('-').reverse().join('/')}</small></div>
+              <button className="prod__add" disabled={(enPromo[x.id] ?? 0) >= x.disponible} onClick={() => sumarPromo(x)} aria-label={`Agregar ${x.titulo}`}><Icon name="plus" size={16} /></button>
+            </article>
+          ))}
+        </section>
+      )}
 
       <div className="chips chips--fila">
         <button className={`chipfilter ${cat === 'todas' ? 'is-active' : ''}`} onClick={() => setCat('todas')}>Todo</button>
@@ -80,8 +101,9 @@ export function Catalogo() {
 
       {confirmando && (
         <NuevoPedido elegirCliente={!dataset.misPedidos && puede('pedidos.gestionar')}
-          inicial={Object.entries(carrito).filter(([, n]) => n > 0).map(([productoId, cantidad]) => ({ productoId, cantidad }))}
-          onCerrar={(codigo) => { setConfirmando(false); if (codigo) { setRegistrado(codigo); setCarrito({}); void refrescarDatos(); } }} />
+          inicial={[...Object.entries(carrito).filter(([, n]) => n > 0).map(([productoId, cantidad]) => ({ productoId, cantidad })),
+            ...promos.filter((x) => enPromo[x.id] > 0).map((x) => ({ productoId: x.productoId, cantidad: enPromo[x.id], promocionId: x.id, nombre: x.titulo, precio: x.precioConIgv }))]}
+          onCerrar={(codigo) => { setConfirmando(false); if (codigo) { setRegistrado(codigo); setCarrito({}); setEnPromo({}); void cargarPromos(); void refrescarDatos(); } }} />
       )}
 
       {ultimo && (

@@ -62,6 +62,9 @@ export async function rutasAdmin(app: FastifyInstance) {
         return reply.code(422).send(error(422, 'PORCENTAJE_FUERA_DE_RANGO', 'El porcentaje debe estar entre 0 y 1 (0.18 = 18 %).'));
       }
     }
+    if (clave === 'hora_corte_mismo_dia' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(nuevo)) {
+      return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa el formato HH:MM de 24 horas, por ejemplo 03:00.'));
+    }
     if (clave === 'cif_base_prorrateo' && !['UNIDADES', 'COSTO_INSUMOS'].includes(nuevo.toUpperCase())) {
       return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa UNIDADES o COSTO_INSUMOS.'));
     }

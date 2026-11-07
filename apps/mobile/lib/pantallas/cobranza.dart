@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
 import '../core/cola.dart';
@@ -77,6 +79,7 @@ class _CobranzaState extends State<Cobranza> {
       'clienteId': d.id,
       'cxcIds': [for (final c in docs) '${c['id']}'],
       'pagos': pagos,
+      'voucher': cobro.voucher,
     };
     final clave = ColaOffline.instancia.nuevaClave();
     final textoQueda = queda > 0.009 ? ' · queda ${dinero(queda)} por cobrar' : ' · cuenta saldada';
@@ -273,9 +276,10 @@ class _CobranzaState extends State<Cobranza> {
 
 /// Resultado de la hoja: las formas de pago (vacío = no pagó, queda como deuda) y una nota opcional.
 class Cobro {
-  const Cobro(this.pagos, this.nota);
+  const Cobro(this.pagos, this.nota, [this.voucher]);
   final List<Map<String, dynamic>> pagos;
   final String nota;
+  final String? voucher;
   double get monto => pagos.fold(0, (s, p) => s + _d(p['monto']));
 }
 
@@ -284,6 +288,36 @@ List<(String, String)> lineasRecibo(List<Map<String, dynamic>> pagos, double que
       for (final p in pagos) ('Pago ${'${p['medio']}'.toLowerCase()}${'${p['referencia'] ?? ''}'.isEmpty ? '' : ' · op. ${p['referencia']}'}', dinero(_d(p['monto']))),
       if (queda > 0.009) ('Saldo pendiente', dinero(queda)),
     ];
+
+/// Foto o captura (voucher, Yape): se reduce en el celular antes de subirla. El servidor valida que sea imagen.
+class BotonVoucher extends StatelessWidget {
+  const BotonVoucher({super.key, required this.valor, required this.onCambio, this.texto = 'Adjuntar voucher (opcional)'});
+  final String? valor;
+  final ValueChanged<String?> onCambio;
+  final String texto;
+
+  Future<void> _elegir(BuildContext context) async {
+    final origen = await showModalBottomSheet<ImageSource>(context: context, builder: (ctx) => SafeArea(child: Wrap(children: [
+      ListTile(leading: const Icon(Icons.photo_camera_outlined), title: const Text('Tomar foto'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+      ListTile(leading: const Icon(Icons.photo_library_outlined), title: const Text('Elegir de la galería'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+    ])));
+    if (origen == null) return;
+    final x = await ImagePicker().pickImage(source: origen, maxWidth: 1200, maxHeight: 1200, imageQuality: 70);
+    if (x == null) return;
+    onCambio('data:image/jpeg;base64,${base64Encode(await x.readAsBytes())}');
+  }
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        Expanded(child: TextButton.icon(
+          style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+          onPressed: () => _elegir(context),
+          icon: Icon(valor == null ? Icons.add_a_photo_outlined : Icons.check_circle_outline, size: 18),
+          label: Text(valor == null ? texto : 'Imagen adjunta'),
+        )),
+        if (valor != null) IconButton(tooltip: 'Quitar imagen', onPressed: () => onCambio(null), icon: const Icon(Icons.close, size: 18)),
+      ]);
+}
 
 /// Abre la hoja de cobro. Con [alEntregar] ofrece «No pagó» y la nota de la entrega (quién recibió).
 /// [otras]: lo que el cliente debe fuera de este cobro; sigue pendiente aunque este se pague completo.
@@ -318,6 +352,7 @@ class _Linea {
 class _HojaCobroState extends State<HojaCobro> {
   final _medios = mediosPago('enCobranza');
   final _nota = TextEditingController();
+  String? _voucher;
   late final List<_Linea> _lineas = [_Linea('${_medios.first['codigo']}', widget.debe)];
 
   double get _suma => _lineas.fold(0, (s, l) => s + l.valor);
@@ -375,6 +410,8 @@ class _HojaCobroState extends State<HojaCobro> {
             const SizedBox(height: 8),
             Text(problema, style: const TextStyle(fontSize: 12.5, color: TantaColors.stateDanger)),
           ],
+          const SizedBox(height: 6),
+          BotonVoucher(valor: _voucher, onCambio: (v) => setState(() => _voucher = v)),
           if (widget.alEntregar) ...[
             const SizedBox(height: 12),
             TextField(controller: _nota, maxLength: 200, decoration: const InputDecoration(labelText: 'Nota de la entrega (opcional)', hintText: 'Quién recibió, hora…', counterText: '')),
@@ -386,7 +423,7 @@ class _HojaCobroState extends State<HojaCobro> {
                 : () => Navigator.pop(context, Cobro([
                       for (final l in _lineas)
                         {'monto': double.parse(l.valor.toStringAsFixed(2)), 'medio': l.medio, 'referencia': l.referencia.text.trim()},
-                    ], _nota.text.trim())),
+                    ], _nota.text.trim(), _voucher)),
             child: Text(widget.alEntregar ? 'Entregar y cobrar ${dinero(_suma)}' : 'Cobrar ${dinero(_suma)}'),
           ),
           // «Te pago mañana»: se entrega y todo queda como deuda en Cobranza.

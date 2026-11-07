@@ -951,7 +951,7 @@ class MisPedidos extends StatefulWidget {
 
 /// Nombre amable de cada estado del pedido (panel, Mis pedidos).
 const etiquetaPedido = {'REGISTRADO': 'Por confirmar', 'CONFIRMADO': 'Confirmado', 'EN_PRODUCCION': 'En producción', 'LISTO': 'Listo para entregar',
-  'DESPACHADO': 'En camino', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
+  'DESPACHADO': 'En tránsito', 'ENTREGADO': 'Entregado', 'RECHAZADO': 'Rechazado', 'CANCELADO': 'Cancelado'};
 
 /// Color del estado: por confirmar (ámbar), en curso (azul), listo o entregado (verde), anulado (rojo).
 Tono tonoPedido(String estado) => switch (estado) {

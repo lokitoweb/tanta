@@ -219,30 +219,45 @@ export async function rutasPagosCostos(app: FastifyInstance) {
     medio: z.string().trim().toUpperCase().max(20),
     nroOperacion: z.string().trim().toUpperCase().max(30).default(''),
     comprobante: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
+    // Gasto de caja chica (menú, gasolina…): documento del gasto, tipo (catálogo) y quién lo autorizó.
+    tipoGasto: z.string().trim().toUpperCase().max(20).nullable().default(null),
+    docTipo: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
+    docSerie: z.string().trim().toUpperCase().max(10).default(''),
+    docNumero: z.string().trim().toUpperCase().max(20).default(''),
+    autorizadoPor: z.string().trim().max(80).default(''),
   }).refine((d) => d.costoIndirectoId || d.concepto.length >= 2, { message: 'Elige el costo indirecto o escribe el concepto.', path: ['concepto'] });
 
   app.get('/pagos-costos', { preHandler: autenticar }, async (req, reply) => {
-    if (!['compras.pagar', 'costos.ver'].some((x) => req.usuario!.permisos.has(x))) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso compras.pagar.'));
+    const permisos = req.usuario!.permisos;
+    if (!['compras.pagar', 'costos.ver', 'gastos.registrar'].some((x) => permisos.has(x))) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso compras.pagar.'));
+    // Quien solo registra gastos ve los suyos.
+    const soloPropios = !permisos.has('compras.pagar') && !permisos.has('costos.ver') ? req.usuario!.id : null;
     const p = z.object({ anio: z.coerce.number().int().min(2000).max(2100).optional(), mes: z.coerce.number().int().min(1).max(12).optional() }).safeParse(req.query);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Período inválido.'));
     const filas = await q<Record<string, unknown>>(`
       SELECT g.codigo, g.concepto, k.codigo cif, g.fecha_operacion::text fecha, g.periodo_mes, g.periodo_anio, g.monto, g.caja, a.codigo apertura,
              g.medio_pago, g.nro_operacion, g.estado, g.motivo_anulacion, u.nombre usuario, g.creado_en::text creado_en,
+             g.tipo_gasto, t.nombre tipo_gasto_nombre, g.doc_tipo, g.doc_serie, g.doc_numero, g.autorizado_por,
              CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/archivos/' || g.comprobante_id END comprobante_url
       FROM core.pago_costo g JOIN core.usuario u ON u.id = g.usuario_id LEFT JOIN core.costo_indirecto k ON k.id = g.costo_indirecto_id
-      LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id
-      WHERE ($1::int IS NULL OR g.periodo_anio = $1) AND ($2::int IS NULL OR g.periodo_mes = $2)
-      ORDER BY g.fecha_operacion DESC, g.creado_en DESC LIMIT 500`, [p.data.anio ?? null, p.data.mes ?? null]);
+      LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id LEFT JOIN core.tipo_gasto t ON t.codigo = g.tipo_gasto
+      WHERE ($1::int IS NULL OR g.periodo_anio = $1) AND ($2::int IS NULL OR g.periodo_mes = $2) AND ($3::uuid IS NULL OR g.usuario_id = $3)
+      ORDER BY g.fecha_operacion DESC, g.creado_en DESC LIMIT 500`, [p.data.anio ?? null, p.data.mes ?? null, soloPropios]);
     return filas.map((f) => ({ codigo: f.codigo, concepto: f.concepto, cif: f.cif, fecha: f.fecha, periodoMes: f.periodo_mes, periodoAnio: f.periodo_anio,
       monto: num(f.monto as string), caja: f.caja, apertura: f.apertura, medio: f.medio_pago, nroOperacion: f.nro_operacion, estado: f.estado,
-      motivoAnulacion: f.motivo_anulacion, usuario: f.usuario, creadoEn: f.creado_en, comprobanteUrl: f.comprobante_url }));
+      motivoAnulacion: f.motivo_anulacion, usuario: f.usuario, creadoEn: f.creado_en, comprobanteUrl: f.comprobante_url,
+      tipoGasto: f.tipo_gasto, tipoGastoNombre: f.tipo_gasto_nombre, docTipo: f.doc_tipo, docSerie: f.doc_serie, docNumero: f.doc_numero, autorizadoPor: f.autorizado_por }));
   });
 
   app.post('/pagos-costos', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'compras.pagar')) return;
+    // Quien solo registra gastos paga desde caja chica y debe indicar tipo, glosa y autorización.
+    const soloGastos = !req.usuario!.permisos.has('compras.pagar') && req.usuario!.permisos.has('gastos.registrar');
+    if (!soloGastos && !exigir(req, reply, 'compras.pagar')) return;
     const p = PagoCosto.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pago inválido.'));
     const d = p.data;
+    if (soloGastos && d.caja !== 'CHICA') return reply.code(403).send(error(403, 'SIN_PERMISO', 'Los gastos se registran desde caja chica.'));
+    if (soloGastos && (!d.tipoGasto || d.autorizadoPor.length < 2)) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el tipo de gasto y quién lo autorizó.'));
     const clave = (req.headers['idempotency-key'] as string | undefined) ?? null;
     if (clave) {
       const previo = await uno<{ codigo: string }>('SELECT codigo FROM core.pago_costo WHERE idempotency_key = $1', [clave]);
@@ -252,6 +267,7 @@ export async function rutasPagosCostos(app: FastifyInstance) {
       const comprobanteId = d.comprobante ? await guardarImagen(d.comprobante, req.usuario!.id) : null;
       const r = await tx(async (c) => {
         const medio = await medioPago(c, d.medio, 'compras');
+        if (d.tipoGasto && !(await c.query('SELECT 1 FROM core.tipo_gasto WHERE codigo = $1 AND activo', [d.tipoGasto])).rowCount) throw fallo(422, 'El tipo de gasto no existe o está inactivo.');
         exigirOperacion(medio, d.nroOperacion);
         if (d.caja === 'CHICA' && !medio.caja_chica) throw fallo(422, `La caja chica no paga con ${medio.nombre.toLowerCase()}.`);
         let concepto = d.concepto;
@@ -270,10 +286,10 @@ export async function rutasPagosCostos(app: FastifyInstance) {
         }
         const cod = `PGC-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.pago_costo WHERE codigo ~ '^PGC-[0-9]+$'`)).rows[0].n)).padStart(6, '0')}`;
         await c.query(`INSERT INTO core.pago_costo (codigo, costo_indirecto_id, concepto, fecha_operacion, periodo_mes, periodo_anio, monto, caja, apertura_id,
-            medio_pago, nro_operacion, comprobante_id, usuario_id, idempotency_key)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14)`,
+            medio_pago, nro_operacion, comprobante_id, usuario_id, idempotency_key, tipo_gasto, doc_tipo, doc_serie, doc_numero, autorizado_por)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14,$15,$16,NULLIF($17,''),NULLIF($18,''),NULLIF($19,''))`,
           [cod, d.costoIndirectoId, concepto, d.fechaOperacion, d.periodoMes, d.periodoAnio, d.monto.toFixed(2), d.caja, aperturaId, d.medio, d.nroOperacion,
-            comprobanteId, req.usuario!.id, clave]);
+            comprobanteId, req.usuario!.id, clave, d.tipoGasto, d.docTipo, d.docSerie, d.docNumero, d.autorizadoPor]);
         return { codigo: cod, concepto };
       });
       await auditar({ ...actor(req), accion: 'PAGO_COSTO_REGISTRADO', entidad: 'pago_costo', entidadId: r.codigo,

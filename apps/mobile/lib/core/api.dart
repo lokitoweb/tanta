@@ -449,17 +449,38 @@ class Api {
   Future<List<dynamic>> misPedidos() async => await _get('/pedidos') as List<dynamic>;
 
   /// El cliente no elige forma de pago al pedir: cómo paga (o si queda debiendo) se registra al entregar.
-  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, required String fechaEntrega, String hora = '', String observaciones = '',
-          String tipoEntrega = 'RECOJO', String direccion = ''}) async =>
-      await _post('/pedidos', {'items': items, 'fechaEntrega': fechaEntrega, 'horaEntrega': hora, 'observaciones': observaciones,
-        'tipoEntrega': tipoEntrega, 'direccion': direccion}, idempotente: true) as Map<String, dynamic>;
+  /// La fecha de entrega la calcula el servidor con la hora de corte; va a la tienda del cliente.
+  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, String observaciones = '', String direccion = ''}) async =>
+      await _post('/pedidos', {'items': items, 'observaciones': observaciones, 'direccion': direccion}, idempotente: true) as Map<String, dynamic>;
+  Future<String> entregaEstimada() async => '${(await _get('/pedidos/entrega-estimada') as Map)['fecha']}';
+  Future<List<dynamic>> promocionesVigentes() async => await _get('/promociones/vigentes') as List<dynamic>;
+  Future<Map<String, dynamic>> corregirPedido(String codigo, List<Map<String, dynamic>> items) async =>
+      await _enviar('PUT', '/pedidos/$codigo/items', {'items': items}) as Map<String, dynamic>;
+
+  // Despacho
+  Future<Map<String, dynamic>> despacho() async => await _get('/despacho') as Map<String, dynamic>;
+  Future<void> guardarVehiculo(String? id, Map<String, dynamic> datos) async => id == null ? await _post('/vehiculos', datos) : await _enviar('PATCH', '/vehiculos/$id', datos);
+  Future<Map<String, dynamic>> despacharPedido({required String pedidoId, required String vehiculoId, required List<Map<String, dynamic>> items, required List<Map<String, dynamic>> empaques}) async =>
+      await _post('/ventas', {'pedidoId': pedidoId, 'vehiculoId': vehiculoId, 'items': items, 'empaques': empaques}, idempotente: true) as Map<String, dynamic>;
+
+  // Gastos de caja chica
+  Future<List<dynamic>> gastos() async => await _get('/pagos-costos') as List<dynamic>;
+  Future<Map<String, dynamic>> registrarGasto(Map<String, dynamic> datos) async => await _post('/pagos-costos', datos, idempotente: true) as Map<String, dynamic>;
+
+  // Hoja de producción
+  Future<Map<String, dynamic>> hojaProduccion(String? fecha) async => await _get('/produccion/hoja${fecha == null ? '' : '?fecha=$fecha'}') as Map<String, dynamic>;
+  Future<List<dynamic>> hojasProduccion() async => await _get('/produccion/hojas') as List<dynamic>;
+  Future<Map<String, dynamic>> detalleHoja(String codigo) async => await _get('/produccion/hojas/${Uri.encodeComponent(codigo)}') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> cerrarPedidosHoja(String fecha) async => await _post('/produccion/hoja/cerrar-pedidos', {'fecha': fecha}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> cerrarProduccionHoja(String codigo, List<Map<String, dynamic>> lineas) async =>
+      await _post('/produccion/hojas/${Uri.encodeComponent(codigo)}/cerrar', {'lineas': lineas}) as Map<String, dynamic>;
 
   /// El vendedor avisa al cliente que su pedido parece mal hecho (el pedido no se mueve).
   Future<void> observarPedido(String codigo, String mensaje) async => await _post('/pedidos/$codigo/observar', {'mensaje': mensaje});
 
   /// Entregar y cobrar en un paso: [pagos] vacío = queda todo como deuda.
-  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = ''}) async =>
-      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = '', String? voucher}) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos, 'voucher': voucher}) as Map<String, dynamic>;
 
   /// Caja del vendedor: lo cobrado hoy por forma de pago, recibos, entregas y su rendición.
   Future<Map<String, dynamic>> miDia() async => await _get('/cobranza/mi-dia') as Map<String, dynamic>;

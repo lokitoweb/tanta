@@ -31,7 +31,8 @@ test('el cliente registra su pedido y solo ve los suyos', async () => {
   assert.equal(dueno, 'mfernandez', 'aunque envíe otro clienteId, el pedido queda a su nombre');
   const mios = (await api(cli, 'GET', '/pedidos')).b;
   assert.ok(mios.some((p) => p.codigo === r.b.codigo && p.items.length === 1));
-  assert.equal((await api(cli, 'POST', '/pedidos', { items: [{ productoId: prods[0].id, cantidad: 1 }], fechaEntrega: '2020-01-01' })).s, 422, 'fecha pasada');
+  // Al cliente la entrega se le calcula; el personal puede fijarla, pero nunca en el pasado.
+  assert.equal((await api(await login('cmedina'), 'POST', '/pedidos', { clienteId: otroCliente, items: [{ productoId: prods[0].id, cantidad: 1 }], fechaEntrega: '2020-01-01' })).s, 422, 'fecha pasada');
   assert.equal((await api(await login('jramos'), 'POST', '/pedidos', { items: [{ productoId: prods[0].id, cantidad: 1 }], fechaEntrega: manana })).s, 403);
   } finally { sql(`UPDATE core.cliente SET limite_credito = ${limite} WHERE id = ${cond}`); }
 });

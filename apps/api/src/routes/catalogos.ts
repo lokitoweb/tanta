@@ -39,8 +39,8 @@ const ESQUEMAS = {
   },
   'tipos-insumo': {
     tabla: 'core.tipo_insumo',
-    campos: z.object({ ...base, esHarina: z.boolean().default(false) }),
-    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', esHarina: 'es_harina' },
+    campos: z.object({ ...base, esHarina: z.boolean().default(false), esEmpaque: z.boolean().default(false) }),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', esHarina: 'es_harina', esEmpaque: 'es_empaque' },
     enUso: 'SELECT 1 FROM core.insumo WHERE tipo = $1 LIMIT 1',
   },
   unidades: {
@@ -67,6 +67,12 @@ const ESQUEMAS = {
     columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', equivalencia: 'equivalencia', insumoId: 'insumo_id', cantidadInsumo: 'cantidad_insumo' },
     enUso: 'SELECT 1 FROM core.producto_presentacion WHERE presentacion_codigo = $1 UNION ALL SELECT 1 FROM core.venta_detalle WHERE presentacion_codigo = $1 LIMIT 1',
   },
+  'tipos-gasto': {
+    tabla: 'core.tipo_gasto',
+    campos: z.object(base),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden' },
+    enUso: 'SELECT 1 FROM core.pago_costo WHERE tipo_gasto = $1 LIMIT 1',
+  },
   bancos: {
     tabla: 'core.banco',
     campos: z.object(base),
@@ -88,7 +94,7 @@ export async function leerCatalogos(todos = false) {
   return {
     tiposDocumento: await leer('core.tipo_documento_compra'), mediosPago: await leer('core.medio_pago'),
     tiposInsumo: await leer('core.tipo_insumo'), unidades: await leer('core.unidad_medida'),
-    presentacionesCompra: await leer('core.presentacion_compra'), presentacionesVenta: await leer('core.presentacion_venta'), bancos: await leer('core.banco'),
+    presentacionesCompra: await leer('core.presentacion_compra'), presentacionesVenta: await leer('core.presentacion_venta'), tiposGasto: await leer('core.tipo_gasto'), bancos: await leer('core.banco'),
   };
 }
 

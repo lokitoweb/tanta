@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'acciones.dart';
 import 'avisos_clientes.dart';
+import 'despacho.dart';
+import 'gastos.dart';
+import 'hoja_produccion.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -173,6 +176,8 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
       if (api.puede('pedidos.ver'))
         _Pestana('Pedidos', Icons.receipt_long_outlined, Icons.receipt_long,
             Pedidos(datos: _datos)),
+      if (api.puede('despacho.ver'))
+        _Pestana('Despacho', Icons.local_shipping_outlined, Icons.local_shipping, const Despacho()),
       if (api.puede('cobranza.ver'))
         _Pestana('Cobranza', Icons.account_balance_wallet_outlined, Icons.account_balance_wallet,
             const Cobranza()),
@@ -495,6 +500,8 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),
       if (api.puede('compras.registrar')) accion('Registrar compra', Icons.local_shipping_outlined, NuevaCompra(datos: datos)),
       if (api.puede('caja.abrir')) accion('Caja chica', Icons.point_of_sale_outlined, const CajaChica()),
+      if (api.puede('produccion.ver')) accion('Hoja de producción', Icons.assignment_outlined, const HojaProduccion()),
+      if (api.puede('gastos.registrar')) accion('Registrar gasto', Icons.receipt_long_outlined, const Gastos()),
       if (api.puede('clientes.avisar')) accion('Avisos a clientes', Icons.campaign_outlined, const AvisosClientes()),
       if (api.puede('compras.verificar')) accion('Verificar compras', Icons.fact_check_outlined, const VerificarCompras()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),

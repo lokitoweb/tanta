@@ -9,11 +9,14 @@ import { Tabla, type Columna } from '@/ui/Tabla';
 import type { Cliente } from '@/core/types';
 import { DialogoEstadoCuenta, type EstadoCuenta } from './EstadoCuenta';
 import { LineasPago, useMediosCobro, type LineaPago } from './LineasPago';
+import { ComprobanteInput } from '@/modules/almacen/Deudas';
 
 interface Rendicion { id: string; estado: 'PENDIENTE' | 'RECIBIDA'; total: number; efectivoEsperado: number; efectivoEntregado: number; efectivoRecibido: number | null;
   nota: string | null; notaCaja: string | null; recibidoPor: string | null; diferencia: number; desactualizada: boolean }
 interface CajaVendedor { vendedorId: string; vendedor: string; porMedio: Record<string, number>; pagos: number; total: number; efectivo: number; rendicion: Rendicion | null }
 interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }>;
+  liquidacion: { ingresos: Array<{ medio: string; monto: number }>; gastos: Array<{ medio: string; monto: number }>; totalIngresos: number; totalGastos: number; neto: number;
+    detalleGastos: Array<{ codigo: string; concepto: string; tipo: string; medio: string; monto: number }> };
   vendedores: CajaVendedor[]; pendientes: Array<{ fecha: string; vendedor: string; total: number; estado: string }> }
 interface Cxc { id: string; clienteId: string; documento: string; saldo: number; pagado: number; venceEn: string; diasVencido: number; vencida: boolean }
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
@@ -27,7 +30,7 @@ export function Cobranza() {
   const deudores = dataset.clientes.filter((c) => c.saldo > 0);
   // Un pago puede llegar en varias formas (p. ej. efectivo + Yape): una línea por forma, un solo recibo.
   // «marcadas»: compras que el cliente paga ahora; sin marcar se cobra de la más antigua a la más nueva.
-  const [pago, setPago] = useState<{ clienteId: string; lineas: LineaPago[]; marcadas: string[] } | null>(null);
+  const [pago, setPago] = useState<{ clienteId: string; lineas: LineaPago[]; marcadas: string[]; voucher: string | null } | null>(null);
   const [cxc, setCxc] = useState<Cxc[]>([]);
   // Caja: el vendedor rinde su día; la persona encargada de caja recibe y anota lo que llegó.
   const [rendir, setRendir] = useState<{ efectivo: string; nota: string } | null>(null);
@@ -43,7 +46,7 @@ export function Cobranza() {
 
   const abrirPago = (c = deudores[0]) => {
     setAviso(null); setCxc([]);
-    setPago({ clienteId: c?.id ?? '', lineas: [lineaNueva(c?.saldo ?? 0)], marcadas: [] });
+    setPago({ clienteId: c?.id ?? '', lineas: [lineaNueva(c?.saldo ?? 0)], marcadas: [], voucher: null });
     api<Cxc[]>('/cxc').then(setCxc).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
   };
   const cuenta = deudores.find((c) => c.id === pago?.clienteId);
@@ -79,7 +82,7 @@ export function Cobranza() {
     try {
       // RN-34: un recibo se aplica a los documentos más antiguos primero.
       const pagos = aPagos(pago.lineas);
-      const r = await api<{ numero: string; aplicaciones: unknown[] }>('/cobranza/recibos', { method: 'POST', conIdempotencia: true, body: { clienteId: pago.clienteId, pagos, cxcIds: pago.marcadas.length ? pago.marcadas : undefined } });
+      const r = await api<{ numero: string; aplicaciones: unknown[] }>('/cobranza/recibos', { method: 'POST', conIdempotencia: true, body: { clienteId: pago.clienteId, pagos, cxcIds: pago.marcadas.length ? pago.marcadas : undefined, voucher: pago.voucher } });
       setPago(null);
       await refrescarDatos();
       setAviso({ tono: 'ok', texto: `Recibo ${r.numero}: ${money(suma)} de ${cuenta?.nombre ?? 'el cliente'}${pagos.length > 1 ? ` (${pagos.map((p) => `${nombreMedio(p.medio).toLowerCase()} ${money(p.monto)}`).join(' + ')})` : ''} aplicado a ${r.aplicaciones.length} documento(s).${queda + otras > 0.009 ? ` Queda ${money(queda + otras)} por cobrar.` : ' Cuenta saldada.'}` });
@@ -140,7 +143,7 @@ export function Cobranza() {
         {pago && (deudores.length ? (
           <div className="form form--2col form--dialogo">
             <label className="field field--ancho"><span className="field__label">Cliente</span>
-              <select className="field__input" value={pago.clienteId} onChange={(e) => { const c = deudores.find((x) => x.id === e.target.value); setPago({ clienteId: e.target.value, lineas: [lineaNueva(c?.saldo ?? 0)], marcadas: [] }); }}>
+              <select className="field__input" value={pago.clienteId} onChange={(e) => { const c = deudores.find((x) => x.id === e.target.value); setPago({ clienteId: e.target.value, lineas: [lineaNueva(c?.saldo ?? 0)], marcadas: [], voucher: null }); }}>
                 {deudores.map((c) => <option key={c.id} value={c.id}>{c.nombre} · debe {money(c.saldo)}</option>)}
               </select></label>
             {compras.length > 1 && (
@@ -157,6 +160,7 @@ export function Cobranza() {
               </fieldset>
             )}
             <LineasPago lineas={pago.lineas} onChange={(lineas) => setPago({ ...pago, lineas })} debe={debe} otras={otras} />
+            <ComprobanteInput valor={pago.voucher} onChange={(voucher) => setPago({ ...pago, voucher })} onError={(texto) => setAviso({ tono: 'danger', texto })} />
             {!cuenta && <span className="field__aviso field--ancho">Elige el cliente.</span>}
           </div>
         ) : <p className="t-muted">No hay cuentas por cobrar pendientes.</p>)}
@@ -271,6 +275,20 @@ export function Cobranza() {
               })}</tbody>
             </table></div>
           </>) : <p className="t-muted">Sin cobros en esta fecha.</p>}
+          {cierre && (cierre.liquidacion.totalIngresos > 0 || cierre.liquidacion.totalGastos > 0) && (
+            <div className="liquidacion">
+              <b>Liquidación diaria</b>
+              <div className="table-wrap"><table className="table table--compacta">
+                <thead><tr><th>Medio de pago</th><th className="t-right">Ingresos por cobranza</th><th className="t-right">Gastos</th><th className="t-right">Neto</th></tr></thead>
+                <tbody>{[...new Set([...cierre.liquidacion.ingresos, ...cierre.liquidacion.gastos].map((x) => x.medio))].map((m) => {
+                  const entra = cierre.liquidacion.ingresos.find((x) => x.medio === m)?.monto ?? 0, sale = cierre.liquidacion.gastos.find((x) => x.medio === m)?.monto ?? 0;
+                  return <tr key={m}><td>{nombreMedio(m)}</td><td className="t-right">{money(entra)}</td><td className="t-right">{money(sale)}</td><td className="t-right">{money(entra - sale)}</td></tr>;
+                })}</tbody>
+                <tfoot><tr><td><strong>Total</strong></td><td className="t-right"><strong>{money(cierre.liquidacion.totalIngresos)}</strong></td><td className="t-right"><strong>{money(cierre.liquidacion.totalGastos)}</strong></td><td className="t-right"><strong>{money(cierre.liquidacion.neto)}</strong></td></tr></tfoot>
+              </table></div>
+              {cierre.liquidacion.detalleGastos.length > 0 && <p className="t-muted">{cierre.liquidacion.detalleGastos.map((g) => `${g.concepto} (${g.tipo.toLowerCase()}) ${money(g.monto)}`).join(' · ')}</p>}
+            </div>
+          )}
           {cierre && cierre.pendientes.length > 0 && (
             <div className="caja-pendientes">
               <b>Días anteriores sin recibir en caja</b>

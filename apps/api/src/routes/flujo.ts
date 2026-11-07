@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { q, tx, uno, num } from '../db.js';
+import { q, tx, uno, num, type Cliente } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
@@ -55,17 +55,105 @@ async function requerimiento(productoId: string, cantidad: number, criterio: Cri
   return (await calcularOrden(productoId, cantidad, criterio))?.insumos ?? [];
 }
 
+const hoyMasDias = (ms: number) => new Date(Date.now() - 5 * 3_600_000 + ms).toISOString();
+
+/** Entrega al día siguiente; el mismo día si se pide antes de la hora de corte (parámetro administrable). */
+export async function fechaEntregaSugerida(horasMinimas = 0): Promise<string> {
+  const corte = (await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'hora_corte_mismo_dia'"))?.valor ?? '00:00';
+  const ahora = hoyMasDias(0);
+  const base = ahora.slice(11, 16) < corte ? ahora.slice(0, 10) : hoyMasDias(86_400_000).slice(0, 10);
+  // Un producto con anticipación propia corre la entrega en lugar de rechazar el pedido.
+  const minima = hoyMasDias(horasMinimas * 3_600_000).slice(0, 10);
+  return base > minima ? base : minima;
+}
+
+type ItemPedido = { productoId: string; cantidad: number; presentacion?: string; promocionId?: string };
+type LineaPedido = ItemPedido & { unidades: number; precioUnidad: number; importe: number; nombre: string };
+
+/** Valida productos, presentaciones y promociones contra la base y calcula el precio de cada línea. El cliente nunca fija el precio. */
+async function armarLineas(c: Cliente, items: ItemPedido[]) {
+  const ids = [...new Set(items.map((i) => i.productoId))];
+  const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; anticipacion_horas: number }>(
+    "SELECT id, nombre, precio_con_igv, anticipacion_horas FROM core.producto WHERE id = ANY($1::uuid[]) AND estado = 'ACTIVO' AND insumo_id IS NULL", [ids]);
+  if (prods.rowCount !== ids.length) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
+  const mapa = new Map(prods.rows.map((x) => [x.id, x]));
+  const pres = await presentacionesDe(c, items);
+  const hoy = hoyMasDias(0).slice(0, 10);
+  const lineas: LineaPedido[] = [];
+  for (const i of items) {
+    const p = mapa.get(i.productoId)!;
+    if (i.promocionId) {
+      if (items.some((x) => x.productoId === i.productoId && x !== i)) throw Object.assign(new Error(`${p.nombre} va una sola vez: con promoción o sin ella.`), { status: 422 });
+      const promo = (await c.query<{ precio_con_igv: string }>('SELECT precio_con_igv FROM core.promocion WHERE id = $1 AND producto_id = $2 AND activa AND $3::date BETWEEN desde AND hasta', [i.promocionId, i.productoId, hoy])).rows[0];
+      if (!promo) throw Object.assign(new Error(`La promoción de ${p.nombre} ya no está vigente.`), { status: 409 });
+      lineas.push({ ...i, nombre: p.nombre, presentacion: undefined, unidades: i.cantidad, precioUnidad: num(promo.precio_con_igv), importe: num(promo.precio_con_igv) * i.cantidad });
+    } else if (!i.presentacion) {
+      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad, precioUnidad: num(p.precio_con_igv), importe: num(p.precio_con_igv) * i.cantidad });
+    } else {
+      const x = pres.get(`${i.productoId}|${i.presentacion}`);
+      if (!x) throw Object.assign(new Error(`${p.nombre} no se vende en la presentación ${i.presentacion}.`), { status: 422 });
+      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, importe: x.precio * i.cantidad });
+    }
+  }
+  return { lineas, total: lineas.reduce((s, i) => s + i.importe, 0), horas: Math.max(0, ...prods.rows.map((x) => Number(x.anticipacion_horas))) };
+}
+
+/** Las promociones venden lo que hay: se reserva al pedir y no pasa a producción. */
+async function reservarPromos(c: Cliente, lineas: LineaPedido[]) {
+  for (const l of lineas.filter((x) => x.promocionId).sort((a, b) => a.productoId.localeCompare(b.productoId))) {
+    const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.productoId])).rows[0];
+    const disponible = num(p.stock) - num(p.reservado);
+    if (disponible + 1e-6 < l.unidades) throw Object.assign(new Error(`Solo quedan ${Math.max(0, Math.floor(disponible))} de ${l.nombre} en promoción.`), { status: 409 });
+    await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [l.productoId, l.unidades]);
+  }
+}
+
+export async function liberarPromos(c: Cliente, pedidoId: string) {
+  for (const l of (await c.query<{ producto_id: string; cantidad: string }>('SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL GROUP BY producto_id ORDER BY producto_id', [pedidoId])).rows) {
+    await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
+  }
+}
+
+/** RN-29 / APT-04: un pedido listo reserva su stock (lo de promoción ya está reservado). Sin stock: error, o false si no es estricto. */
+export async function reservarListo(c: Cliente, pedidoId: string, estricto = false): Promise<boolean> {
+  const lineas = (await c.query<{ producto_id: string; producto: string; cantidad: string }>(
+    'SELECT producto_id, producto, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NULL GROUP BY producto_id, producto ORDER BY producto_id', [pedidoId])).rows;
+  const stock = new Map<string, number>();
+  for (const l of lineas) {
+    const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.producto_id])).rows[0];
+    const disponible = num(p.stock) - num(p.reservado);
+    stock.set(l.producto_id, disponible);
+    if (disponible + 1e-6 < num(l.cantidad)) {
+      if (!estricto) return false;
+      throw Object.assign(new Error(`No hay stock para reservar ${l.producto}: disponible ${disponible.toFixed(0)}, pedido ${num(l.cantidad).toFixed(0)}.`), { status: 409 });
+    }
+  }
+  for (const l of lineas) await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [l.producto_id, l.cantidad]);
+  return true;
+}
+
+async function guardarLineas(c: Cliente, pedidoId: string, lineas: LineaPedido[]) {
+  for (const i of lineas) {
+    await c.query(`INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv, presentacion_codigo, cantidad_presentacion, promocion_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [pedidoId, i.productoId, i.nombre, i.unidades, i.precioUnidad.toFixed(4), i.presentacion ?? null, i.presentacion ? i.cantidad : null, i.promocionId ?? null]);
+  }
+}
+
 export async function rutasFlujo(app: FastifyInstance) {
+  // Cuándo llegaría un pedido hecho ahora: el cliente lo ve antes de confirmar.
+  app.get('/pedidos/entrega-estimada', { preHandler: autenticar }, async () => ({ fecha: await fechaEntregaSugerida() }));
+
   /* --------------------------------------------------------------- pedidos */
   const NuevoPedido = z.object({
     clienteId: z.string().uuid().optional(),
     // Con presentación (paquete x 6) la cantidad va en presentaciones; sin ella, en unidades.
-    items: z.array(z.object({ productoId: z.string().uuid(), cantidad: z.number().positive().max(10_000), presentacion: z.string().trim().toUpperCase().max(20).optional() })).min(1).max(50),
-    fechaEntrega: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    items: z.array(z.object({ productoId: z.string().uuid(), cantidad: z.number().positive().max(10_000), presentacion: z.string().trim().toUpperCase().max(20).optional(), promocionId: z.string().uuid().optional() })).min(1).max(50),
+    // Al cliente la entrega se le calcula; el personal puede indicar otra fecha por una excepción.
+    fechaEntrega: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     horaEntrega: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).or(z.literal('')).default(''),
     observaciones: z.string().trim().max(500).default(''),
     // PED-03: recojo en tienda o delivery (con dirección).
-    tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).default('RECOJO'),
+    tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).optional(),
     direccion: z.string().trim().max(200).default(''),
     // Sin forma de pago: el cliente no paga al pedir. Cómo paga (o si queda debiendo) se registra al entregar.
   }).refine((d) => d.tipoEntrega !== 'DELIVERY' || d.direccion.length >= 5, { message: 'Indica la dirección de entrega.', path: ['direccion'] });
@@ -75,51 +163,38 @@ export async function rutasFlujo(app: FastifyInstance) {
     const p = NuevoPedido.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pedido inválido.'));
     const d = p.data;
-    if (d.fechaEntrega < hoyLima()) return reply.code(422).send(error(422, 'FECHA_PASADA', 'La fecha de entrega no puede ser anterior a hoy.'));
-
     // Un cliente solo pide a su nombre (aunque envíe otro clienteId): evita IDOR.
     const yo = await uno<{ cliente_id: string | null }>('SELECT cliente_id FROM core.usuario WHERE id = $1', [req.usuario!.id]);
     const clienteId = yo?.cliente_id ?? d.clienteId;
     if (!clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige el cliente del pedido.'));
+    const fechaPedida = yo?.cliente_id ? undefined : d.fechaEntrega;
+    if (fechaPedida && fechaPedida < hoyLima()) return reply.code(422).send(error(422, 'FECHA_PASADA', 'La fecha de entrega no puede ser anterior a hoy.'));
 
     try {
       const r = await tx(async (c) => {
-        const cli = (await c.query<{ nombre: string; estado: string }>('SELECT c.nombre, c.estado FROM core.cliente c WHERE c.id = $1 FOR UPDATE', [clienteId])).rows[0];
+        const cli = (await c.query<{ nombre: string; estado: string; direccion: string }>('SELECT c.nombre, c.estado, c.direccion FROM core.cliente c WHERE c.id = $1 FOR UPDATE', [clienteId])).rows[0];
         if (!cli || cli.estado !== 'ACTIVO') throw Object.assign(new Error('El cliente no existe o está inactivo.'), { status: 422 });
-        const ids = [...new Set(d.items.map((i) => i.productoId))];
-        const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; anticipacion_horas: number }>(
-          "SELECT id, nombre, precio_con_igv, anticipacion_horas FROM core.producto WHERE id = ANY($1::uuid[]) AND estado = 'ACTIVO' AND insumo_id IS NULL", [ids]);
-        if (prods.rowCount !== ids.length) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
-        const mapa = new Map(prods.rows.map((x) => [x.id, x]));
-        const pres = await presentacionesDe(c, d.items);
-        const lineas = d.items.map((i) => {
-          if (!i.presentacion) return { ...i, unidades: i.cantidad, precioUnidad: num(mapa.get(i.productoId)!.precio_con_igv), importe: num(mapa.get(i.productoId)!.precio_con_igv) * i.cantidad };
-          const x = pres.get(`${i.productoId}|${i.presentacion}`);
-          if (!x) throw Object.assign(new Error(`${mapa.get(i.productoId)!.nombre} no se vende en la presentación ${i.presentacion}.`), { status: 422 });
-          return { ...i, unidades: i.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, importe: x.precio * i.cantidad };
-        });
-        const total = lineas.reduce((s, i) => s + i.importe, 0);
-        // PED-04 / CP-09: anticipación mínima del producto más exigente (hora de Lima, UTC−5).
-        const horas = Math.max(0, ...prods.rows.map((x) => Number(x.anticipacion_horas)));
-        const entrega = Date.parse(`${d.fechaEntrega}T${d.horaEntrega || '08:00'}:00-05:00`);
-        if (horas > 0 && entrega < Date.now() + horas * 3_600_000) {
-          const lento = prods.rows.find((x) => Number(x.anticipacion_horas) === horas)!.nombre;
-          throw Object.assign(new Error(`${lento} se pide con ${horas} h de anticipación: elige una entrega posterior.`), { status: 422 });
+        const { lineas, total, horas } = await armarLineas(c, d.items);
+        await reservarPromos(c, lineas);
+        const fechaEntrega = fechaPedida ?? await fechaEntregaSugerida(horas);
+        // PED-04 / CP-09: si el personal fija la fecha, respeta la anticipación del producto más exigente (hora de Lima, UTC−5).
+        const entrega = Date.parse(`${fechaEntrega}T${d.horaEntrega || '23:59'}:00-05:00`);
+        if (fechaPedida && horas > 0 && entrega < Date.now() + horas * 3_600_000) {
+          throw Object.assign(new Error(`Este pedido se pide con ${horas} h de anticipación: elige una entrega posterior.`), { status: 422 });
         }
+        // La entrega es en la tienda del cliente: su dirección registrada, salvo que indique otra.
+        const direccion = d.direccion || (await c.query<{ direccion: string }>('SELECT direccion FROM core.direccion_cliente WHERE cliente_id = $1 ORDER BY creado_en DESC LIMIT 1', [clienteId])).rows[0]?.direccion || cli.direccion || '';
+        const tipoEntrega = d.tipoEntrega ?? (direccion ? 'DELIVERY' : 'RECOJO');
         // PED-09: el pedido que registra el vendedor ya queda confirmado; el del cliente espera confirmación (PED-08).
         const estadoInicial = yo?.cliente_id ? 'REGISTRADO' : 'CONFIRMADO';
         const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
         const ped = (await c.query<{ id: string }>(
           `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en)
            VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END) RETURNING id`,
-          [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), d.fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
-            estadoInicial, d.tipoEntrega, d.direccion])).rows[0];
-        for (const i of lineas) {
-          const pr = mapa.get(i.productoId)!;
-          await c.query(`INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv, presentacion_codigo, cantidad_presentacion)
-            VALUES ($1,$2,$3,$4,$5,$6,$7)`, [ped.id, pr.id, pr.nombre, i.unidades, i.precioUnidad.toFixed(4), i.presentacion ?? null, i.presentacion ? i.cantidad : null]);
-        }
-        return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: estadoInicial };
+          [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
+            estadoInicial, tipoEntrega, tipoEntrega === 'DELIVERY' ? direccion : ''])).rows[0];
+        await guardarLineas(c, ped.id, lineas);
+        return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: estadoInicial, fechaEntrega };
       });
       await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CREADO', entidad: 'pedido', entidadId: r.codigo, detalle: { total: r.total, items: d.items.length }, ip: req.ip });
       void emitirEvento('pedido.estado', { codigo: r.codigo, de: null, a: r.estado });
@@ -138,7 +213,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     const filas = await q<Record<string, string>>(`
       SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
-             p.tipo_entrega AS "tipoEntrega", p.direccion, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
+             p.tipo_entrega AS "tipoEntrega", p.direccion, (SELECT ve.placa FROM core.vehiculo ve WHERE ve.id = p.vehiculo_id) vehiculo, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
              p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn",
              (SELECT sum(x.saldo) FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA') AS "porCobrar",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
@@ -165,8 +240,12 @@ export async function rutasFlujo(app: FastifyInstance) {
     if (!['REGISTRADO', 'CONFIRMADO'].includes(ped.estado)) {
       return reply.code(409).send(error(409, 'PEDIDO_EN_CURSO', 'El pedido ya pasó a producción: solo el vendedor puede anularlo.'));
     }
-    const r = await q("UPDATE core.pedido SET estado = 'CANCELADO', motivo = $2 WHERE id = $1 AND estado = $3 RETURNING id", [ped.id, p.data.motivo, ped.estado]);
-    if (!r.length) return reply.code(409).send(error(409, 'PEDIDO_CAMBIADO', 'El pedido cambió: recarga e intenta de nuevo.'));
+    const cambiado = await tx(async (c) => {
+      const r = await c.query("UPDATE core.pedido SET estado = 'CANCELADO', motivo = $2 WHERE id = $1 AND estado = $3 RETURNING id", [ped.id, p.data.motivo, ped.estado]);
+      if (r.rowCount) await liberarPromos(c, ped.id);
+      return Boolean(r.rowCount);
+    });
+    if (!cambiado) return reply.code(409).send(error(409, 'PEDIDO_CAMBIADO', 'El pedido cambió: recarga e intenta de nuevo.'));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CANCELADO', entidad: 'pedido', entidadId: codigo, detalle: p.data, ip: req.ip });
     void emitirEvento('pedido.estado', { codigo, de: ped.estado, a: 'CANCELADO' });
     return { codigo, estado: 'CANCELADO' };
@@ -187,6 +266,37 @@ export async function rutasFlujo(app: FastifyInstance) {
       cuerpo: `${req.usuario!.nombre}: ${p.data.mensaje} · Si está mal, anúlalo y vuelve a hacerlo.`, ruta: `/pedidos/${codigo}` });
     void emitirEvento('pedido.observado', { codigo });
     return { codigo, observacion: p.data.mensaje };
+  });
+
+  // El vendedor corrige lo pedido (antes de producción) tras hablar con el cliente: el total se recalcula y el cliente recibe el aviso.
+  app.put('/pedidos/:codigo/items', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'pedidos.gestionar')) return;
+    const { codigo } = req.params as { codigo: string };
+    const p = z.object({ items: NuevoPedido.innerType().shape.items }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Pedido inválido.'));
+    try {
+      const r = await tx(async (c) => {
+        const ped = (await c.query<{ id: string; estado: string; cliente_id: string; total: string }>('SELECT id, estado, cliente_id, total FROM core.pedido WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
+        if (!ped) throw Object.assign(new Error('El pedido no existe.'), { status: 404 });
+        if (!['REGISTRADO', 'CONFIRMADO'].includes(ped.estado)) throw Object.assign(new Error('Solo se corrige un pedido antes de producción.'), { status: 409 });
+        const antes = (await c.query('SELECT producto, cantidad FROM core.pedido_detalle WHERE pedido_id = $1 ORDER BY id', [ped.id])).rows;
+        await liberarPromos(c, ped.id);
+        await c.query('DELETE FROM core.pedido_detalle WHERE pedido_id = $1', [ped.id]);
+        const { lineas, total } = await armarLineas(c, p.data.items);
+        await reservarPromos(c, lineas);
+        await guardarLineas(c, ped.id, lineas);
+        await c.query('UPDATE core.pedido SET total = $2, observacion_vendedor = NULL, observado_en = NULL, observado_por = NULL WHERE id = $1', [ped.id, total.toFixed(4)]);
+        return { clienteId: ped.cliente_id, total: Number(total.toFixed(2)), antes, despues: lineas.map((l) => ({ producto: l.nombre, cantidad: l.unidades })) };
+      });
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CORREGIDO', entidad: 'pedido', entidadId: codigo, detalle: { antes: r.antes, despues: r.despues, total: r.total }, ip: req.ip });
+      avisar([{ clienteId: r.clienteId }], { tipo: 'pedido', titulo: `Tu pedido ${codigo} fue corregido`, cuerpo: `${req.usuario!.nombre} ajustó tu pedido. Nuevo total: S/ ${r.total.toFixed(2)}.`, ruta: `/pedidos/${codigo}` });
+      void emitirEvento('pedido.corregido', { codigo });
+      return { codigo, total: r.total };
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'PEDIDO_INVALIDO', err.message));
+    }
   });
 
   /* ------------------------------------------------- direcciones (cliente) */

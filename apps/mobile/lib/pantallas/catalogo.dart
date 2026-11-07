@@ -8,6 +8,10 @@ import '../ui/comunes.dart';
 /// productoId → cantidad. Vive mientras la app está abierta.
 final carrito = ValueNotifier<Map<String, int>>({});
 
+/// Promociones vigentes como productos del carrito (clave promo:id): salen del stock y con precio propio.
+final promociones = ValueNotifier<List<Map<String, dynamic>>>(const []);
+const _prefijoPromo = 'promo:';
+
 void ponerEnCarrito(String id, int cantidad) {
   final c = Map<String, int>.from(carrito.value);
   if (cantidad <= 0) {
@@ -45,10 +49,23 @@ class _CatalogoState extends State<Catalogo> {
   String _categoria = 'todas';
   String _buscar = '';
 
-  List<Map<String, dynamic>> get _productos => (widget.datos['productos'] as List? ?? const [])
+  List<Map<String, dynamic>> get _soloProductos => (widget.datos['productos'] as List? ?? const [])
       .cast<Map<String, dynamic>>()
       // Los intermedios (masa madre) no se venden.
       .where((p) => (p['estado'] == null || p['estado'] == 'ACTIVO') && p['insumoId'] == null).toList();
+  List<Map<String, dynamic>> get _productos => [..._soloProductos, ...promociones.value];
+
+  @override
+  void initState() {
+    super.initState();
+    Api.instancia.promocionesVigentes().then((l) {
+      if (!mounted) return;
+      setState(() => promociones.value = [
+        for (final x in l.cast<Map<String, dynamic>>())
+          {...x, 'id': '$_prefijoPromo${x['id']}', 'promocionId': x['id'], 'nombre': x['titulo']},
+      ]);
+    }).catchError((_) {});
+  }
 
   /// A05: detalle con selector de cantidad.
   Future<void> _detalle(Map<String, dynamic> p) async {
@@ -102,7 +119,7 @@ class _CatalogoState extends State<Catalogo> {
   Widget build(BuildContext context) {
     final productos = _productos;
     final categorias = (widget.datos['categorias'] as List? ?? const []).cast<Map<String, dynamic>>();
-    final filtrados = productos.where((p) => (_categoria == 'todas' || p['categoriaId'] == _categoria)
+    final filtrados = _soloProductos.where((p) => (_categoria == 'todas' || p['categoriaId'] == _categoria)
         && '${p['nombre']}'.toLowerCase().contains(_buscar.toLowerCase())).toList();
 
     return ValueListenableBuilder<Map<String, int>>(
@@ -168,6 +185,29 @@ class _CatalogoState extends State<Catalogo> {
                 ),
               ]),
             ),
+          ),
+          if (promociones.value.isNotEmpty) SizedBox(
+            height: 92,
+            child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(16, 0, 16, 10), children: [
+              for (final x in promociones.value) Container(
+                width: 250,
+                margin: const EdgeInsets.only(right: 10),
+                padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                decoration: BoxDecoration(color: TantaColors.surfaceCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: TantaColors.honey500)),
+                child: Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Text('${x['titulo']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                    Text('${x['producto']} · ${dinero((x['precioConIgv'] as num).toDouble())}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                    Text('Quedan ${x['disponible']}', style: const TextStyle(fontSize: 11, color: TantaColors.textMuted)),
+                  ])),
+                  IconButton(
+                    tooltip: 'Agregar',
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: (c[x['id']] ?? 0) >= (x['disponible'] as num) ? null : () => ponerEnCarrito('${x['id']}', (c[x['id']] ?? 0) + 1),
+                  ),
+                ]),
+              ),
+            ]),
           ),
           Expanded(
             child: filtrados.isEmpty
@@ -301,7 +341,7 @@ Widget _fila(String a, String b, {bool fuerte = false}) => Padding(
   ]),
 );
 
-/// A07: fecha y hora, recojo o delivery, pago contra entrega y observaciones. El servidor recalcula todo.
+/// A07: dirección de la tienda, pago contra entrega y observaciones. La fecha y los precios los pone el servidor.
 class ConfirmarPedido extends StatefulWidget {
   const ConfirmarPedido({super.key, required this.productos});
   final List<Map<String, dynamic>> productos;
@@ -310,9 +350,7 @@ class ConfirmarPedido extends StatefulWidget {
 }
 
 class _ConfirmarPedidoState extends State<ConfirmarPedido> {
-  DateTime _fecha = DateTime.now().add(const Duration(days: 1));
-  TimeOfDay _hora = const TimeOfDay(hour: 9, minute: 0);
-  String _tipo = 'RECOJO';
+  String? _estimada;
   final _dir = TextEditingController();
   final _obs = TextEditingController();
   bool _enviando = false;
@@ -321,6 +359,7 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   @override
   void initState() {
     super.initState();
+    Api.instancia.entregaEstimada().then((f) { if (mounted) setState(() => _estimada = f); }).catchError((_) {});
     Api.instancia.misDirecciones().then((l) {
       if (mounted && l.isNotEmpty && _dir.text.isEmpty) setState(() => _dir.text = '${(l.first as Map)['direccion']}');
     }).catchError((_) {});
@@ -332,15 +371,16 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
     final nav = Navigator.of(context);
     try {
       final r = await Api.instancia.crearPedido(
-        items: carrito.value.entries.map((e) => {'productoId': e.key, 'cantidad': e.value}).toList(),
-        fechaEntrega: _fecha.toIso8601String().substring(0, 10),
-        hora: '${_hora.hour.toString().padLeft(2, '0')}:${_hora.minute.toString().padLeft(2, '0')}',
-        tipoEntrega: _tipo, direccion: _tipo == 'DELIVERY' ? _dir.text.trim() : '',
+        items: carrito.value.entries.map((e) {
+          final promo = widget.productos.where((p) => p['id'] == e.key && p['promocionId'] != null).firstOrNull;
+          return {'productoId': promo?['productoId'] ?? e.key, 'cantidad': e.value, if (promo != null) 'promocionId': promo['promocionId']};
+        }).toList(),
+        direccion: _dir.text.trim(),
         observaciones: _obs.text.trim(),
       );
       carrito.value = {};
       nav.popUntil((r) => r.isFirst);
-      aviso.showSnackBar(SnackBar(content: Text('Pedido ${r['codigo'] ?? ''} registrado. Te avisaremos cuando lo confirmemos.')));
+      aviso.showSnackBar(SnackBar(content: Text('Pedido ${r['codigo'] ?? ''} registrado. Entrega: ${fechaCorta('${r['fechaEntrega']}')}.')));
     } on ApiException catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
     } catch (_) {
@@ -353,40 +393,15 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   @override
   Widget build(BuildContext context) {
     final t = totalesCarrito(widget.productos);
-    final valido = carrito.value.isNotEmpty && (_tipo == 'RECOJO' || _dir.text.trim().length >= 5);
+    final valido = carrito.value.isNotEmpty && _dir.text.trim().length >= 5;
     return Scaffold(
       appBar: AppBar(title: const Text('Confirmar pedido')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Text('Entrega', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: OutlinedButton.icon(
-            icon: const Icon(Icons.event), label: Text('${_fecha.day}/${_fecha.month}/${_fecha.year}'),
-            onPressed: () async {
-              final hoy = DateTime.now();
-              final f = await showDatePicker(context: context, helpText: 'Fecha de entrega', initialDate: _fecha, firstDate: hoy, lastDate: hoy.add(const Duration(days: 60)));
-              if (f != null) setState(() => _fecha = f);
-            },
-          )),
-          const SizedBox(width: 8),
-          Expanded(child: OutlinedButton.icon(
-            icon: const Icon(Icons.schedule), label: Text(_hora.format(context)),
-            onPressed: () async {
-              final h = await showTimePicker(context: context, initialTime: _hora, helpText: 'Hora de entrega');
-              if (h != null) setState(() => _hora = h);
-            },
-          )),
-        ]),
+        Text(_estimada == null ? 'Te llevamos tu pedido a tu tienda.' : 'Llega a tu tienda el ${fechaCorta(_estimada!)}.', style: const TextStyle(fontSize: 13.5)),
         const SizedBox(height: 12),
-        SegmentedButton<String>(
-          segments: const [ButtonSegment(value: 'RECOJO', label: Text('Recojo en tienda')), ButtonSegment(value: 'DELIVERY', label: Text('Delivery'))],
-          selected: {_tipo},
-          onSelectionChanged: (v) => setState(() => _tipo = v.first),
-        ),
-        if (_tipo == 'DELIVERY') ...[
-          const SizedBox(height: 12),
-          TextField(controller: _dir, maxLength: 200, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Dirección de entrega')),
-        ],
+        TextField(controller: _dir, maxLength: 200, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Dirección de tu tienda')),
         const SizedBox(height: 16),
         // No se paga al pedir: el vendedor registra el pago (efectivo, Yape, transferencia…) al entregar.
         const Text('No pagas ahora: pagas al recibir tu pedido.', style: TextStyle(color: TantaColors.textMuted, fontSize: 12.5)),

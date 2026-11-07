@@ -10,7 +10,7 @@ const PESTANAS = [
   ['medios-pago', 'Medios de pago', 'mediosPago'], ['tipos-documento', 'Documentos de compra', 'tiposDocumento'],
   ['tipos-insumo', 'Tipos de insumo', 'tiposInsumo'], ['unidades', 'Unidades', 'unidades'],
   ['presentaciones-compra', 'Presentaciones de compra', 'presentacionesCompra'], ['presentaciones-venta', 'Presentaciones de venta', 'presentacionesVenta'],
-  ['bancos', 'Bancos', 'bancos'],
+  ['tipos-gasto', 'Tipos de gasto', 'tiposGasto'], ['bancos', 'Bancos', 'bancos'],
 ] as const;
 type Ruta = typeof PESTANAS[number][0];
 
@@ -36,9 +36,9 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
   },
   'tipos-insumo': {
     descripcion: 'Clasificación de los insumos. Los marcados como harina suman el 100 % del porcentaje panadero.',
-    nuevo: { codigo: '', nombre: '', esHarina: false, orden: 10, activo: true },
-    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'esHarina', label: 'Es harina' }, { key: 'activo', label: 'Activo' }],
-    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('esHarina', 'Cuenta como harina en el % panadero'), ...comunes],
+    nuevo: { codigo: '', nombre: '', esHarina: false, esEmpaque: false, orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'esHarina', label: 'Es harina' }, { key: 'esEmpaque', label: 'Es empaque' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('esHarina', 'Cuenta como harina en el % panadero'), si('esEmpaque', 'Material de empaque', 'Despacho puede usarlo (bolsas, etiquetas…)'), ...comunes],
   },
   unidades: {
     descripcion: 'Única tabla de conversión: dentro de una familia, factor respecto a la unidad patrón (kg, L, unidad). Una unidad en uso no cambia de familia ni de factor.',
@@ -60,6 +60,12 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
     nuevo: { codigo: '', nombre: '', equivalencia: 1, insumoId: '', cantidadInsumo: '', orden: 10, activo: true },
     columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'equivalencia', label: 'Equivalencia', tipo: 'num' }, { key: 'insumo', label: 'Descuenta' }, { key: 'activo', label: 'Activo' }],
     campos: [],
+  },
+  'tipos-gasto': {
+    descripcion: 'Clasificación de los gastos de caja chica: ventas, distribución, operativo…',
+    nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, ...comunes],
   },
   bancos: {
     descripcion: 'Bancos para las cuentas de los proveedores.',

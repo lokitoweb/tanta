@@ -21,6 +21,11 @@ import { Pedidos } from '@/modules/ventas/Pedidos';
 import { Cobranza } from '@/modules/ventas/Cobranza';
 import { Aprobaciones } from '@/modules/ventas/Aprobaciones';
 import { AvisosClientes } from '@/modules/ventas/AvisosClientes';
+import { Despacho } from '@/modules/ventas/Despacho';
+import { Gastos } from '@/modules/ventas/Gastos';
+import { Promociones } from '@/modules/ventas/Promociones';
+import { HojaProduccion } from '@/modules/produccion/HojaProduccion';
+import { PuntoEquilibrio } from '@/modules/gerencia/PuntoEquilibrio';
 import { Catalogo } from '@/modules/cliente/Catalogo';
 import { Usuarios } from '@/modules/seguridad/Usuarios';
 import { Parametros } from '@/modules/seguridad/Parametros';
@@ -60,6 +65,11 @@ export function App() {
         <Route path="/ventas/pedidos" element={<Gate permiso="pedidos.ver" siNo={<SinAcceso />}><Pedidos /></Gate>} />
         <Route path="/ventas/cobranza" element={<Gate permiso="cobranza.ver" siNo={<SinAcceso />}><Cobranza /></Gate>} />
         <Route path="/ventas/aprobaciones" element={<Gate permiso="descuentos.aprobar" siNo={<SinAcceso />}><Aprobaciones /></Gate>} />
+        <Route path="/ventas/despacho" element={<Gate permiso="despacho.ver" siNo={<SinAcceso />}><Despacho /></Gate>} />
+        <Route path="/ventas/gastos" element={<Gate permiso="gastos.registrar" siNo={<SinAcceso />}><Gastos /></Gate>} />
+        <Route path="/ventas/promociones" element={<Gate permiso="promociones.gestionar" siNo={<SinAcceso />}><Promociones /></Gate>} />
+        <Route path="/produccion/hoja" element={<Gate permiso="produccion.ver" siNo={<SinAcceso />}><HojaProduccion /></Gate>} />
+        <Route path="/gerencia/punto-equilibrio" element={<Gate permiso="costos.ver" siNo={<SinAcceso />}><PuntoEquilibrio /></Gate>} />
         <Route path="/ventas/avisos" element={<Gate permiso="clientes.avisar" siNo={<SinAcceso />}><AvisosClientes /></Gate>} />
         <Route path="/catalogo" element={<Gate permiso="catalogo.ver" siNo={<SinAcceso />}><Catalogo /></Gate>} />
         <Route path="/seguridad/usuarios" element={<Gate permiso="usuarios.ver" siNo={<SinAcceso />}><Usuarios /></Gate>} />
