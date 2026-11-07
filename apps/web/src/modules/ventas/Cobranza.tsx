@@ -15,6 +15,7 @@ interface Rendicion { id: string; estado: 'PENDIENTE' | 'RECIBIDA'; total: numbe
 interface CajaVendedor { vendedorId: string; vendedor: string; porMedio: Record<string, number>; pagos: number; total: number; efectivo: number; rendicion: Rendicion | null }
 interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }>;
   vendedores: CajaVendedor[]; pendientes: Array<{ fecha: string; vendedor: string; total: number; estado: string }> }
+interface Cxc { id: string; clienteId: string; documento: string; saldo: number; pagado: number; venceEn: string; diasVencido: number; vencida: boolean }
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 export function Cobranza() {
@@ -25,7 +26,9 @@ export function Cobranza() {
   const limiteTotal = dataset.clientes.reduce((s, c) => s + c.limiteCredito, 0);
   const deudores = dataset.clientes.filter((c) => c.saldo > 0);
   // Un pago puede llegar en varias formas (p. ej. efectivo + Yape): una línea por forma, un solo recibo.
-  const [pago, setPago] = useState<{ clienteId: string; lineas: LineaPago[] } | null>(null);
+  // «marcadas»: compras que el cliente paga ahora; sin marcar se cobra de la más antigua a la más nueva.
+  const [pago, setPago] = useState<{ clienteId: string; lineas: LineaPago[]; marcadas: string[] } | null>(null);
+  const [cxc, setCxc] = useState<Cxc[]>([]);
   // Caja: el vendedor rinde su día; la persona encargada de caja recibe y anota lo que llegó.
   const [rendir, setRendir] = useState<{ efectivo: string; nota: string } | null>(null);
   const [recibir, setRecibir] = useState<{ v: CajaVendedor; efectivo: string; nota: string } | null>(null);
@@ -38,9 +41,22 @@ export function Cobranza() {
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [guardando, setGuardando] = useState(false);
 
-  const abrirPago = (c = deudores[0]) => { setAviso(null); setPago({ clienteId: c?.id ?? '', lineas: [lineaNueva(c?.saldo ?? 0)] }); };
+  const abrirPago = (c = deudores[0]) => {
+    setAviso(null); setCxc([]);
+    setPago({ clienteId: c?.id ?? '', lineas: [lineaNueva(c?.saldo ?? 0)], marcadas: [] });
+    api<Cxc[]>('/cxc').then(setCxc).catch((e) => setAviso({ tono: 'danger', texto: e.message }));
+  };
   const cuenta = deudores.find((c) => c.id === pago?.clienteId);
-  const { suma, queda, problema: falta } = revisar(pago?.lineas ?? [], cuenta?.saldo ?? 0);
+  const compras = cxc.filter((x) => x.clienteId === pago?.clienteId);
+  const sumaMarcadas = (ids: string[]) => compras.filter((x) => ids.includes(x.id)).reduce((s, x) => s + x.saldo, 0);
+  const debe = pago?.marcadas.length ? sumaMarcadas(pago.marcadas) : cuenta?.saldo ?? 0;
+  const otras = (cuenta?.saldo ?? 0) - debe;
+  const marcar = (id: string) => {
+    if (!pago) return;
+    const marcadas = pago.marcadas.includes(id) ? pago.marcadas.filter((x) => x !== id) : [...pago.marcadas, id];
+    setPago({ ...pago, marcadas, lineas: [lineaNueva(marcadas.length ? sumaMarcadas(marcadas) : cuenta?.saldo ?? 0)] });
+  };
+  const { suma, queda, problema: falta } = revisar(pago?.lineas ?? [], debe);
   const problema = !pago || !cuenta ? 'Elige el cliente.' : falta;
   const mio = cierre?.vendedores.find((v) => v.vendedorId === sesion.usuario.id);
   const accionCaja = async (fn: () => Promise<string>) => {
@@ -63,10 +79,10 @@ export function Cobranza() {
     try {
       // RN-34: un recibo se aplica a los documentos más antiguos primero.
       const pagos = aPagos(pago.lineas);
-      const r = await api<{ numero: string; aplicaciones: unknown[] }>('/cobranza/recibos', { method: 'POST', conIdempotencia: true, body: { clienteId: pago.clienteId, pagos } });
+      const r = await api<{ numero: string; aplicaciones: unknown[] }>('/cobranza/recibos', { method: 'POST', conIdempotencia: true, body: { clienteId: pago.clienteId, pagos, cxcIds: pago.marcadas.length ? pago.marcadas : undefined } });
       setPago(null);
       await refrescarDatos();
-      setAviso({ tono: 'ok', texto: `Recibo ${r.numero}: ${money(suma)} de ${cuenta?.nombre ?? 'el cliente'}${pagos.length > 1 ? ` (${pagos.map((p) => `${nombreMedio(p.medio).toLowerCase()} ${money(p.monto)}`).join(' + ')})` : ''} aplicado a ${r.aplicaciones.length} documento(s).${queda > 0.009 ? ` Queda ${money(queda)} por cobrar.` : ' Cuenta saldada.'}` });
+      setAviso({ tono: 'ok', texto: `Recibo ${r.numero}: ${money(suma)} de ${cuenta?.nombre ?? 'el cliente'}${pagos.length > 1 ? ` (${pagos.map((p) => `${nombreMedio(p.medio).toLowerCase()} ${money(p.monto)}`).join(' + ')})` : ''} aplicado a ${r.aplicaciones.length} documento(s).${queda + otras > 0.009 ? ` Queda ${money(queda + otras)} por cobrar.` : ' Cuenta saldada.'}` });
     } catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo registrar.' }); }
     finally { setGuardando(false); }
   };
@@ -103,7 +119,10 @@ export function Cobranza() {
     },
     {
       key: 'id', header: '', align: 'right',
-      render: (c) => <Boton onClick={() => void api<EstadoCuenta>(`/estado-cuenta?clienteId=${c.id}`).then(setEstado).catch((e) => setAviso({ tono: 'danger', texto: e.message }))}>Estado de cuenta</Boton>,
+      render: (c) => <div className="fila-acciones">
+        {puede('cobranza.registrar') && <Boton onClick={() => abrirPago(c)}>Cobrar</Boton>}
+        <Boton onClick={() => void api<EstadoCuenta>(`/estado-cuenta?clienteId=${c.id}`).then(setEstado).catch((e) => setAviso({ tono: 'danger', texto: e.message }))}>Estado de cuenta</Boton>
+      </div>,
     },
   ];
 
@@ -115,16 +134,29 @@ export function Cobranza() {
         acciones={<><Boton icono="download" onClick={() => exportarExcel('cuentas-por-cobrar', dataset.clientes.map((c) => ({ ...c })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{puede('cobranza.registrar') && <Boton variant="primary" icono="plus" onClick={() => abrirPago()}>Registrar pago</Boton>}</>}
       />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
-      <Dialogo abierto={pago !== null} titulo="Registrar pago" descripcion="Total o parcial. Se aplica a los documentos más antiguos y genera un recibo."
+      <Dialogo abierto={pago !== null} titulo="Registrar pago" descripcion="Total o parcial. Marca las compras que paga; sin marcar se aplica a las más antiguas. Genera un recibo."
         onCerrar={() => setPago(null)}
         acciones={<><Boton onClick={() => setPago(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || problema !== null} onClick={() => void registrar()}>{guardando ? 'Registrando…' : `Cobrar ${money(suma)}`}</Boton></>}>
         {pago && (deudores.length ? (
           <div className="form form--2col form--dialogo">
             <label className="field field--ancho"><span className="field__label">Cliente</span>
-              <select className="field__input" value={pago.clienteId} onChange={(e) => { const c = deudores.find((x) => x.id === e.target.value); setPago({ clienteId: e.target.value, lineas: [lineaNueva(c?.saldo ?? 0)] }); }}>
+              <select className="field__input" value={pago.clienteId} onChange={(e) => { const c = deudores.find((x) => x.id === e.target.value); setPago({ clienteId: e.target.value, lineas: [lineaNueva(c?.saldo ?? 0)], marcadas: [] }); }}>
                 {deudores.map((c) => <option key={c.id} value={c.id}>{c.nombre} · debe {money(c.saldo)}</option>)}
               </select></label>
-            <LineasPago lineas={pago.lineas} onChange={(lineas) => setPago({ ...pago, lineas })} debe={cuenta?.saldo ?? 0} />
+            {compras.length > 1 && (
+              <fieldset className="cobro-compras field--ancho">
+                <legend className="field__label">Compras por pagar</legend>
+                {compras.map((x) => (
+                  <label key={x.id} className="cobro-compra">
+                    <input type="checkbox" checked={pago.marcadas.includes(x.id)} onChange={() => marcar(x.id)} />
+                    <span className="celda-doble"><strong>{x.documento}</strong>
+                      <span className={x.vencida ? 't-neg' : ''}>vence {x.venceEn.split('-').reverse().join('/')}{x.vencida ? ` · ${x.diasVencido} días vencida` : ''}{x.pagado > 0.009 ? ' · pago parcial' : ''}</span></span>
+                    <b>{money(x.saldo)}</b>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            <LineasPago lineas={pago.lineas} onChange={(lineas) => setPago({ ...pago, lineas })} debe={debe} otras={otras} />
             {!cuenta && <span className="field__aviso field--ancho">Elige el cliente.</span>}
           </div>
         ) : <p className="t-muted">No hay cuentas por cobrar pendientes.</p>)}

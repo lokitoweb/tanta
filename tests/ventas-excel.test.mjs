@@ -108,6 +108,29 @@ test('Pago con dos formas (efectivo + Yape) y pago parcial que deja la compra en
   assert.equal(fila.clienteId, cli);
 });
 
+test('Cobrar solo las compras marcadas: las demás siguen pendientes, aunque sean más antiguas', async () => {
+  const t = await login('cmedina');
+  const cli = cliente();
+  const [antigua, a, b] = [deuda(cli, 100, 20), deuda(cli, 40, 5), deuda(cli, 60, 3)];
+  const r = await api(t, 'POST', '/cobranza/recibos', { clienteId: cli, cxcIds: [a, b], pagos: [{ monto: 100, medio: 'EFECTIVO' }] });
+  assert.equal(r.s, 201, JSON.stringify(r.b));
+  const abiertas = (await api(t, 'GET', '/cxc')).b.map((x) => x.id);
+  assert.ok(abiertas.includes(antigua), 'la compra sin marcar sigue en la cartera');
+  assert.ok(!abiertas.includes(a) && !abiertas.includes(b), 'las pagadas salen de la cartera');
+  assert.equal((await api(t, 'POST', '/cobranza/recibos', { clienteId: cli, cxcIds: [antigua], pagos: [{ monto: 101, medio: 'EFECTIVO' }] })).s, 422, 'no se cobra más que lo marcado');
+});
+
+test('Cliente: el nombre del contacto es opcional y se guarda al crear y editar', async () => {
+  const t = await login('lbermudez');
+  const base = { nombre: `Contacto ${Date.now()}`, docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', listaPrecio: 'MINORISTA', diasCredito: 0, limiteCredito: 0 };
+  const c = await api(t, 'POST', '/clientes', { ...base, contacto: 'Ana Ruiz' });
+  assert.equal(c.s, 201, JSON.stringify(c.b));
+  const leer = async () => (await api(t, 'GET', '/clientes')).b.find((x) => x.id === c.b.id);
+  assert.equal((await leer()).contacto, 'Ana Ruiz');
+  assert.equal((await api(t, 'PATCH', `/clientes/${c.b.id}`, base)).s, 200, 'sin contacto también es válido');
+  assert.equal((await leer()).contacto, '');
+});
+
 test('CP-34: antigüedad de deuda por días vencidos (5, 20 y 40)', async () => {
   const cli = cliente();
   [5, 20, 40].forEach((d) => deuda(cli, 10, d));

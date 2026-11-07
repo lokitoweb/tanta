@@ -26,9 +26,11 @@ export function useMediosCobro() {
 }
 
 /** Filas de formas de pago con «Agregar otra», el resumen (cobras / queda) y lo que falta. Va dentro de un .form--2col. */
-export function LineasPago({ lineas, onChange, debe }: { lineas: LineaPago[]; onChange: (l: LineaPago[]) => void; debe: number }) {
+export function LineasPago({ lineas, onChange, debe, otras = 0 }: { lineas: LineaPago[]; onChange: (l: LineaPago[]) => void; debe: number; otras?: number }) {
   const { medios, pideOperacion, lineaNueva, revisar } = useMediosCobro();
   const { suma, queda, problema } = revisar(lineas, debe);
+  // «otras»: deudas del cliente que no entran en este cobro; siguen pendientes aunque este se pague completo.
+  const resta = queda + otras;
   const cambiar = (i: number, c: Partial<LineaPago>) => onChange(lineas.map((l, j) => (j === i ? { ...l, ...c } : l)));
   // La nueva forma propone lo que falta y un medio distinto a los ya usados.
   const agregar = () => onChange([...lineas, lineaNueva(Math.max(queda, 0), medios.find((m) => !lineas.some((l) => l.medio === m.codigo))?.codigo)]);
@@ -48,7 +50,7 @@ export function LineasPago({ lineas, onChange, debe }: { lineas: LineaPago[]; on
       {lineas.length < 5 && <div className="field--ancho"><Boton icono="plus" onClick={agregar}>Agregar otra forma de pago</Boton></div>}
       <div className="pago-resumen field--ancho">
         <span>Cobras <b>{money(suma)}</b></span>
-        <span className={queda > 0.009 ? 't-warn' : 't-ok'}>{queda > 0.009 ? <>Queda por cobrar <b>{money(queda)}</b></> : 'Cuenta saldada'}</span>
+        <span className={resta > 0.009 ? 't-warn' : 't-ok'}>{resta > 0.009 ? <>Queda por cobrar <b>{money(resta)}</b></> : 'Cuenta saldada'}</span>
       </div>
       {problema && <span className="field__aviso field--ancho">{problema}</span>}
     </>

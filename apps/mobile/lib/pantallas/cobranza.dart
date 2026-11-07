@@ -20,7 +20,7 @@ class _Deudor {
   int get maxDias => docs.fold(0, (m, c) => c['vencida'] == true && (c['diasVencido'] as num).toInt() > m ? (c['diasVencido'] as num).toInt() : m);
 }
 
-/// Cobranza: cartera agrupada por cliente. Se cobra todo lo del cliente o una compra puntual,
+/// Cobranza: cartera agrupada por cliente. Se cobra todo lo del cliente o las compras marcadas,
 /// con una o varias formas de pago; un pago parcial deja la compra en la lista con lo que falta.
 class Cobranza extends StatefulWidget {
   const Cobranza({super.key});
@@ -32,6 +32,7 @@ class _CobranzaState extends State<Cobranza> {
   List<Map<String, dynamic>>? _cuentas;
   String? _error;
   final _abiertos = <String>{};
+  final _marcadas = <String>{}; // ids de las compras elegidas para cobrar
   int _version = 0;
 
   @override
@@ -65,11 +66,12 @@ class _CobranzaState extends State<Cobranza> {
 
   Future<void> _cobrar(_Deudor d, List<Map<String, dynamic>> docs) async {
     final debe = docs.fold<double>(0, (s, c) => s + _d(c['saldo']));
-    final cobro = await mostrarHojaCobro(context, cliente: d.nombre, detalle: docs.length == 1 ? '${docs.first['documento'] ?? 'Compra'}' : '${docs.length} compras', debe: debe);
+    final cobro = await mostrarHojaCobro(context, cliente: d.nombre, detalle: docs.length == 1 ? '${docs.first['documento'] ?? 'Compra'}' : '${docs.length} compras', debe: debe, otras: d.saldo - debe);
     if (cobro == null || cobro.pagos.isEmpty || !mounted) return;
     final pagos = cobro.pagos;
     final monto = pagos.fold<double>(0, (s, p) => s + _d(p['monto']));
-    final queda = debe - monto;
+    // Lo que el cliente sigue debiendo, contando las compras que no entraron en este cobro.
+    final queda = d.saldo - monto;
     final aviso = ScaffoldMessenger.of(context);
     final datos = {
       'clienteId': d.id,
@@ -83,7 +85,7 @@ class _CobranzaState extends State<Cobranza> {
       // En línea: se registra al instante y hay número de recibo real.
       final r = await Api.instancia.registrarRecibo(datos, claveIdempotencia: clave);
       await _cargar();
-      setState(() => _version++);
+      setState(() { _version++; _marcadas.removeAll(datos['cxcIds'] as List<String>); });
       aviso.showSnackBar(SnackBar(
         content: Text('Pago de ${dinero(monto)} registrado$textoQueda'),
         backgroundColor: TantaColors.stateOk,
@@ -120,6 +122,7 @@ class _CobranzaState extends State<Cobranza> {
     if (!mounted) return;
     // Se descuenta en pantalla (más antiguas primero, como el servidor) para no cobrar dos veces.
     setState(() {
+      _marcadas.removeAll(datos['cxcIds'] as List<String>);
       var resto = monto;
       for (final c in docs) {
         final aplica = resto < _d(c['saldo']) ? resto : _d(c['saldo']);
@@ -181,6 +184,8 @@ class _CobranzaState extends State<Cobranza> {
   Widget _tarjeta(_Deudor d, bool puedeCobrar) {
     final abierto = _abiertos.contains(d.id);
     final n = d.docs.length;
+    final marcadas = d.docs.where((c) => _marcadas.contains('${c['id']}')).toList();
+    final suma = marcadas.fold<double>(0, (s, c) => s + _d(c['saldo']));
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Panel(
@@ -207,6 +212,11 @@ class _CobranzaState extends State<Cobranza> {
           ),
           if (abierto) ...[
             const Divider(height: 1),
+            if (puedeCobrar && n > 1)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: Text('Marca las compras que va a pagar. Sin marcar se cobra todo.', style: TextStyle(fontSize: 11.5, color: TantaColors.textMuted)),
+              ),
             for (final c in d.docs) _documento(d, c, puedeCobrar),
           ],
           if (puedeCobrar)
@@ -214,9 +224,9 @@ class _CobranzaState extends State<Cobranza> {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: TantaColors.ink800, minimumSize: const Size.fromHeight(40)),
-                onPressed: () => _cobrar(d, d.docs),
+                onPressed: () => _cobrar(d, marcadas.isEmpty ? d.docs : marcadas),
                 icon: const Icon(Icons.payments_outlined, size: 18),
-                label: Text(n == 1 ? 'Cobrar' : 'Cobrar al cliente'),
+                label: Text(marcadas.isNotEmpty ? 'Cobrar ${dinero(suma)} (${marcadas.length} de $n)' : n == 1 ? 'Cobrar' : 'Cobrar al cliente'),
               ),
             ),
         ]),
@@ -228,9 +238,15 @@ class _CobranzaState extends State<Cobranza> {
     final vencida = c['vencida'] == true;
     final pagado = _d(c['pagado']);
     final parcial = pagado > 0.009;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+    final id = '${c['id']}';
+    final elegible = puedeCobrar && d.docs.length > 1;
+    void marcar() => setState(() => _marcadas.contains(id) ? _marcadas.remove(id) : _marcadas.add(id));
+    return InkWell(
+      onTap: elegible ? marcar : null,
+      child: Padding(
+      padding: EdgeInsets.fromLTRB(elegible ? 4 : 14, 10, 14, 10),
       child: Row(children: [
+        if (elegible) Checkbox(value: _marcadas.contains(id), onChanged: (_) => marcar()),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Flexible(child: Text('${c['documento'] ?? 'Compra'}', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600))),
@@ -249,9 +265,8 @@ class _CobranzaState extends State<Cobranza> {
           Text(dinero(_d(c['saldo'])), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
           if (parcial) const Text('queda', style: TextStyle(fontSize: 10.5, color: TantaColors.textMuted)),
         ]),
-        if (puedeCobrar && d.docs.length > 1)
-          TextButton(onPressed: () => _cobrar(d, [c]), child: const Text('Cobrar')),
       ]),
+    ),
     );
   }
 }
@@ -271,20 +286,22 @@ List<(String, String)> lineasRecibo(List<Map<String, dynamic>> pagos, double que
     ];
 
 /// Abre la hoja de cobro. Con [alEntregar] ofrece «No pagó» y la nota de la entrega (quién recibió).
-Future<Cobro?> mostrarHojaCobro(BuildContext context, {required String cliente, required String detalle, required double debe, bool alEntregar = false}) =>
+/// [otras]: lo que el cliente debe fuera de este cobro; sigue pendiente aunque este se pague completo.
+Future<Cobro?> mostrarHojaCobro(BuildContext context, {required String cliente, required String detalle, required double debe, double otras = 0, bool alEntregar = false}) =>
     showModalBottomSheet<Cobro>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => HojaCobro(cliente: cliente, detalle: detalle, debe: debe, alEntregar: alEntregar),
+      builder: (_) => HojaCobro(cliente: cliente, detalle: detalle, debe: debe, otras: otras, alEntregar: alEntregar),
     );
 
 /// Formulario del cobro: una o varias formas de pago (p. ej. efectivo + Yape) que suman lo que se cobra.
 class HojaCobro extends StatefulWidget {
-  const HojaCobro({super.key, required this.cliente, required this.detalle, required this.debe, this.alEntregar = false});
+  const HojaCobro({super.key, required this.cliente, required this.detalle, required this.debe, this.otras = 0, this.alEntregar = false});
   final String cliente;
   final String detalle;
   final double debe;
+  final double otras;
   final bool alEntregar;
   @override
   State<HojaCobro> createState() => _HojaCobroState();
@@ -324,7 +341,7 @@ class _HojaCobroState extends State<HojaCobro> {
 
   @override
   Widget build(BuildContext context) {
-    final queda = widget.debe - _suma;
+    final queda = widget.debe + widget.otras - _suma;
     final problema = _problema;
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).viewPadding.bottom),

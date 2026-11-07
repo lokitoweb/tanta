@@ -633,7 +633,7 @@ export async function rutasMaestros(app: FastifyInstance) {
 
   /* -------------------------------------------------------------- clientes */
   const Cliente = z.object({
-    nombre: texto(2, 160), docTipo: z.enum(['DNI', 'RUC', 'CE']), docNumero: z.string().trim().regex(/^[0-9A-Za-z]{0,15}$/, 'Solo letras y números'),
+    nombre: texto(2, 160), contacto: z.string().trim().max(120).default(''), docTipo: z.enum(['DNI', 'RUC', 'CE']), docNumero: z.string().trim().regex(/^[0-9A-Za-z]{0,15}$/, 'Solo letras y números'),
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido'), email: z.union([z.literal(''), z.string().trim().email().max(160)]),
     direccion: z.string().trim().max(200), listaPrecio: z.enum(['MINORISTA', 'MAYORISTA', 'CORPORATIVO']),
     diasCredito: z.number().int().min(0).max(120), limiteCredito: dinero, estado: z.enum(['ACTIVO', 'INACTIVO']).default('ACTIVO'),
@@ -645,13 +645,13 @@ export async function rutasMaestros(app: FastifyInstance) {
   app.get('/clientes', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'clientes.gestionar')) return;
     const filas = await q<Record<string, string>>(`
-      SELECT c.id, c.codigo, c.nombre, c.doc_tipo, coalesce(c.doc_numero,'') doc_numero, coalesce(c.telefono,'') telefono,
+      SELECT c.id, c.codigo, c.nombre, c.contacto, c.doc_tipo, coalesce(c.doc_numero,'') doc_numero, coalesce(c.telefono,'') telefono,
              c.email, c.direccion, c.lista_precio, c.dias_credito, c.limite_credito, c.estado, c.condicion_pago, coalesce(c.vendedor_id::text, '') vendedor_id,
              coalesce((SELECT sum(saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) saldo,
              EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = c.id) usa_app
       FROM core.cliente c ORDER BY c.nombre`);
     return filas.map((f) => ({
-      id: f.id, codigo: f.codigo, nombre: f.nombre, docTipo: f.doc_tipo, docNumero: f.doc_numero, telefono: f.telefono, email: f.email,
+      id: f.id, codigo: f.codigo, nombre: f.nombre, contacto: f.contacto, docTipo: f.doc_tipo, docNumero: f.doc_numero, telefono: f.telefono, email: f.email,
       direccion: f.direccion, listaPrecio: f.lista_precio, diasCredito: num(f.dias_credito), limiteCredito: num(f.limite_credito),
       estado: f.estado, condicionPago: f.condicion_pago, vendedorId: f.vendedor_id, saldo: num(f.saldo), usaApp: Boolean(f.usa_app),
     }));
@@ -664,10 +664,10 @@ export async function rutasMaestros(app: FastifyInstance) {
     const d = p.data;
     const cond = d.condicionPago ?? (d.diasCredito > 0 || d.limiteCredito > 0 ? 'CREDITO' : 'CONTADO');
     const f = await uno<{ id: string; codigo: string }>(
-      `INSERT INTO core.cliente (codigo, nombre, doc_tipo, doc_numero, telefono, email, direccion, lista_precio, dias_credito, limite_credito, estado, condicion_pago, vendedor_id)
+      `INSERT INTO core.cliente (codigo, nombre, doc_tipo, doc_numero, telefono, email, direccion, lista_precio, dias_credito, limite_credito, estado, condicion_pago, vendedor_id, contacto)
        VALUES ('CLI-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.cliente WHERE codigo ~ '^CLI-[0-9]+$')::text, 4, '0'),
-               $1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,NULLIF($12,'')::uuid) RETURNING id, codigo`,
-      [d.nombre, d.docTipo, d.docNumero, d.telefono, d.email, d.direccion, d.listaPrecio, d.diasCredito, d.limiteCredito, d.estado, cond, d.vendedorId]);
+               $1,$2,NULLIF($3,''),NULLIF($4,''),$5,$6,$7,$8,$9,$10,$11,NULLIF($12,'')::uuid,$13) RETURNING id, codigo`,
+      [d.nombre, d.docTipo, d.docNumero, d.telefono, d.email, d.direccion, d.listaPrecio, d.diasCredito, d.limiteCredito, d.estado, cond, d.vendedorId, d.contacto]);
     await auditar({ ...actor(req), accion: 'CLIENTE_CREADO', entidad: 'cliente', entidadId: f!.id, detalle: { nombre: d.nombre, limiteCredito: d.limiteCredito }, ip: req.ip });
     return reply.code(201).send({ ...f, ...d });
   });
@@ -681,8 +681,8 @@ export async function rutasMaestros(app: FastifyInstance) {
     const cond = d.condicionPago ?? (d.diasCredito > 0 || d.limiteCredito > 0 ? 'CREDITO' : 'CONTADO');
     const r = await q(`UPDATE core.cliente SET nombre=$2, doc_tipo=$3, doc_numero=NULLIF($4,''), telefono=NULLIF($5,''), email=$6, direccion=$7,
                          lista_precio=$8, dias_credito=$9, limite_credito=$10, estado=$11,
-                         condicion_pago=$12, vendedor_id=NULLIF($13,'')::uuid WHERE id=$1 RETURNING id`,
-      [id, d.nombre, d.docTipo, d.docNumero, d.telefono, d.email, d.direccion, d.listaPrecio, d.diasCredito, d.limiteCredito, d.estado, cond, d.vendedorId]);
+                         condicion_pago=$12, vendedor_id=NULLIF($13,'')::uuid, contacto=$14 WHERE id=$1 RETURNING id`,
+      [id, d.nombre, d.docTipo, d.docNumero, d.telefono, d.email, d.direccion, d.listaPrecio, d.diasCredito, d.limiteCredito, d.estado, cond, d.vendedorId, d.contacto]);
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
     await auditar({ ...actor(req), accion: 'CLIENTE_EDITADO', entidad: 'cliente', entidadId: id, detalle: { nombre: d.nombre, limiteCredito: d.limiteCredito, estado: d.estado }, ip: req.ip });
     return { id, ...d };
