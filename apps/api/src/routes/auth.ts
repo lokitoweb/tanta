@@ -5,7 +5,7 @@ import { q, uno, tx } from '../db.js';
 import {
   ACCESO_MIN, REFRESCO_DIAS, autenticar, error, firmarAcceso, firmarTicketMfa, verificarTicketMfa, nuevoRefreshToken,
   permisosDeRol, rolDeUsuario, sha256, verificarClaveDetalle, hashClave,
-  generarSecretoMfa, verificarTotp, urlOtpauth,
+  generarSecretoMfa, verificarTotp, urlOtpauth, claveCorta,
 } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { enviarCorreo, correoDisponible } from '../correo.js';
@@ -345,13 +345,15 @@ export async function rutasAuth(app: FastifyInstance) {
     email: z.string().trim().toLowerCase().email().max(160),
     direccion: z.string().trim().min(5).max(200),
     usuario: z.string().trim().toLowerCase().regex(/^[a-z0-9._-]{4,30}$/, 'Usuario de 4 a 30 letras o números'),
-    clave: z.string().min(10).max(128),
+    clave: z.string().max(128),
   }).refine((d) => docValido(d.docTipo, d.docNumero), { message: 'Número de documento inválido', path: ['docNumero'] });
 
   app.post('/auth/registro', { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (req, reply) => {
     const p = Registro.safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Revisa tus datos.'));
     const d = p.data;
+    const corta = await claveCorta(d.clave);
+    if (corta) return reply.code(422).send(error(422, 'CLAVE_CORTA', corta));
     try {
       await tx(async (c) => {
         if ((await c.query('SELECT 1 FROM core.cliente WHERE doc_tipo = $1 AND doc_numero = $2', [d.docTipo, d.docNumero])).rowCount) {
@@ -412,9 +414,11 @@ export async function rutasAuth(app: FastifyInstance) {
   app.post('/auth/restablecer', { config: { rateLimit: { max: 10, timeWindow: '15 minutes' } } }, async (req, reply) => {
     const p = z.object({
       identificador: z.string().trim().min(3).max(160), codigo: z.string().regex(/^\d{6}$/, 'El código tiene 6 dígitos'),
-      nueva: z.string().min(10, 'Mínimo 10 caracteres').max(128),
+      nueva: z.string().max(128),
     }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
+    const corta = await claveCorta(p.data.nueva);
+    if (corta) return reply.code(422).send(error(422, 'CLAVE_CORTA', corta));
     const invalido = () => reply.code(400).send(error(400, 'CODIGO_INVALIDO', 'El código no es válido o ya venció. Pide uno nuevo.'));
     const u = await uno<{ id: string; nombre: string; usuario: string; rol: string | null }>(
       `SELECT u.id, u.nombre, u.usuario, (SELECT rol_id FROM core.usuario_rol WHERE usuario_id = u.id LIMIT 1) rol FROM core.usuario u

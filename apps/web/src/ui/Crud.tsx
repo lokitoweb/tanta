@@ -10,7 +10,7 @@ import { imagenABase64 } from '@/core/imagen';
 export interface Campo {
   key: string; label: string;
   /** seccion = subtítulo que agrupa campos; calculado = valor de solo lectura que se recalcula al escribir. */
-  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'imagen' | 'seccion' | 'calculado' | 'filas';
+  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'fecha' | 'imagen' | 'seccion' | 'calculado' | 'filas';
   /** Para tipo calculado: recibe el formulario actual y devuelve el texto a mostrar. */
   calcular?: (form: Record<string, unknown>) => string;
   placeholder?: string;
@@ -213,7 +213,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
                   valor={numero(c)} onValor={(n) => set(c, n === '' ? '' : String(n))} />
               ) : (
                 <input className="field__input" placeholder={c.placeholder} required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id}
-                  type={c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : 'text'}
+                  type={c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : c.tipo === 'fecha' ? 'date' : 'text'}
                   value={valor(c)} onChange={(e) => set(c, e.target.value)} />
               )}
               {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}

@@ -1002,6 +1002,26 @@ class _MisPedidosState extends State<MisPedidos> {
     }
   }
 
+  Future<void> _descargar(Map<String, dynamic> p) async {
+    final c = (p['comprobante'] as Map).cast<String, dynamic>();
+    double n(Object? x) => ((x as num?) ?? 0).toDouble();
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      await compartirComprobante(
+        titulo: '${c['nombre']}'.toUpperCase(),
+        numero: '${c['numero']}',
+        cliente: '${p['cliente'] ?? ''}',
+        lineas: [for (final l in ((c['lineas'] as List?) ?? const []).cast<Map>()) ('${n(l['cantidad']).toStringAsFixed(n(l['cantidad']) % 1 == 0 ? 0 : 2)} × ${l['producto']}', dinero(n(l['cantidad']) * n(l['precio'])))],
+        totales: [('Op. gravada', dinero(n(c['base']))), ('IGV', dinero(n(c['igv'])))],
+        total: dinero(n(c['total'])),
+        vendedor: '${c['vendedor'] ?? ''}',
+        emitido: DateTime.tryParse('${c['fecha']}'),
+      );
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('No se pudo generar el comprobante.')));
+    }
+  }
+
   /// A09: detalle con línea de tiempo, productos, entrega y acciones.
   Future<void> _detalle(Map<String, dynamic> p) async {
     List<dynamic> historial = const [];
@@ -1018,6 +1038,9 @@ class _MisPedidosState extends State<MisPedidos> {
       expand: false, initialChildSize: 0.75, builder: (_, scroll) => ListView(controller: scroll, padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(ctx).viewPadding.bottom), children: [
         Text('${p['codigo']}', style: Theme.of(ctx).textTheme.titleLarge),
         Text('Entrega ${p['fecha_entrega']}${'${p['hora_entrega'] ?? ''}'.isEmpty ? '' : ' · ${p['hora_entrega']}'} · ${p['tipoEntrega'] == 'DELIVERY' ? 'delivery a ${p['direccion']}' : 'recojo en tienda'}'),
+        if (p['comprobante'] is! Map && p['comprobanteTipo'] != null)
+          Text('Comprobante: ${comprobantesVenta().where((t) => t['codigo'] == p['comprobanteTipo']).firstOrNull?['nombre'] ?? p['comprobanteTipo']} · se emite al despachar',
+              style: const TextStyle(fontSize: 12.5, color: TantaColors.textMuted)),
         if ('${p['observacion'] ?? ''}'.isNotEmpty && cancelable) _observacion('${p['observacion']}'),
         const SizedBox(height: 16),
         for (var k = 0; k < pasos.length; k++)
@@ -1038,6 +1061,15 @@ class _MisPedidosState extends State<MisPedidos> {
             trailing: Text(dinero(((i['precio'] as num?) ?? 0).toDouble() * ((i['cantidad'] as num?) ?? 0).toDouble()))),
         ListTile(dense: true, contentPadding: EdgeInsets.zero, title: const Text('Total', style: TextStyle(fontWeight: FontWeight.w700)),
             trailing: Text(dinero(((p['total'] as num?) ?? 0).toDouble()), style: const TextStyle(fontWeight: FontWeight.w700))),
+        // CLI-07: la boleta, factura o nota de pedido emitida al despachar se descarga o comparte en PDF.
+        if (p['comprobante'] is Map) Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.download_outlined),
+            label: Text('Descargar ${'${(p['comprobante'] as Map)['nombre']}'.toLowerCase()} ${(p['comprobante'] as Map)['numero']}'),
+            onPressed: () => _descargar(p),
+          ),
+        ),
         const SizedBox(height: 12),
         Row(children: [
           if (cancelable) Expanded(child: OutlinedButton.icon(

@@ -120,13 +120,13 @@ class _PerfilState extends State<Perfil> {
     final ok = await _dialogo('Cambiar contraseña', [
       TextField(controller: actual, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña actual'), autofillHints: const [AutofillHints.password]),
       const SizedBox(height: 12),
-      TextField(controller: nueva, obscureText: true, decoration: const InputDecoration(labelText: 'Nueva (mínimo 10 caracteres)'), autofillHints: const [AutofillHints.newPassword]),
+      TextField(controller: nueva, obscureText: true, decoration: InputDecoration(labelText: 'Nueva (mínimo ${Api.instancia.claveMinima} caracteres)'), autofillHints: const [AutofillHints.newPassword]),
       const SizedBox(height: 12),
       TextField(controller: repetir, obscureText: true, decoration: const InputDecoration(labelText: 'Repite la nueva')),
     ], 'Cambiar');
     if (ok != true) return;
     if (nueva.text != repetir.text) return _aviso('Las contraseñas nuevas no coinciden.', error: true);
-    if (nueva.text.length < 10) return _aviso('La nueva contraseña debe tener al menos 10 caracteres.', error: true);
+    if (nueva.text.length < Api.instancia.claveMinima) return _aviso('La nueva contraseña debe tener al menos ${Api.instancia.claveMinima} caracteres.', error: true);
     await _accion(() async {
       await Api.instancia.cambiarClave(actual.text, nueva.text);
       // El servidor cerró todas las sesiones: se vuelve a ingresar con la clave nueva.

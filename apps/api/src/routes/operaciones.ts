@@ -552,22 +552,24 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const margen = netas > 0 ? utilidad / netas : 0;
 
           totalConIgv = Number(totalConIgv.toFixed(2));
-          // RN-31/32: nota de venta con serie y correlativo únicos; base e IGV a 2 decimales (base + IGV = total).
+          // RN-31/32: comprobante con serie y correlativo únicos; base e IGV a 2 decimales (base + IGV = total).
+          // El de un pedido es el que eligió el cliente (boleta, factura, nota de pedido); la venta directa, nota de venta.
+          const tipoComp = pedidoId ? (await c.query<{ t: string }>('SELECT comprobante_tipo t FROM core.pedido WHERE id = $1', [pedidoId])).rows[0]?.t ?? 'NOTA_VENTA' : 'NOTA_VENTA';
           const serie = (await c.query<{ serie: string; correlativo: number }>(`UPDATE core.serie_comprobante SET correlativo_actual = correlativo_actual + 1
-            WHERE tipo = 'NOTA_VENTA' AND activo RETURNING serie, correlativo_actual AS correlativo`)).rows[0];
-          if (!serie) throw Object.assign(new Error('No hay una serie activa de nota de venta: configúrala en Parámetros.'), { status: 409 });
+            WHERE tipo = $1 AND activo RETURNING serie, correlativo_actual AS correlativo`, [tipoComp])).rows[0];
+          if (!serie) throw Object.assign(new Error(`No hay una serie activa para ${tipoComp.replace('_', ' ').toLowerCase()}: configúrala en Parámetros → Series.`), { status: 409 });
           const base = Number((totalConIgv / (1 + igv)).toFixed(2));
           const igvMonto = Number((totalConIgv - base).toFixed(2));
 
           const v = await c.query<{ id: string }>(
             `INSERT INTO core.venta (codigo,cliente_id,forma_pago,ventas_netas,costo_ventas,utilidad,margen,estado,vendedor,idempotency_key,vendedor_id,canal,descuento_pct,total_con_igv,pedido_id,
-                                     serie,correlativo,base,igv,referencia_pago)
+                                     serie,correlativo,base,igv,referencia_pago,comprobante_tipo)
              VALUES ($1,$2,$3,$4,$5,$6,$7,'CONFIRMADA',$8,$9,$10,
                      CASE WHEN $13::uuid IS NOT NULL OR EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = $2) THEN 'APP' ELSE 'TERCEROS' END,
-                     $11,$12,$13,$14,$15,$16,$17,NULLIF($18,'')) RETURNING id`,
+                     $11,$12,$13,$14,$15,$16,$17,NULLIF($18,''),$19) RETURNING id`,
             [codigo, clienteId ?? null, formaPago, netas.toFixed(4), costoTotal.toFixed(4),
               utilidad.toFixed(4), margen.toFixed(6), req.usuario!.nombre, clave ?? null, req.usuario!.id,
-              descuentoPct.toFixed(6), totalConIgv.toFixed(4), pedidoId ?? null, serie.serie, serie.correlativo, base.toFixed(2), igvMonto.toFixed(2), referenciaPago],
+              descuentoPct.toFixed(6), totalConIgv.toFixed(4), pedidoId ?? null, serie.serie, serie.correlativo, base.toFixed(2), igvMonto.toFixed(2), referenciaPago, tipoComp],
           );
           const ventaId = v.rows[0].id;
           if (descuentoPct > tope + 1e-9) {
@@ -648,7 +650,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
           }
 
           return { codigo, ventaId, ventasNetas: netas, costoVentas: costoTotal, utilidad, margen, cxcId, alertaCredito, lineas,
-            comprobante: { tipo: 'NOTA_VENTA', serie: serie.serie, correlativo: serie.correlativo,
+            comprobante: { tipo: tipoComp, serie: serie.serie, correlativo: serie.correlativo,
               numero: `${serie.serie}-${String(serie.correlativo).padStart(8, '0')}`, base, igv: igvMonto, total: totalConIgv } };
         }),
       );
@@ -854,6 +856,39 @@ export async function rutasOperaciones(app: FastifyInstance) {
     CANCELADO: [],
   };
 
+  /** Al anular: un pedido Listo devuelve su stock reservado; uno anterior devuelve el cupo de sus promociones. */
+  const liberarAlAnular = async (c: import('pg').PoolClient, pedidoId: string, estadoPrevio: string) => {
+    if (estadoPrevio !== 'LISTO') return liberarPromos(c, pedidoId);
+    const lineas = (await c.query<{ producto_id: string; cantidad: string }>('SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id ORDER BY producto_id', [pedidoId])).rows;
+    for (const l of lineas) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
+  };
+
+  // VEN-06: el vendedor cancela varios pedidos a la vez con un motivo. Cada uno se valida y audita por separado:
+  // los que ya no se pueden cancelar (despachados, entregados) se informan y el resto sí se cancela.
+  app.post('/pedidos/cancelar-varios', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'pedidos.gestionar')) return;
+    const p = z.object({ codigos: z.array(z.string().trim().max(30)).min(1).max(100), motivo: z.string().trim().min(3, 'Indica el motivo.').max(200) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Elige los pedidos e indica el motivo.'));
+    const cancelados: string[] = [];
+    const rechazados: Array<{ codigo: string; motivo: string }> = [];
+    for (const codigo of [...new Set(p.data.codigos)]) {
+      const r = await tx(async (c) => {
+        const ped = (await c.query<{ id: string; estado: string; cliente: string }>('SELECT id, estado, cliente FROM core.pedido WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
+        if (!ped) return { error: 'No existe.' };
+        if (!TRANSICIONES[ped.estado]?.includes('CANCELADO')) return { error: `Está ${ped.estado.replace('_', ' ').toLowerCase()}: ya no se cancela.` };
+        await c.query("UPDATE core.pedido SET estado = 'CANCELADO', motivo = $2 WHERE id = $1", [ped.id, p.data.motivo]);
+        await liberarAlAnular(c, ped.id, ped.estado);
+        return { de: ped.estado, cliente: ped.cliente };
+      });
+      if ('error' in r) { rechazados.push({ codigo, motivo: r.error! }); continue; }
+      cancelados.push(codigo);
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CANCELADO', entidad: 'pedido', entidadId: codigo,
+        detalle: { de: r.de, a: 'CANCELADO', cliente: r.cliente, motivo: p.data.motivo, masivo: true }, ip: req.ip });
+      void emitirEvento('pedido.estado', { codigo, de: r.de, a: 'CANCELADO' });
+    }
+    return { cancelados, rechazados };
+  });
+
   app.patch('/pedidos/:codigo/estado', { preHandler: autenticar, bodyLimit: 2_000_000 }, async (req, reply) => {
     if (!exigir(req, reply, 'pedidos.gestionar')) return;
     const { codigo } = req.params as { codigo: string };
@@ -898,10 +933,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
           recibo = await emitirRecibo(c, { clienteId: cx.cliente_id, cxcIds: [cx.id], pagos, usuarioId: req.usuario!.id, comprobanteId });
         }
         if (destino === 'LISTO') await reservarListo(c, pedido.id, true);
-        if (pedido.estado === 'LISTO' && destino === 'CANCELADO') {
-          const lineas = (await c.query<{ producto_id: string; cantidad: string }>('SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id ORDER BY producto_id', [pedido.id])).rows;
-          for (const l of lineas) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
-        } else if (['CANCELADO', 'RECHAZADO'].includes(destino)) await liberarPromos(c, pedido.id);
+        if (['CANCELADO', 'RECHAZADO'].includes(destino)) await liberarAlAnular(c, pedido.id, pedido.estado);
       });
     } catch (e) {
       const err = e as Error & { status?: number };

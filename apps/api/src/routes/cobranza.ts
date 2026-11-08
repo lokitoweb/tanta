@@ -352,7 +352,8 @@ export async function rutasCobranza(app: FastifyInstance) {
   // Una serie nueva pasa a ser la activa de su tipo; la anterior queda en el historial (no se reutiliza).
   app.post('/series', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'parametros.gestionar')) return;
-    const p = z.object({ tipo: z.enum(['NOTA_VENTA', 'RECIBO']), serie: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{4}$/, 'La serie tiene 4 letras o números') }).safeParse(req.body);
+    // RECIBO (cobranza) o un tipo de Maestros → Catálogos → Comprobantes de venta.
+    const p = await z.object({ tipo: z.string().trim().toUpperCase().max(20).refine(async (t) => t === 'RECIBO' || !!(await uno('SELECT 1 FROM core.tipo_comprobante_venta WHERE codigo = $1', [t])), 'Tipo de comprobante inválido.'), serie: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{4}$/, 'La serie tiene 4 letras o números') }).safeParseAsync(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Serie inválida.'));
     try {
       await tx(async (c) => {

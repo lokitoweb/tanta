@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
+import { useCatalogos } from '@/core/catalogos';
 import { money } from '@/core/format';
 import { Boton } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
@@ -23,7 +24,13 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
     inicial.length ? inicial.map((i) => ({ productoId: i.productoId, cantidad: String(i.cantidad), presentacion: i.presentacion ?? '', promocionId: i.promocionId, nombre: i.nombre, precio: i.precio })) : [{ productoId: productos[0]?.id ?? '', cantidad: '1', presentacion: '' }]);
   const [fecha, setFecha] = useState('');
   const [estimada, setEstimada] = useState('');
-  useEffect(() => { if (!elegirCliente) api<Array<{ direccion: string }>>('/mis-direcciones').then((l) => { if (l[0]) setDireccion(l[0].direccion); }).catch(() => {}); }, [elegirCliente]);
+  // El cliente envía a una de sus direcciones (hasta el máximo de Parámetros); se agregan en su perfil.
+  const [misDirecciones, setMisDirecciones] = useState<string[]>([]);
+  useEffect(() => { if (!elegirCliente) api<Array<{ direccion: string }>>('/mis-direcciones').then((l) => { setMisDirecciones(l.map((x) => x.direccion)); if (l[0]) setDireccion(l[0].direccion); }).catch(() => {}); }, [elegirCliente]);
+  // Boleta, factura o nota de pedido: el catálogo administrable; la factura exige RUC (lo valida la API).
+  const { comprobantesVenta } = useCatalogos();
+  const [comprobante, setComprobante] = useState('');
+  useEffect(() => { if (!comprobante && comprobantesVenta[0]) setComprobante(comprobantesVenta[0].codigo); }, [comprobantesVenta, comprobante]);
   useEffect(() => { api<{ fecha: string }>('/pedidos/entrega-estimada').then((r) => setEstimada(r.fecha)).catch(() => {}); }, []);
   const [obs, setObs] = useState('');
   const [direccion, setDireccion] = useState('');
@@ -54,7 +61,7 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
     try {
       const r = await api<{ codigo: string }>('/pedidos', {
         method: 'POST', conIdempotencia: true,
-        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad), ...(i.presentacion ? { presentacion: i.presentacion } : {}), ...(i.promocionId ? { promocionId: i.promocionId } : {}) })), ...(fecha ? { fechaEntrega: fecha } : {}), observaciones: obs, direccion },
+        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad), ...(i.presentacion ? { presentacion: i.presentacion } : {}), ...(i.promocionId ? { promocionId: i.promocionId } : {}) })), ...(fecha ? { fechaEntrega: fecha } : {}), observaciones: obs, direccion, ...(comprobante ? { comprobanteTipo: comprobante } : {}) },
       });
       onCerrar(r.codigo);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar.'); }
@@ -93,7 +100,14 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
           <Boton size="sm" icono="plus" onClick={() => setItems([...items, { productoId: productos[0]?.id ?? '', cantidad: '1', presentacion: '' }])}>Agregar producto</Boton>
         </div>
         {elegirCliente && <label className="field"><span className="field__label">Fecha de entrega (opcional)</span><input className="field__input" type="date" min={hoy()} value={fecha} onChange={(e) => setFecha(e.target.value)} /><span className="field__ayuda">Sin fecha: {estimada ? estimada.split('-').reverse().join('/') : 'según la hora de corte'}</span></label>}
-        <label className={`field ${elegirCliente ? '' : 'field--ancho'}`}><span className="field__label">Dirección de entrega</span><input className="field__input" maxLength={200} value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder={elegirCliente ? 'La registrada del cliente' : 'Tu tienda: calle, número, distrito'} /></label>
+        {!elegirCliente && misDirecciones.length > 0
+          ? <label className="field"><span className="field__label">Dirección de entrega</span>
+              <select className="field__input" value={direccion} onChange={(e) => setDireccion(e.target.value)}>{misDirecciones.map((d) => <option key={d} value={d}>{d}</option>)}</select>
+              <span className="field__ayuda">Agrega o quita direcciones en Mi perfil.</span></label>
+          : <label className="field"><span className="field__label">Dirección de entrega</span><input className="field__input" maxLength={200} value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder={elegirCliente ? 'La registrada del cliente' : 'Tu tienda: calle, número, distrito'} /></label>}
+        <label className="field"><span className="field__label">Comprobante</span>
+          <select className="field__input" value={comprobante} onChange={(e) => setComprobante(e.target.value)}>
+            {comprobantesVenta.map((t) => <option key={t.codigo} value={t.codigo}>{t.nombre}{t.requiereRuc ? ' (requiere RUC)' : ''}</option>)}</select></label>
         <label className="field field--ancho"><span className="field__label">Observaciones / personalización</span><input className="field__input" maxLength={500} value={obs} onChange={(e) => setObs(e.target.value)} placeholder="Ej.: torta con mensaje «Feliz cumpleaños Ana»" /></label>
         {error && <p className="form__error field--ancho" role="alert">{error}</p>}
       </div>

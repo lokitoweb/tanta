@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, tx, uno, num } from '../db.js';
-import { autenticar, exigir, error, hashClave } from '../seguridad.js';
+import { autenticar, exigir, error, hashClave, claveCorta } from '../seguridad.js';
 import { auditar, verificarCadena, ultimoEvento } from '../auditoria.js';
 import { invalidar } from '../cache.js';
 
@@ -65,6 +65,10 @@ export async function rutasAdmin(app: FastifyInstance) {
     if (clave === 'hora_corte_mismo_dia' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(nuevo)) {
       return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa el formato HH:MM de 24 horas, por ejemplo 03:00.'));
     }
+    const RANGOS: Record<string, [number, number]> = { clave_longitud_minima: [5, 64], cliente_max_direcciones: [1, 20] };
+    if (RANGOS[clave] && !(Number.isInteger(Number(nuevo)) && Number(nuevo) >= RANGOS[clave][0] && Number(nuevo) <= RANGOS[clave][1])) {
+      return reply.code(422).send(error(422, 'VALOR_INVALIDO', `Usa un número entero de ${RANGOS[clave][0]} a ${RANGOS[clave][1]}.`));
+    }
     if (clave === 'cif_base_prorrateo' && !['UNIDADES', 'COSTO_INSUMOS'].includes(nuevo.toUpperCase())) {
       return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa UNIDADES o COSTO_INSUMOS.'));
     }
@@ -105,7 +109,7 @@ export async function rutasAdmin(app: FastifyInstance) {
   const NuevoUsuario = z.object({
     nombre: z.string().min(3).max(120),
     usuario: z.string().min(3).max(40).regex(/^[a-z0-9._-]+$/, 'Solo minúsculas, números, punto, guion y guion bajo.'),
-    clave: z.string().min(10, 'La contraseña inicial debe tener al menos 10 caracteres.').max(128),
+    clave: z.string().min(1, 'Escribe la contraseña inicial.').max(128),
     rol: z.string().min(1),
     // Un usuario con rol Cliente se vincula a su ficha: así solo ve y pide lo suyo.
     clienteId: z.string().uuid().optional(),
@@ -118,6 +122,8 @@ export async function rutasAdmin(app: FastifyInstance) {
       return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Datos inválidos.'));
     }
     const d = parseo.data;
+    const corta = await claveCorta(d.clave);
+    if (corta) return reply.code(422).send(error(422, 'CLAVE_CORTA', corta));
 
     if (!(await protegeJerarquia(req, reply, { rol: d.rol }))) return;
     if (d.rol === 'CLIENTE' && !d.clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige la ficha de cliente de este usuario.'));
@@ -201,13 +207,14 @@ export async function rutasAdmin(app: FastifyInstance) {
     return { id, rol: p.data.rol };
   });
 
-  const NuevaClave = z.object({ clave: z.string().min(10, 'Mínimo 10 caracteres.').max(128) });
+  const NuevaClave = z.object({ clave: z.string().max(128) });
 
   app.patch('/usuarios/:id/clave', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'usuarios.gestionar')) return;
     const { id } = req.params as { id: string };
     const parseo = NuevaClave.safeParse(req.body);
-    if (!parseo.success) return reply.code(422).send(error(422, 'CLAVE_CORTA', 'La contraseña debe tener al menos 8 caracteres.'));
+    const corta = parseo.success ? await claveCorta(parseo.data.clave) : 'La contraseña es demasiado larga.';
+    if (!parseo.success || corta) return reply.code(422).send(error(422, 'CLAVE_CORTA', corta!));
     if (!(await protegeJerarquia(req, reply, { usuarioId: id }))) return;
 
     await q('UPDATE core.usuario SET clave_hash = $1 WHERE id = $2', [hashClave(parseo.data.clave), id]);

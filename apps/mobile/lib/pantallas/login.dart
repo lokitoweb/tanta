@@ -352,7 +352,7 @@ class _RegistroClienteState extends State<RegistroCliente> {
           _campo('email', 'Correo', Icons.mail_outline, teclado: TextInputType.emailAddress),
           _campo('direccion', 'Dirección de entrega', Icons.place_outlined),
           _campo('usuario', 'Usuario', Icons.alternate_email, ayuda: '4 a 30 letras o números'),
-          _campo('clave', 'Contraseña', Icons.lock_outline, oculto: true, ayuda: 'Mínimo 10 caracteres'),
+          _campo('clave', 'Contraseña', Icons.lock_outline, oculto: true, ayuda: 'Mínimo ${Api.instancia.claveMinima} caracteres'),
           if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           FilledButton(onPressed: _enviando ? null : _registrar, child: Text(_enviando ? 'Creando…' : 'Crear cuenta')),
           const SizedBox(height: 10),

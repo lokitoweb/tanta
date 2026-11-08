@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '@/core/api';
+import { api, useClaveMinima } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { Encabezado, Insignia, Tarjeta, TarjetaTitulo, Boton } from '@/ui/primitives';
 import { Tabla, type Columna } from '@/ui/Tabla';
@@ -15,6 +15,7 @@ export function Usuarios() {
   const gestiona = puede('usuarios.gestionar');
   const [usuarios, setUsuarios] = useState<Usuario[]>(dataset.usuarios ?? []);
   const [nuevo, setNuevo] = useState(false);
+  const claveMin = useClaveMinima();
   const [form, setForm] = useState({ nombre: '', usuario: '', clave: '', rol: 'VENDEDOR', clienteId: '' });
   // Roles y clientes vienen de la base: un rol creado en «Roles y permisos» aparece aquí al instante.
   const [roles, setRoles] = useState<Array<{ id: string; nombre: string }>>([]);
@@ -177,7 +178,7 @@ export function Usuarios() {
           </label>
           <label className="field">
             <span className="field__label">Contraseña inicial</span>
-            <input className="field__input" type="text" value={form.clave} onChange={(e) => setForm({ ...form, clave: e.target.value })} placeholder="mínimo 10 caracteres" />
+            <input className="field__input" type="text" value={form.clave} onChange={(e) => setForm({ ...form, clave: e.target.value })} placeholder={`mínimo ${claveMin} caracteres`} />
           </label>
           <label className="field">
             <span className="field__label">Rol</span>

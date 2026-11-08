@@ -4,6 +4,7 @@ import 'avisos_clientes.dart';
 import 'despacho.dart';
 import 'gastos.dart';
 import 'hoja_produccion.dart';
+import 'promociones.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -503,6 +504,7 @@ class _PanelInicio extends StatelessWidget {
       if (api.puede('produccion.ver')) accion('Hoja de producción', Icons.assignment_outlined, const HojaProduccion()),
       if (api.puede('gastos.registrar')) accion('Registrar gasto', Icons.receipt_long_outlined, const Gastos()),
       if (api.puede('clientes.avisar')) accion('Avisos a clientes', Icons.campaign_outlined, const AvisosClientes()),
+      if (api.puede('promociones.gestionar')) accion('Promociones', Icons.local_offer_outlined, Promociones(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>().where((p) => p['insumoId'] == null).toList())),
       if (api.puede('compras.verificar')) accion('Verificar compras', Icons.fact_check_outlined, const VerificarCompras()),
       if (api.puede('inventario.mover') || api.puede('conteo.aprobar')) accion('Conteo físico', Icons.fact_check_outlined, Conteos(datos: datos)),
       if (api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) accion('Mis pedidos', Icons.receipt_long_outlined, MisPedidos(productos: (datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>())),

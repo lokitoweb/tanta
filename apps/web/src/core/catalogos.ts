@@ -10,10 +10,12 @@ export interface PresentacionCompra { codigo: string; nombre: string; equivalenc
 export interface PresentacionVenta { codigo: string; nombre: string; equivalencia: number; insumoId: string | null; cantidadInsumo: number | null; activo: boolean; orden: number }
 export interface Banco { codigo: string; nombre: string; activo: boolean; orden: number }
 export interface TipoGasto { codigo: string; nombre: string; activo: boolean; orden: number }
+/** Boleta, factura, nota de pedido… lo elige el cliente al cerrar su pedido. */
+export interface ComprobanteVenta { codigo: string; nombre: string; requiereRuc: boolean; activo: boolean; orden: number }
 export interface Catalogos { tiposGasto: TipoGasto[]; mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[];
-  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[] }
+  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[]; comprobantesVenta: ComprobanteVenta[] }
 
-const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [] };
+const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [], comprobantesVenta: [] };
 let cache: Promise<Catalogos> | null = null;
 
 /** Recarga los catálogos (tras editarlos en Maestros → Catálogos). */

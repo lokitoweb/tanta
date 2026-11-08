@@ -73,6 +73,13 @@ const ESQUEMAS = {
     columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden' },
     enUso: 'SELECT 1 FROM core.pago_costo WHERE tipo_gasto = $1 LIMIT 1',
   },
+  // Lo que el cliente elige al cerrar su pedido; cada tipo emite con su serie (Parámetros → Series).
+  'comprobantes-venta': {
+    tabla: 'core.tipo_comprobante_venta',
+    campos: z.object({ ...base, requiereRuc: z.boolean().default(false) }),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', requiereRuc: 'requiere_ruc' },
+    enUso: 'SELECT 1 FROM core.pedido WHERE comprobante_tipo = $1 UNION ALL SELECT 1 FROM core.venta WHERE comprobante_tipo = $1 LIMIT 1',
+  },
   bancos: {
     tabla: 'core.banco',
     campos: z.object(base),
@@ -95,6 +102,7 @@ export async function leerCatalogos(todos = false) {
     tiposDocumento: await leer('core.tipo_documento_compra'), mediosPago: await leer('core.medio_pago'),
     tiposInsumo: await leer('core.tipo_insumo'), unidades: await leer('core.unidad_medida'),
     presentacionesCompra: await leer('core.presentacion_compra'), presentacionesVenta: await leer('core.presentacion_venta'), tiposGasto: await leer('core.tipo_gasto'), bancos: await leer('core.banco'),
+    comprobantesVenta: await leer('core.tipo_comprobante_venta'),
   };
 }
 

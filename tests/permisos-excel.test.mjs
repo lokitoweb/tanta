@@ -27,7 +27,8 @@ const permisos = (rol) => new Set(sql(`SELECT string_agg(permiso_id, ',') FROM c
 // [rol, debe tener, no debe tener] — cada permiso con la fila de la matriz que lo exige.
 const MATRIZ = [
   ['ADMINISTRADOR', ['usuarios.gestionar', 'maestros.editar', 'parametros.gestionar', 'proveedores.gestionar', 'compras.registrar', 'compras.autorizar', 'compras.anular', 'ventas.anular', 'auditoria.ver', 'dashboard.ver'],
-    ['ventas.registrar', 'descuentos.aprobar', 'conteo.aprobar', 'inventario.mover', 'compras.verificar']],
+    ['ventas.registrar', 'descuentos.aprobar', 'conteo.aprobar', 'inventario.mover']],
+  // Informe 03: el Administrador también verifica compras (no encontraba la opción).
   ['GERENTE', ['usuarios.ver', 'clientes.ver', 'maestros.ver', 'costos.ver', 'dashboard.ver', 'auditoria.ver', 'descuentos.aprobar', 'conteo.aprobar', 'ventas.anular', 'cobranza.ver'],
     ['usuarios.gestionar', 'maestros.editar', 'clientes.gestionar', 'ventas.registrar', 'inventario.mover', 'compras.registrar']],
   ['PRODUCCION', ['produccion.planificar', 'produccion.ejecutar', 'maestros.ver', 'recetas.ver', 'inventario.ver', 'pedidos.ver'],

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { api } from '@/core/api';
+import { api, useClaveMinima } from '@/core/api';
 import { Boton } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
 
 /** Recuperar contraseña: código de 6 dígitos por correo (SMTP configurado por el Superadmin). */
 export function Recuperar({ onVolver }: { onVolver: (aviso?: string) => void }) {
   const [paso, setPaso] = useState<'pedir' | 'cambiar'>('pedir');
+  const claveMin = useClaveMinima();
   const [identificador, setIdentificador] = useState('');
   const [codigo, setCodigo] = useState('');
   const [nueva, setNueva] = useState('');
@@ -53,7 +54,7 @@ export function Recuperar({ onVolver }: { onVolver: (aviso?: string) => void }) 
         <input className="field__input mfa__codigo" value={codigo} onChange={(e) => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder="000000" autoFocus />
       </label>
       <label className="field">
-        <span className="field__label">Contraseña nueva (mínimo 10 caracteres)</span>
+        <span className="field__label">Contraseña nueva (mínimo {claveMin} caracteres)</span>
         <input className="field__input" type="password" value={nueva} onChange={(e) => setNueva(e.target.value)} minLength={10} maxLength={128} autoComplete="new-password" required />
       </label>
       <label className="field">
@@ -61,7 +62,7 @@ export function Recuperar({ onVolver }: { onVolver: (aviso?: string) => void }) 
         <input className="field__input" type="password" value={repetir} onChange={(e) => setRepetir(e.target.value)} autoComplete="new-password" required />
       </label>
       {error && <p className="form__error" role="alert"><Icon name="alert" size={15} /> {error}</p>}
-      <Boton variant="primary" size="lg" full type="submit" disabled={trabajando || codigo.length !== 6 || nueva.length < 10 || nueva !== repetir}>{trabajando ? 'Guardando…' : 'Cambiar contraseña'}</Boton>
+      <Boton variant="primary" size="lg" full type="submit" disabled={trabajando || codigo.length !== 6 || nueva.length < claveMin || nueva !== repetir}>{trabajando ? 'Guardando…' : 'Cambiar contraseña'}</Boton>
       <button type="button" className="mfa__volver" onClick={() => { setPaso('pedir'); setCodigo(''); }}>No me llegó: pedir otro código</button>
       <button type="button" className="mfa__volver" onClick={() => onVolver()}>Volver a iniciar sesión</button>
     </form>

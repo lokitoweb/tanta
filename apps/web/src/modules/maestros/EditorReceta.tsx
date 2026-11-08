@@ -25,6 +25,7 @@ export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const insumos = dataset.insumos;
+  const primera = receta.version === 0;
 
   const set = (i: number, k: keyof Linea, v: string) => setLineas((ls) => ls.map((l, j) => {
     if (j !== i) return l;
@@ -43,18 +44,18 @@ export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (
         body: { rendimiento: Number(rend), mermaEstandar: Number(merma) / 100, lineas: lineas.map((l) => ({ insumoId: l.insumoId, cantidad: Number(l.cantidad), unidad: l.unidad || undefined })) },
       });
       await refrescarDatos();
-      onCerrar(`Versión ${receta.version + 1} guardada · insumos por unidad ${money(r.costoConMerma)}`);
+      onCerrar(`${primera ? `Receta de ${receta.producto} registrada` : `Versión ${receta.version + 1} guardada`} · insumos por unidad ${money(r.costoConMerma)}`);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar.'); }
     finally { setGuardando(false); }
   };
 
   return (
-    <Dialogo abierto titulo={`Nueva versión · ${receta.producto}`}
-      descripcion={`La versión ${receta.version} queda en el historial; las ventas pasadas conservan su costo.`}
+    <Dialogo abierto titulo={`${primera ? 'Nueva receta' : 'Nueva versión'} · ${receta.producto}`}
+      descripcion={primera ? 'Agrega los insumos del lote. Al guardar se calcula el costo del producto.' : `La versión ${receta.version} queda en el historial; las ventas pasadas conservan su costo.`}
       onCerrar={() => onCerrar()}
       acciones={<><Boton onClick={() => onCerrar()}>Cancelar</Boton>
         <Boton variant="primary" onClick={() => void guardar()} disabled={guardando || lineas.length === 0 || lineas.some((l) => !l.insumoId || !(Number(l.cantidad) > 0))}>
-          {guardando ? 'Guardando…' : `Guardar versión ${receta.version + 1}`}</Boton></>}>
+          {guardando ? 'Guardando…' : primera ? 'Guardar receta' : `Guardar versión ${receta.version + 1}`}</Boton></>}>
       <div className="form form--2col form--dialogo">
         <label className="field"><span className="field__label">Rendimiento declarado (unidades por lote)</span>
           <input className="field__input" type="number" min="0.01" step="any" value={rend} onChange={(e) => setRend(e.target.value)} />

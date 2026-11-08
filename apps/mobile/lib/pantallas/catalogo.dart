@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/api.dart';
+import '../core/catalogos.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
@@ -351,18 +352,53 @@ class ConfirmarPedido extends StatefulWidget {
 
 class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   String? _estimada;
+  // Sin direcciones guardadas se escribe una; con varias, se elige a cuál va el pedido (CLI-09).
   final _dir = TextEditingController();
+  List<String> _dirs = const [];
   final _obs = TextEditingController();
+  // Boleta, factura o nota de pedido (catálogo administrable; la factura exige RUC y lo valida el servidor).
+  String? _comp = comprobantesVenta().firstOrNull?['codigo'] as String?;
   bool _enviando = false;
-
 
   @override
   void initState() {
     super.initState();
     Api.instancia.entregaEstimada().then((f) { if (mounted) setState(() => _estimada = f); }).catchError((_) {});
-    Api.instancia.misDirecciones().then((l) {
-      if (mounted && l.isNotEmpty && _dir.text.isEmpty) setState(() => _dir.text = '${(l.first as Map)['direccion']}');
-    }).catchError((_) {});
+    _cargarDirecciones();
+  }
+
+  Future<void> _cargarDirecciones() async {
+    try {
+      final l = (await Api.instancia.misDirecciones()).map((d) => '${(d as Map)['direccion']}').toList();
+      if (!mounted) return;
+      setState(() {
+        _dirs = l;
+        if (l.isNotEmpty && !l.contains(_dir.text)) _dir.text = l.first;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _agregarDireccion() async {
+    final c = TextEditingController();
+    final nueva = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Nueva dirección'),
+      content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: const InputDecoration(labelText: 'Calle, número, distrito')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+        FilledButton(onPressed: () { if (c.text.trim().length >= 5) Navigator.pop(ctx, c.text.trim()); }, child: const Text('Guardar')),
+      ],
+    ));
+    if (nueva == null || !mounted) return;
+    final aviso = ScaffoldMessenger.of(context);
+    try {
+      await Api.instancia.agregarDireccion(nueva, '');
+      _dir.text = nueva;
+      await _cargarDirecciones();
+    } on ApiException catch (e) {
+      aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
+    } catch (_) {
+      aviso.showSnackBar(const SnackBar(content: Text('Sin conexión: intenta de nuevo')));
+    }
   }
 
   Future<void> _confirmar() async {
@@ -377,6 +413,7 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
         }).toList(),
         direccion: _dir.text.trim(),
         observaciones: _obs.text.trim(),
+        comprobanteTipo: _comp,
       );
       carrito.value = {};
       nav.popUntil((r) => r.isFirst);
@@ -401,7 +438,30 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
         const SizedBox(height: 8),
         Text(_estimada == null ? 'Te llevamos tu pedido a tu tienda.' : 'Llega a tu tienda el ${fechaCorta(_estimada!)}.', style: const TextStyle(fontSize: 13.5)),
         const SizedBox(height: 12),
-        TextField(controller: _dir, maxLength: 200, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Dirección de tu tienda')),
+        if (_dirs.isEmpty)
+          TextField(controller: _dir, maxLength: 200, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Dirección de tu tienda'))
+        else ...[
+          Text(_dirs.length > 1 ? '¿A cuál de tus direcciones lo enviamos?' : 'Dirección de entrega', style: const TextStyle(fontSize: 13, color: TantaColors.textMuted)),
+          for (final d in _dirs)
+            ListTile(
+              contentPadding: EdgeInsets.zero, dense: true,
+              leading: Icon(_dir.text == d ? Icons.radio_button_checked : Icons.radio_button_unchecked, color: _dir.text == d ? TantaColors.ink800 : TantaColors.textMuted),
+              title: Text(d),
+              onTap: () => setState(() => _dir.text = d),
+            ),
+          Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _agregarDireccion, icon: const Icon(Icons.add_location_alt_outlined), label: const Text('Otra dirección'))),
+        ],
+        if (comprobantesVenta().isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text('Comprobante', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final t in comprobantesVenta())
+              ChoiceChip(label: Text('${t['nombre']}'), selected: _comp == t['codigo'], onSelected: (_) => setState(() => _comp = t['codigo'] as String)),
+          ]),
+          if (comprobantesVenta().where((t) => t['codigo'] == _comp).firstOrNull?['requiereRuc'] == true)
+            const Padding(padding: EdgeInsets.only(top: 6), child: Text('La factura se emite a tu RUC registrado.', style: TextStyle(fontSize: 12.5, color: TantaColors.textMuted))),
+        ],
         const SizedBox(height: 16),
         // No se paga al pedir: el vendedor registra el pago (efectivo, Yape, transferencia…) al entregar.
         const Text('No pagas ahora: pagas al recibir tu pedido.', style: TextStyle(color: TantaColors.textMuted, fontSize: 12.5)),

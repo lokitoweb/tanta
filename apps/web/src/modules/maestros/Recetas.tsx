@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useApp } from '@/core/app-state';
 import { cantidad, money, num2, partesQueSuman, pct, semaforo } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
+import { Dialogo } from '@/ui/Dialogo';
+import type { Receta } from '@/core/types';
 import { EditorReceta } from './EditorReceta';
 
 export function Recetas() {
@@ -11,6 +13,42 @@ export function Recetas() {
   const verCosto = puede('costos.ver');
   const [editando, setEditando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  // Primera receta de un producto: se elige el producto y se abre el mismo editor (versión 1).
+  const [eligiendo, setEligiendo] = useState(false);
+  const [nueva, setNueva] = useState<Receta | null>(null);
+  const sinReceta = dataset.productos.filter((p) => p.estado === 'ACTIVO' && !dataset.recetas.some((r) => r.productoId === p.id));
+  const editar = puede('recetas.editar');
+  const cerrarEditor = (r?: string) => { setEditando(false); setNueva(null); if (r) setAviso(r); };
+
+  const encabezado = (descripcion: string, conVersion: boolean) => (
+    <>
+      <Encabezado titulo="Recetas" descripcion={descripcion}
+        acciones={editar && <>
+          {sinReceta.length > 0 && <Boton variant={conVersion ? 'secondary' : 'primary'} icono="plus" onClick={() => { setAviso(null); setEligiendo(true); }}>Nueva receta</Boton>}
+          {conVersion && <Boton variant="primary" icono="plus" onClick={() => { setAviso(null); setEditando(true); }}>Nueva versión</Boton>}
+        </>} />
+      {aviso && <div className="aviso aviso--ok" role="status"><span className="aviso__icono">✓</span><div><p>{aviso}</p></div></div>}
+      <Dialogo abierto={eligiendo} titulo="Nueva receta" descripcion="Elige el producto que todavía no tiene receta." onCerrar={() => setEligiendo(false)}
+        acciones={<Boton onClick={() => setEligiendo(false)}>Cancelar</Boton>}>
+        <ul className="recetas">{sinReceta.map((p) => (
+          <li key={p.id}><button className="recetas__item" onClick={() => {
+            setEligiendo(false);
+            setNueva({ id: p.id, productoId: p.id, producto: p.nombre, version: 0, estado: 'BORRADOR', rendimiento: 1, mermaEstandar: p.mermaPct ?? 0, lineas: [] });
+          }}><span className="recetas__nom">{p.nombre}</span><span className="recetas__meta">{p.codigo}{p.insumoId ? ' · sub-receta' : ''}</span></button></li>))}</ul>
+      </Dialogo>
+      {nueva && <EditorReceta receta={nueva} onCerrar={cerrarEditor} />}
+    </>
+  );
+
+  // Sin recetas (sistema nuevo o recién limpiado): se explica y se ofrece crear la primera.
+  if (!receta) {
+    return (
+      <>
+        {encabezado('Sin recetas registradas', false)}
+        <Tarjeta><p className="t-muted">{editar && sinReceta.length ? 'Todavía no hay recetas: usa «Nueva receta» para registrar la primera.' : 'Todavía no hay recetas cargadas en el sistema.'}</p></Tarjeta>
+      </>
+    );
+  }
 
   // Si el rol no ve costos, el API no los envía: aquí no hay nada que calcular.
   // RN-15: costo total = insumos por unidad esperada + mano de obra + CIF (redondeados para que sumen).
@@ -20,24 +58,10 @@ export function Recetas() {
     : [0, 0];
   const cif = verCosto ? Math.round(((receta.costoUnitario ?? 0) - insumos - mo) * 100) / 100 : 0;
 
-  if (!receta) {
-    return (
-      <>
-        <Encabezado titulo="Recetas" descripcion="Sin recetas registradas" />
-        <Tarjeta><p className="t-muted">Todavía no hay recetas cargadas en el sistema.</p></Tarjeta>
-      </>
-    );
-  }
-
   return (
     <>
-      <Encabezado
-        titulo="Recetas"
-        descripcion="Cada versión queda congelada: cambiar una receta crea una versión nueva, no reescribe la historia"
-        acciones={puede('recetas.editar') && <Boton variant="primary" icono="plus" onClick={() => { setAviso(null); setEditando(true); }}>Nueva versión</Boton>}
-      />
-      {aviso && <div className="aviso aviso--ok" role="status"><span className="aviso__icono">✓</span><div><p>{aviso}</p></div></div>}
-      {editando && <EditorReceta receta={receta} onCerrar={(r) => { setEditando(false); if (r) setAviso(r); }} />}
+      {encabezado('Cada versión queda congelada: cambiar una receta crea una versión nueva, no reescribe la historia', true)}
+      {editando && <EditorReceta receta={receta} onCerrar={cerrarEditor} />}
 
       <div className="split">
         <Tarjeta padding="none" className="split__lista">

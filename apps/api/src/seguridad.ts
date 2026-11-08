@@ -59,6 +59,13 @@ export function verificarClaveDetalle(clave: string, almacenado: string): { vali
   return { valida: false, rehash: false };
 }
 
+/** Contraseña nueva demasiado corta según Parámetros → clave_longitud_minima (piso 5). Devuelve el mensaje o null. */
+export async function claveCorta(clave: string): Promise<string | null> {
+  const v = Number((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'clave_longitud_minima'"))?.valor);
+  const minimo = Number.isInteger(v) && v >= 5 ? v : 5;
+  return clave.length < minimo ? `La contraseña debe tener al menos ${minimo} caracteres.` : null;
+}
+
 export function verificarClave(clave: string, almacenado: string): boolean {
   return verificarClaveDetalle(clave, almacenado).valida;
 }

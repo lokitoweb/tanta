@@ -25,7 +25,8 @@ export function Promociones() {
         { key: 'titulo', label: 'Título', requerido: true, ancho: true, max: 80, placeholder: 'Ej.: Pan francés a mitad de precio' },
         { key: 'productoId', label: 'Producto', tipo: 'select', opciones: productos, ancho: true },
         { key: 'precioConIgv', label: 'Precio de promoción con IGV (S/)', tipo: 'numero', requerido: true },
-        { key: 'desde', label: 'Desde (AAAA-MM-DD)', requerido: true, max: 10 }, { key: 'hasta', label: 'Hasta (AAAA-MM-DD)', requerido: true, max: 10 },
+        { key: 'desde', label: 'Desde', tipo: 'fecha', requerido: true },
+        { key: 'hasta', label: 'Hasta', tipo: 'fecha', requerido: true, ayuda: 'Igual a «Desde» = solo hoy: vence sola al terminar el día' },
         { key: 'activa', label: 'Activa', tipo: 'bool' },
         { key: 'avisar', label: 'Avisar a los clientes al guardar', tipo: 'bool', ayuda: 'Llega a la campana y al celular de quienes tienen cuenta' },
       ]} />

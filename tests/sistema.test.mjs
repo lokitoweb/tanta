@@ -72,11 +72,11 @@ test('perfil: datos, foto validada, cambio de clave y eliminación de cuenta', a
   assert.equal((await api(sa, 'POST', '/usuarios', { nombre: 'Temporal Prueba', usuario, clave: 'ClaveInicial1', rol: 'VENDEDOR' })).s, 201);
   const t = await login(usuario, 'ClaveInicial1');
 
-  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: 'temp@tanta.pe', telefono: '+51 999 111 222' })).s, 403, 'cambiar el correo pide la contraseña');
-  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: 'temp@tanta.pe', telefono: '+51 999 111 222', clave: 'ClaveInicial1' })).s, 200);
-  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Dos', email: 'temp@tanta.pe', telefono: '' })).s, 200, 'sin cambiar el correo no pide contraseña');
+  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: `${usuario}@tanta.pe`, telefono: '+51 999 111 222' })).s, 403, 'cambiar el correo pide la contraseña');
+  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Prueba', email: `${usuario}@tanta.pe`, telefono: '+51 999 111 222', clave: 'ClaveInicial1' })).s, 200);
+  assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'Temporal Dos', email: `${usuario}@tanta.pe`, telefono: '' })).s, 200, 'sin cambiar el correo no pide contraseña');
   assert.equal((await api(t, 'POST', '/auth/mfa/recuperacion', {})).s, 403, 'regenerar códigos pide la contraseña');
-  assert.equal((await api(t, 'GET', '/perfil')).b.email, 'temp@tanta.pe');
+  assert.equal((await api(t, 'GET', '/perfil')).b.email, `${usuario}@tanta.pe`);
   assert.equal((await api(t, 'PATCH', '/perfil', { nombre: 'J', email: 'x', telefono: '<script>' })).s, 422);
 
   const foto = await api(t, 'PUT', '/perfil/foto', { base64: PNG });
@@ -85,7 +85,7 @@ test('perfil: datos, foto validada, cambio de clave y eliminación de cuenta', a
   assert.equal((await api(t, 'PUT', '/perfil/foto', { base64: Buffer.from('<svg onload=alert(1)>').toString('base64') })).s, 415, 'no acepta SVG/HTML disfrazado');
 
   assert.equal((await api(t, 'POST', '/perfil/clave', { actual: 'mala', nueva: 'NuevaClave2026' })).s, 403);
-  assert.equal((await api(t, 'POST', '/perfil/clave', { actual: 'ClaveInicial1', nueva: 'corta' })).s, 422);
+  assert.equal((await api(t, 'POST', '/perfil/clave', { actual: 'ClaveInicial1', nueva: 'cort' })).s, 422, 'menos que la mínima (5 por defecto)');
   assert.equal((await api(t, 'POST', '/perfil/clave', { actual: 'ClaveInicial1', nueva: 'NuevaClave2026' })).s, 200);
   const t2 = await login(usuario, 'NuevaClave2026');
   assert.ok(t2, 'entra con la clave nueva');

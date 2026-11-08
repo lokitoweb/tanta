@@ -6,6 +6,7 @@
  * - El token de refresco viaja en una cookie HttpOnly: JavaScript no puede leerla,
  *   así un XSS no se lleva la sesión. Por eso todas las llamadas usan `credentials: 'include'`.
  */
+import { useEffect, useState } from 'react';
 
 // Mismo origen siempre: en desarrollo lo reenvía Vite, en producción Caddy.
 const BASE = import.meta.env.VITE_API_URL ?? '/api/v1';
@@ -44,6 +45,14 @@ export interface ConfigPublica {
   movil: { versionActual: string; versionMinima: string };
   legal: { urlPrivacidad: string; urlTerminos: string; correoSoporte: string };
   negocio: { nombre: string; ruc: string; direccion: string; telefono: string; whatsapp: string; email: string; representante: string; claim: string };
+  seguridad?: { claveMinima: number };
+}
+
+/** Caracteres mínimos de una contraseña nueva (Parámetros → clave_longitud_minima). La API la vuelve a validar. */
+export function useClaveMinima(): number {
+  const [n, setN] = useState(5);
+  useEffect(() => { leerConfigPublica().then((c) => setN(c.seguridad?.claveMinima ?? 5)).catch(() => {}); }, []);
+  return n;
 }
 
 // Una sola petición por carga de página; el superadmin la renueva tras guardar.

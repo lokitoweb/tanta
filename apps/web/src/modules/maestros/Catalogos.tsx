@@ -10,7 +10,7 @@ const PESTANAS = [
   ['medios-pago', 'Medios de pago', 'mediosPago'], ['tipos-documento', 'Documentos de compra', 'tiposDocumento'],
   ['tipos-insumo', 'Tipos de insumo', 'tiposInsumo'], ['unidades', 'Unidades', 'unidades'],
   ['presentaciones-compra', 'Presentaciones de compra', 'presentacionesCompra'], ['presentaciones-venta', 'Presentaciones de venta', 'presentacionesVenta'],
-  ['tipos-gasto', 'Tipos de gasto', 'tiposGasto'], ['bancos', 'Bancos', 'bancos'],
+  ['tipos-gasto', 'Tipos de gasto', 'tiposGasto'], ['comprobantes-venta', 'Comprobantes de venta', 'comprobantesVenta'], ['bancos', 'Bancos', 'bancos'],
 ] as const;
 type Ruta = typeof PESTANAS[number][0];
 
@@ -66,6 +66,12 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
     nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
     columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'activo', label: 'Activo' }],
     campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, ...comunes],
+  },
+  'comprobantes-venta': {
+    descripcion: 'Lo que el cliente elige al cerrar su pedido (boleta, factura, nota de pedido). Cada tipo necesita su serie activa en Parámetros → Series.',
+    nuevo: { codigo: '', nombre: '', requiereRuc: false, orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'requiereRuc', label: 'Exige RUC' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('requiereRuc', 'Exige cliente con RUC', 'Factura: sí · boleta y nota de pedido: no'), ...comunes],
   },
   bancos: {
     descripcion: 'Bancos para las cuentas de los proveedores.',

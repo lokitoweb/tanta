@@ -28,6 +28,9 @@ String nombreMedio(String codigo) => '${medioPago(codigo)?['nombre'] ?? codigo}'
 
 List<Map<String, dynamic>> tiposGasto() => _lista('tiposGasto');
 
+/// Boleta, factura, nota de pedido… lo que el cliente elige al cerrar su pedido (la factura exige RUC).
+List<Map<String, dynamic>> comprobantesVenta() => _lista('comprobantesVenta');
+
 List<Map<String, dynamic>> tiposDocumento() {
   final l = _lista('tiposDocumento');
   return l.isEmpty ? [{'codigo': 'FACTURA', 'nombre': 'Factura', 'creditoFiscal': true}] : l;

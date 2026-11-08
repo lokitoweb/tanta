@@ -155,6 +155,8 @@ export async function rutasFlujo(app: FastifyInstance) {
     // PED-03: recojo en tienda o delivery (con dirección).
     tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).optional(),
     direccion: z.string().trim().max(200).default(''),
+    // Boleta, factura o nota de pedido (Maestros → Catálogos → Comprobantes de venta).
+    comprobanteTipo: z.string().trim().toUpperCase().max(20).optional(),
     // Sin forma de pago: el cliente no paga al pedir. Cómo paga (o si queda debiendo) se registra al entregar.
   }).refine((d) => d.tipoEntrega !== 'DELIVERY' || d.direccion.length >= 5, { message: 'Indica la dirección de entrega.', path: ['direccion'] });
 
@@ -172,8 +174,17 @@ export async function rutasFlujo(app: FastifyInstance) {
 
     try {
       const r = await tx(async (c) => {
-        const cli = (await c.query<{ nombre: string; estado: string; direccion: string }>('SELECT c.nombre, c.estado, c.direccion FROM core.cliente c WHERE c.id = $1 FOR UPDATE', [clienteId])).rows[0];
+        const cli = (await c.query<{ nombre: string; estado: string; direccion: string; doc_tipo: string }>('SELECT c.nombre, c.estado, c.direccion, c.doc_tipo FROM core.cliente c WHERE c.id = $1 FOR UPDATE', [clienteId])).rows[0];
         if (!cli || cli.estado !== 'ACTIVO') throw Object.assign(new Error('El cliente no existe o está inactivo.'), { status: 422 });
+        const comp = (await c.query<{ codigo: string; nombre: string; requiere_ruc: boolean }>(
+          `SELECT codigo, nombre, requiere_ruc FROM core.tipo_comprobante_venta WHERE activo AND ($1::text IS NULL OR codigo = $1) ORDER BY orden, codigo LIMIT 1`, [d.comprobanteTipo ?? null])).rows[0];
+        if (!comp) throw Object.assign(new Error('Ese tipo de comprobante no existe o está inactivo.'), { status: 422 });
+        if (comp.requiere_ruc && cli.doc_tipo !== 'RUC') throw Object.assign(new Error(`La ${comp.nombre.toLowerCase()} requiere un cliente con RUC: elige otro comprobante o actualiza el documento.`), { status: 422 });
+        // El cliente envía a una de sus direcciones (máximo en Parámetros); sin ninguna registrada, a la que escriba.
+        if (yo?.cliente_id && d.direccion) {
+          const suyas = (await direccionesDe(clienteId)).map((x) => x.direccion.trim().toLowerCase());
+          if (suyas.length && !suyas.includes(d.direccion.toLowerCase())) throw Object.assign(new Error('Elige una de tus direcciones de entrega (o agrégala en tu perfil).'), { status: 422 });
+        }
         const { lineas, total, horas } = await armarLineas(c, d.items);
         await reservarPromos(c, lineas);
         const fechaEntrega = fechaPedida ?? await fechaEntregaSugerida(horas);
@@ -189,12 +200,12 @@ export async function rutasFlujo(app: FastifyInstance) {
         const estadoInicial = yo?.cliente_id ? 'REGISTRADO' : 'CONFIRMADO';
         const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
         const ped = (await c.query<{ id: string }>(
-          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en)
-           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END) RETURNING id`,
+          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en, comprobante_tipo)
+           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END, $13) RETURNING id`,
           [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
-            estadoInicial, tipoEntrega, tipoEntrega === 'DELIVERY' ? direccion : ''])).rows[0];
+            estadoInicial, tipoEntrega, tipoEntrega === 'DELIVERY' ? direccion : '', comp.codigo])).rows[0];
         await guardarLineas(c, ped.id, lineas);
-        return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: estadoInicial, fechaEntrega };
+        return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: estadoInicial, fechaEntrega, comprobanteTipo: comp.codigo };
       });
       await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CREADO', entidad: 'pedido', entidadId: r.codigo, detalle: { total: r.total, items: d.items.length }, ip: req.ip });
       void emitirEvento('pedido.estado', { codigo: r.codigo, de: null, a: r.estado });
@@ -214,7 +225,13 @@ export async function rutasFlujo(app: FastifyInstance) {
       SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
              p.tipo_entrega AS "tipoEntrega", p.direccion, (SELECT ve.placa FROM core.vehiculo ve WHERE ve.id = p.vehiculo_id) vehiculo, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
-             p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn",
+             p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn", p.comprobante_tipo AS "comprobanteTipo",
+             -- El comprobante emitido al despachar, para descargarlo (sin costos: solo lo que el cliente pagó).
+             (SELECT json_build_object('tipo', v.comprobante_tipo, 'nombre', coalesce(t.nombre, v.comprobante_tipo), 'numero', v.serie || '-' || lpad(v.correlativo::text, 8, '0'),
+                'fecha', v.creado_en, 'base', v.base, 'igv', v.igv, 'total', v.total_con_igv, 'vendedor', v.vendedor,
+                'lineas', (SELECT json_agg(json_build_object('producto', vd.producto, 'cantidad', vd.cantidad, 'precio', vd.precio_con_igv) ORDER BY vd.id) FROM core.venta_detalle vd WHERE vd.venta_id = v.id))
+              FROM core.venta v LEFT JOIN core.tipo_comprobante_venta t ON t.codigo = v.comprobante_tipo
+              WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' AND v.serie IS NOT NULL LIMIT 1) AS comprobante,
              (SELECT sum(x.saldo) FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA') AS "porCobrar",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
                'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion) ORDER BY d.id)
@@ -300,12 +317,40 @@ export async function rutasFlujo(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------- direcciones (cliente) */
+  /** La principal (registro o ficha que mantiene la empresa) va primero y no se borra desde la app; luego las guardadas. */
+  const direccionesDe = (cli: string) => q<{ id: string | null; direccion: string; referencia: string; principal: boolean }>(
+    `SELECT id, direccion, referencia, principal FROM (
+       SELECT NULL::text id, direccion, '' referencia, true principal, NULL::timestamptz creado_en FROM core.cliente WHERE id = $1 AND length(trim(direccion)) >= 5
+       UNION ALL SELECT id::text, direccion, coalesce(referencia, ''), false, creado_en FROM core.direccion_cliente WHERE cliente_id = $1) d
+     ORDER BY principal DESC, creado_en`, [cli]);
+  const maxDirecciones = async () => {
+    const v = Number((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'cliente_max_direcciones'"))?.valor);
+    return Number.isInteger(v) && v >= 1 ? v : 4;
+  };
   const clienteDe = async (usuarioId: string) => (await uno<{ cliente_id: string | null }>('SELECT cliente_id FROM core.usuario WHERE id = $1', [usuarioId]))?.cliente_id ?? null;
 
   app.get('/mis-direcciones', { preHandler: autenticar }, async (req, reply) => {
     const cli = await clienteDe(req.usuario!.id);
     if (!cli) return reply.code(403).send(error(403, 'SOLO_CLIENTES', 'Solo para cuentas de cliente.'));
-    return q('SELECT id, direccion, referencia FROM core.direccion_cliente WHERE cliente_id = $1 ORDER BY creado_en', [cli]);
+    return direccionesDe(cli);
+  });
+
+  // Ficha del cliente (rol Cliente): contacto, documento, celular y direcciones. El documento lo mantiene la empresa.
+  app.get('/mi-ficha', { preHandler: autenticar }, async (req, reply) => {
+    const cli = await clienteDe(req.usuario!.id);
+    if (!cli) return reply.code(403).send(error(403, 'SOLO_CLIENTES', 'Solo para cuentas de cliente.'));
+    const f = await uno<Record<string, string>>(`SELECT nombre, contacto, doc_tipo "docTipo", doc_numero "docNumero", telefono, email FROM core.cliente WHERE id = $1`, [cli]);
+    return { ...f, direcciones: await direccionesDe(cli), maxDirecciones: await maxDirecciones() };
+  });
+
+  app.patch('/mi-ficha', { preHandler: autenticar }, async (req, reply) => {
+    const cli = await clienteDe(req.usuario!.id);
+    if (!cli) return reply.code(403).send(error(403, 'SOLO_CLIENTES', 'Solo para cuentas de cliente.'));
+    const p = z.object({ contacto: z.string().trim().max(120), telefono: z.string().trim().min(6, 'Escribe tu celular.').max(30).regex(/^[0-9+ ()-]*$/, 'Celular inválido') }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
+    await q('UPDATE core.cliente SET contacto = $2, telefono = $3 WHERE id = $1', [cli, p.data.contacto, p.data.telefono]);
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CLIENTE_FICHA_ACTUALIZADA', entidad: 'cliente', entidadId: cli, detalle: p.data, ip: req.ip });
+    return p.data;
   });
 
   app.post('/mis-direcciones', { preHandler: autenticar }, async (req, reply) => {
@@ -313,9 +358,9 @@ export async function rutasFlujo(app: FastifyInstance) {
     if (!cli) return reply.code(403).send(error(403, 'SOLO_CLIENTES', 'Solo para cuentas de cliente.'));
     const p = z.object({ direccion: z.string().trim().min(5).max(200), referencia: z.string().trim().max(120).default('') }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Escribe la dirección completa.'));
-    if (Number((await uno<{ n: string }>('SELECT count(*) n FROM core.direccion_cliente WHERE cliente_id = $1', [cli]))?.n) >= 10) {
-      return reply.code(409).send(error(409, 'LIMITE', 'Puedes guardar hasta 10 direcciones.'));
-    }
+    // Parámetros → cliente_max_direcciones, contando la dirección principal registrada.
+    const [actuales, max] = [(await direccionesDe(cli)).length, await maxDirecciones()];
+    if (actuales >= max) return reply.code(409).send(error(409, 'LIMITE', `Puedes tener hasta ${max} direcciones: elimina una para agregar otra.`));
     const r = await uno('INSERT INTO core.direccion_cliente (cliente_id, direccion, referencia) VALUES ($1,$2,$3) RETURNING id, direccion, referencia', [cli, p.data.direccion, p.data.referencia]);
     return reply.code(201).send(r);
   });

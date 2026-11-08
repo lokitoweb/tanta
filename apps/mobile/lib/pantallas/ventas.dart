@@ -25,6 +25,10 @@ class _PedidosState extends State<Pedidos> {
   String? _error;
   String? _ocupado;
   String _filtro = 'activos';
+  // Selección múltiple para cancelar varios pedidos (VEN-06).
+  bool _seleccionando = false;
+  final Set<String> _marcados = {};
+  bool _cancelable(Map<String, dynamic> p) => ['REGISTRADO', 'CONFIRMADO', 'EN_PRODUCCION', 'LISTO'].contains(p['estado']) && p['pendiente'] != true;
 
   static const _filtros = {
     'activos': 'Activos',
@@ -343,12 +347,54 @@ class _PedidosState extends State<Pedidos> {
             for (final f in _filtros.entries)
               Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(
                 label: Text('${f.value} ${cuenta(f.key)}'), selected: _filtro == f.key, onSelected: (_) => setState(() => _filtro = f.key))),
+            if (Api.instancia.puede('pedidos.gestionar'))
+              ActionChip(
+                avatar: Icon(_seleccionando ? Icons.close : Icons.checklist, size: 18),
+                label: Text(_seleccionando ? 'Terminar' : 'Cancelar varios'),
+                onPressed: () => setState(() { _seleccionando = !_seleccionando; _marcados.clear(); })),
           ])),
           const SizedBox(height: 12),
+          if (_seleccionando) ...[_barraSeleccion(lista), const SizedBox(height: 10)],
           if (lista.isEmpty) const VacioMensaje('No hay pedidos con este filtro', icono: Icons.receipt_long_outlined),
           for (final p in lista) _tarjeta(p),
         ],
       ),
+    );
+  }
+
+  /// VEN-06: cancela los pedidos marcados con un solo motivo; la API informa los que ya no se podían cancelar.
+  Future<void> _cancelarMarcados() async {
+    final m = await _pedirTexto('Cancelar ${_marcados.length} pedido(s)', 'Motivo (le llega a cada cliente)');
+    if (m == null) return;
+    setState(() => _ocupado = 'varios');
+    try {
+      final r = await Api.instancia.cancelarVarios(_marcados.toList(), m);
+      final no = ((r['rechazados'] as List?) ?? const []).cast<Map>();
+      _aviso('${(r['cancelados'] as List).length} cancelado(s)${no.isEmpty ? '' : ' · no se cancelaron: ${no.map((x) => '${x['codigo']} (${x['motivo']})').join(', ')}'}',
+          color: no.isEmpty ? TantaColors.stateOk : TantaColors.stateWarn);
+      setState(() { _marcados.clear(); _seleccionando = false; });
+      await _cargar();
+    } on ApiException catch (e) {
+      _aviso(e.mensaje, color: TantaColors.stateDanger);
+    } catch (_) {
+      _aviso('Sin conexión: intenta de nuevo');
+    } finally {
+      if (mounted) setState(() => _ocupado = null);
+    }
+  }
+
+  Widget _barraSeleccion(List<Map<String, dynamic>> lista) {
+    final cancelables = lista.where(_cancelable).map((p) => '${p['codigo']}').toList();
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+      child: Row(children: [
+        Expanded(child: Text(_marcados.isEmpty ? 'Toca los pedidos a cancelar' : '${_marcados.length} seleccionado(s)', style: const TextStyle(fontWeight: FontWeight.w600))),
+        TextButton(onPressed: cancelables.isEmpty ? null : () => setState(() => _marcados.length == cancelables.length ? _marcados.clear() : _marcados.addAll(cancelables)),
+            child: Text(_marcados.length == cancelables.length && cancelables.isNotEmpty ? 'Ninguno' : 'Todos')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: TantaColors.stateDanger),
+          onPressed: _marcados.isEmpty || _ocupado != null ? null : _cancelarMarcados, child: const Text('Cancelar')),
+      ]),
     );
   }
 
@@ -358,15 +404,23 @@ class _PedidosState extends State<Pedidos> {
     final ocupado = _ocupado == p['codigo'];
     final observado = '${p['observacion'] ?? ''}'.isNotEmpty && (estado == 'REGISTRADO' || estado == 'CONFIRMADO');
     final porCobrar = p['porCobrar'] == null ? 0.0 : _n(p['porCobrar']);
+    final codigo = '${p['codigo']}';
+    final marcado = _marcados.contains(codigo);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Pulsable(
         radio: 8,
-        onTap: ocupado ? null : () => _detalle(p),
+        onTap: ocupado ? null : _seleccionando
+            ? (_cancelable(p) ? () => setState(() => marcado ? _marcados.remove(codigo) : _marcados.add(codigo)) : null)
+            : () => _detalle(p),
         child: Panel(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
+              if (_seleccionando) Padding(padding: const EdgeInsets.only(right: 8), child: Icon(
+                  !_cancelable(p) ? Icons.block : marcado ? Icons.check_box : Icons.check_box_outline_blank,
+                  size: 22, color: !_cancelable(p) ? TantaColors.textMuted : marcado ? TantaColors.stateDanger : TantaColors.ink800,
+                  semanticLabel: _cancelable(p) ? (marcado ? 'Seleccionado' : 'Sin seleccionar') : 'No se puede cancelar')),
               Expanded(child: Text('${p['cliente']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
               if (ocupado) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               else Insignia(p['pendiente'] == true ? 'Por enviar' : etiquetaPedido[estado] ?? estado,

@@ -2,6 +2,7 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'api.dart';
 
 /// Comprobante interno de venta/despacho/cobro en PDF, compartible por WhatsApp o correo
 /// (PDF 3.2, Vendedor). No es comprobante electrónico SUNAT y así lo dice el documento.
@@ -12,9 +13,17 @@ Future<void> compartirComprobante({
   required List<(String, String)> lineas,
   required String total,
   required String vendedor,
+  DateTime? emitido,
+  List<(String, String)> totales = const [],
 }) async {
-  final fecha = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
-  final doc = pw.Document(title: '$titulo $numero', author: 'Panadería Tanta');
+  final fecha = DateFormat('dd/MM/yyyy HH:mm').format((emitido ?? DateTime.now()).toLocal());
+  // Datos de la empresa y leyenda: los administra la web (Configuración y Parámetros → comprobante_leyenda).
+  final negocio = (Api.instancia.config['negocio'] as Map?) ?? const {};
+  final empresa = '${negocio['nombre'] ?? ''}'.trim().isEmpty ? 'Panadería Tanta' : '${negocio['nombre']}';
+  final ruc = '${negocio['ruc'] ?? ''}'.trim();
+  final direccion = '${negocio['direccion'] ?? ''}'.trim();
+  final leyenda = '${(Api.instancia.config['comprobantes'] as Map?)?['leyenda'] ?? ''}'.trim();
+  final doc = pw.Document(title: '$titulo $numero', author: empresa);
 
   doc.addPage(pw.Page(
     // Ticket de 80 mm: se lee bien en el celular y en una impresora térmica.
@@ -23,8 +32,9 @@ Future<void> compartirComprobante({
     build: (_) => pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Center(child: pw.Text('PANADERÍA TANTA', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold))),
-        pw.Center(child: pw.Text('www.tantapanaderia.com', style: const pw.TextStyle(fontSize: 8))),
+        pw.Center(child: pw.Text(empresa.toUpperCase(), textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold))),
+        if (ruc.isNotEmpty) pw.Center(child: pw.Text('RUC $ruc', style: const pw.TextStyle(fontSize: 8))),
+        if (direccion.isNotEmpty) pw.Center(child: pw.Text(direccion, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
         pw.SizedBox(height: 10),
         pw.Text('$titulo · $numero', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
         pw.Text('Fecha: $fecha', style: const pw.TextStyle(fontSize: 8)),
@@ -36,6 +46,11 @@ Future<void> compartirComprobante({
             pw.Text(monto, style: const pw.TextStyle(fontSize: 9)),
           ]),
         pw.Divider(),
+        for (final (concepto, monto) in totales)
+          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+            pw.Text(concepto, style: const pw.TextStyle(fontSize: 9)),
+            pw.Text(monto, style: const pw.TextStyle(fontSize: 9)),
+          ]),
         pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
           pw.Text('TOTAL', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
           pw.Text(total, style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
@@ -43,7 +58,7 @@ Future<void> compartirComprobante({
         pw.SizedBox(height: 10),
         pw.Text('Atendido por: $vendedor', style: const pw.TextStyle(fontSize: 8)),
         pw.SizedBox(height: 6),
-        pw.Text('Documento interno. No es comprobante electrónico SUNAT.',
+        pw.Text(leyenda.isEmpty ? 'Documento interno. No es comprobante electrónico SUNAT.' : leyenda,
             style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic)),
       ],
     ),

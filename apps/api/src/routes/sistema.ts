@@ -5,7 +5,7 @@ import { isIP } from 'node:net';
 import { importPKCS8, SignJWT } from 'jose';
 import { z } from 'zod';
 import { q, tx, uno } from '../db.js';
-import { autenticar, exigir, error, hashClave, verificarClave } from '../seguridad.js';
+import { autenticar, exigir, error, hashClave, verificarClave, claveCorta } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { recordar, invalidar } from '../cache.js';
 import { enviarCorreo } from '../correo.js';
@@ -296,8 +296,10 @@ export async function rutasSistema(app: FastifyInstance) {
     // El dominio por el que se entró manda; el guardado solo sirve si se entra desde localhost.
     const dominio = dominioPublico(req.hostname) ?? String((movil as { urlApi?: string }).urlApi ?? '');
     const { textoPrivacidad: _p, textoTerminos: _t, ...legalPublico } = legal as Record<string, unknown>;
+    const p = Object.fromEntries((await q<{ clave: string; valor: string }>("SELECT clave, valor FROM core.parametro WHERE clave IN ('clave_longitud_minima', 'comprobante_leyenda')")).map((x) => [x.clave, x.valor]));
+    const claveMin = Math.max(5, Number(p.clave_longitud_minima) || 5);
     return {
-      marca, legal: legalPublico, negocio,
+      marca, legal: legalPublico, negocio, seguridad: { claveMinima: claveMin }, comprobantes: { leyenda: p.comprobante_leyenda ?? '' },
       movil: { ...movil, urlApi: dominio && !dominio.endsWith('/api/v1') ? `${dominio}/api/v1` : dominio },
       // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
       firebase: f.projectId && f.apiKey ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
@@ -549,8 +551,9 @@ export async function rutasSistema(app: FastifyInstance) {
     preHandler: autenticar,
     config: { rateLimit: { max: Number(process.env.LOGIN_RATE_MAX ?? 8), timeWindow: '1 minute' } },
   }, async (req, reply) => {
-    const p = z.object({ actual: z.string().min(1).max(128), nueva: z.string().min(10).max(128) }).safeParse(req.body);
-    if (!p.success) return reply.code(422).send(error(422, 'CLAVE_DEBIL', 'La nueva contraseña debe tener al menos 10 caracteres.'));
+    const p = z.object({ actual: z.string().min(1).max(128), nueva: z.string().max(128) }).safeParse(req.body);
+    const corta = p.success ? await claveCorta(p.data.nueva) : 'Escribe la contraseña actual y la nueva.';
+    if (!p.success || corta) return reply.code(422).send(error(422, 'CLAVE_DEBIL', corta!));
     if (p.data.actual === p.data.nueva) return reply.code(422).send(error(422, 'CLAVE_IGUAL', 'La nueva contraseña debe ser distinta.'));
     const u = await uno<{ clave_hash: string }>('SELECT clave_hash FROM core.usuario WHERE id = $1', [req.usuario!.id]);
     if (!u || !verificarClave(p.data.actual, u.clave_hash)) {

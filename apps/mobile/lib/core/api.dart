@@ -377,6 +377,24 @@ class Api {
   Future<void> cancelarPedido(String codigo, String motivo) async => await _post('/pedidos/$codigo/cancelar', {'motivo': motivo});
 
   Future<List<dynamic>> misDirecciones() async => await _get('/mis-direcciones') as List<dynamic>;
+  Future<void> agregarDireccion(String direccion, String referencia) async => await _post('/mis-direcciones', {'direccion': direccion, 'referencia': referencia});
+  Future<void> quitarDireccion(String id) async => await _enviar('DELETE', '/mis-direcciones/$id', {});
+
+  /// Ficha del cliente: contacto, documento, celular y direcciones (máximo en Parámetros).
+  Future<Map<String, dynamic>> miFicha() async => await _get('/mi-ficha') as Map<String, dynamic>;
+  Future<void> guardarFicha({required String contacto, required String telefono}) async => await _enviar('PATCH', '/mi-ficha', {'contacto': contacto, 'telefono': telefono});
+
+  /// VEN-06: cancela varios pedidos con un motivo; devuelve los cancelados y los que no se pudieron.
+  Future<Map<String, dynamic>> cancelarVarios(List<String> codigos, String motivo) async =>
+      await _post('/pedidos/cancelar-varios', {'codigos': codigos, 'motivo': motivo}) as Map<String, dynamic>;
+
+  /// Promociones (permiso promociones.gestionar).
+  Future<List<dynamic>> promociones() async => await _get('/promociones') as List<dynamic>;
+  Future<void> guardarPromocion(String? id, Map<String, dynamic> datos) async =>
+      id == null ? await _post('/promociones', datos) : await _enviar('PATCH', '/promociones/$id', datos);
+
+  /// Caracteres mínimos de una contraseña nueva (Parámetros → clave_longitud_minima).
+  int get claveMinima => ((config['seguridad'] as Map?)?['claveMinima'] as num?)?.toInt() ?? 5;
 
   /// SEG-04: autorregistro del cliente (sin sesión). Devuelve el mensaje del servidor.
   Future<String> registrarse(Map<String, dynamic> datos) async =>
@@ -477,8 +495,9 @@ class Api {
 
   /// El cliente no elige forma de pago al pedir: cómo paga (o si queda debiendo) se registra al entregar.
   /// La fecha de entrega la calcula el servidor con la hora de corte; va a la tienda del cliente.
-  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, String observaciones = '', String direccion = ''}) async =>
-      await _post('/pedidos', {'items': items, 'observaciones': observaciones, 'direccion': direccion}, idempotente: true) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> crearPedido({required List<Map<String, dynamic>> items, String observaciones = '', String direccion = '', String? comprobanteTipo}) async =>
+      await _post('/pedidos', {'items': items, 'observaciones': observaciones, 'direccion': direccion, if (comprobanteTipo != null) 'comprobanteTipo': comprobanteTipo},
+          idempotente: true) as Map<String, dynamic>;
   Future<String> entregaEstimada() async => '${(await _get('/pedidos/entrega-estimada') as Map)['fecha']}';
   Future<List<dynamic>> promocionesVigentes() async => await _get('/promociones/vigentes') as List<dynamic>;
   Future<Map<String, dynamic>> corregirPedido(String codigo, List<Map<String, dynamic>> items) async =>

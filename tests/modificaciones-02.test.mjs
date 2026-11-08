@@ -192,7 +192,7 @@ test('Promociones: salen del stock con su precio, no entran a producción y se l
   const adm = await login('lbermudez'), cli = await login('mfernandez'), ven = await login('cmedina');
   sql(`UPDATE core.producto SET stock = reservado + 10 WHERE id = '${prodA}'`);
   const body = { productoId: prodA, titulo: `Promo ${randomUUID().slice(0, 6)}`, precioConIgv: 0.5, desde: lima(), hasta: lima(2) };
-  assert.equal((await api(ven, 'POST', '/promociones', body)).s, 403);
+  assert.equal((await api(await login('rquispe'), 'POST', '/promociones', body)).s, 403, 'sin promociones.gestionar (el Vendedor sí lo tiene desde el informe 03)');
   assert.equal((await api(adm, 'POST', '/promociones', { ...body, hasta: lima(-1) })).s, 422, 'fechas al revés');
   const pr = await api(adm, 'POST', '/promociones', body);
   assert.equal(pr.s, 201, JSON.stringify(pr.b));

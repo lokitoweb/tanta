@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, regenerarRecuperacion } from '@/core/api';
+import { api, regenerarRecuperacion, useClaveMinima } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { imagenABase64 } from '@/core/imagen';
 import { fechaHora } from '@/core/format';
@@ -16,6 +16,7 @@ export function Perfil() {
   const { recargarSesion, cerrarSesion } = useApp();
   const [p, setP] = useState<PerfilDatos | null>(null);
   const [form, setForm] = useState<{ nombre: string; email: string; telefono: string; clave?: string }>({ nombre: '', email: '', telefono: '' });
+  const claveMin = useClaveMinima();
   const [clave, setClave] = useState({ actual: '', nueva: '', repetir: '' });
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
@@ -60,7 +61,7 @@ export function Perfil() {
     return 'Contraseña cambiada. Por seguridad se cerrarán tus sesiones; vuelve a ingresar.';
   });
 
-  const fuerza = clave.nueva.length >= 14 ? 'fuerte' : clave.nueva.length >= 10 ? 'aceptable' : clave.nueva ? 'débil' : '';
+  const fuerza = clave.nueva.length >= Math.max(14, claveMin + 4) ? 'fuerte' : clave.nueva.length >= claveMin ? 'aceptable' : clave.nueva ? 'débil' : '';
 
   if (!p) return (
     <>
@@ -97,6 +98,8 @@ export function Perfil() {
         </Boton>
       </Tarjeta>
 
+      <FichaCliente onAviso={setAviso} />
+
       <div className="perfil-columnas">
         <Tarjeta>
           <TarjetaTitulo titulo="Datos de contacto" subtitulo="Se usan para avisos y para recuperar tu cuenta" />
@@ -121,7 +124,7 @@ export function Perfil() {
         </Tarjeta>
 
         <Tarjeta>
-          <TarjetaTitulo titulo="Seguridad" subtitulo="Mínimo 10 caracteres. Al cambiarla se cierran tus sesiones en otros equipos." />
+          <TarjetaTitulo titulo="Seguridad" subtitulo={`Mínimo ${claveMin} caracteres. Al cambiarla se cierran tus sesiones en otros equipos.`} />
           <form className="form" onSubmit={(e) => { e.preventDefault(); void cambiarClave(); }}>
             <label className="field"><span className="field__label">Contraseña actual</span>
               <input className="field__input" type="password" required autoComplete="current-password" value={clave.actual} onChange={(e) => setClave({ ...clave, actual: e.target.value })} />
@@ -136,7 +139,7 @@ export function Perfil() {
               </label>
             </div>
             <div className="form__acciones">
-              <Boton variant="primary" type="submit" disabled={ocupado === 'clave' || clave.nueva.length < 10 || clave.nueva !== clave.repetir}>
+              <Boton variant="primary" type="submit" disabled={ocupado === 'clave' || clave.nueva.length < claveMin || clave.nueva !== clave.repetir}>
                 {ocupado === 'clave' ? 'Cambiando…' : 'Cambiar contraseña'}
               </Boton>
             </div>
@@ -155,5 +158,55 @@ export function Perfil() {
         <ul className="mfa__lista">{codigos?.map((c) => <li key={c} className="mfa__item">{c}</li>)}</ul>
       </Dialogo>
     </>
+  );
+}
+
+interface Ficha { nombre: string; contacto: string; docTipo: string; docNumero: string; telefono: string; email: string;
+  direcciones: Array<{ id: string | null; direccion: string; referencia: string; principal: boolean }>; maxDirecciones: number }
+
+/**
+ * Ficha del cliente (solo cuentas de cliente): contacto, documento, celular y sus direcciones de entrega.
+ * El documento lo mantiene la empresa; la dirección principal también. El máximo sale de Parámetros.
+ */
+function FichaCliente({ onAviso }: { onAviso: (a: { tono: 'ok' | 'danger'; texto: string }) => void }) {
+  const [f, setF] = useState<Ficha | null>(null);
+  const [datos, setDatos] = useState({ contacto: '', telefono: '' });
+  const [nueva, setNueva] = useState({ direccion: '', referencia: '' });
+  const [ocupado, setOcupado] = useState(false);
+  const cargar = () => api<Ficha>('/mi-ficha').then((x) => { setF(x); setDatos({ contacto: x.contacto ?? '', telefono: x.telefono ?? '' }); }).catch(() => setF(null));
+  useEffect(() => { void cargar(); }, []);
+  if (!f) return null; // 403 para el personal: la tarjeta no aparece.
+  const hacer = async (fn: () => Promise<unknown>, ok: string) => {
+    setOcupado(true);
+    try { await fn(); await cargar(); onAviso({ tono: 'ok', texto: ok }); }
+    catch (e) { onAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo guardar.' }); }
+    finally { setOcupado(false); }
+  };
+  const lleno = f.direcciones.length >= f.maxDirecciones;
+  return (
+    <Tarjeta>
+      <TarjetaTitulo titulo="Mi ficha de cliente" subtitulo={`${f.nombre} · ${f.docTipo} ${f.docNumero || '—'} · el documento lo actualiza la panadería`} />
+      <form className="form form--2col" onSubmit={(e) => { e.preventDefault(); void hacer(() => api('/mi-ficha', { method: 'PATCH', body: datos }), 'Ficha actualizada.'); }}>
+        <label className="field"><span className="field__label">Persona de contacto</span>
+          <input className="field__input" maxLength={120} value={datos.contacto} onChange={(e) => setDatos({ ...datos, contacto: e.target.value })} /></label>
+        <label className="field"><span className="field__label">Celular</span>
+          <input className="field__input" type="tel" required minLength={6} maxLength={30} value={datos.telefono} onChange={(e) => setDatos({ ...datos, telefono: e.target.value })} /></label>
+        <div className="form__acciones field--ancho"><Boton variant="primary" type="submit" disabled={ocupado}>Guardar ficha</Boton></div>
+      </form>
+      <h4 className="card__sub">Direcciones de entrega · {f.direcciones.length} de {f.maxDirecciones}</h4>
+      <ul className="lista-direcciones">{f.direcciones.map((d, i) => (
+        <li key={d.id ?? `p${i}`}><span>{d.direccion}{d.referencia && <span className="t-muted"> · {d.referencia}</span>}{d.principal && <span className="badge">Principal</span>}</span>
+          {d.id && <Boton size="sm" disabled={ocupado} onClick={() => void hacer(() => api(`/mis-direcciones/${d.id}`, { method: 'DELETE' }), 'Dirección eliminada.')}>Quitar</Boton>}</li>))}
+      </ul>
+      {lleno ? <p className="t-muted">Llegaste al máximo de direcciones: quita una para agregar otra.</p> : (
+        <form className="form form--2col" onSubmit={(e) => { e.preventDefault(); void hacer(async () => { await api('/mis-direcciones', { method: 'POST', body: nueva }); setNueva({ direccion: '', referencia: '' }); }, 'Dirección agregada.'); }}>
+          <label className="field"><span className="field__label">Nueva dirección</span>
+            <input className="field__input" required minLength={5} maxLength={200} placeholder="Calle, número, distrito" value={nueva.direccion} onChange={(e) => setNueva({ ...nueva, direccion: e.target.value })} /></label>
+          <label className="field"><span className="field__label">Referencia (opcional)</span>
+            <input className="field__input" maxLength={120} value={nueva.referencia} onChange={(e) => setNueva({ ...nueva, referencia: e.target.value })} /></label>
+          <div className="form__acciones field--ancho"><Boton type="submit" icono="plus" disabled={ocupado}>Agregar dirección</Boton></div>
+        </form>
+      )}
+    </Tarjeta>
   );
 }

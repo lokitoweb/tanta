@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
+import { useCatalogos } from '@/core/catalogos';
 import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Icon } from '@/ui/icons';
 
@@ -183,6 +184,10 @@ function Series() {
   const [nueva, setNueva] = useState({ tipo: 'NOTA_VENTA', serie: '' });
   const [mensaje, setMensaje] = useState('');
   const [cargaError, setCargaError] = useState<string | null>(null);
+  // Tipos: los comprobantes de venta del catálogo (boleta, factura, nota de pedido…) y el recibo de cobranza.
+  const { comprobantesVenta } = useCatalogos();
+  const tipos = [...comprobantesVenta.map((t) => ({ codigo: t.codigo, nombre: t.nombre })), { codigo: 'RECIBO', nombre: 'Recibo de cobranza' }];
+  const nombreTipo = (c: string) => tipos.find((t) => t.codigo === c)?.nombre ?? c;
   const cargar = () => api<NonNullable<typeof series>>('/series').then((s) => { setSeries(s); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => { void cargar(); }, []);
   const crear = async () => {
@@ -191,17 +196,17 @@ function Series() {
   };
   return (
     <Tarjeta>
-      <TarjetaTitulo titulo="Series de comprobantes" subtitulo="Nota de venta y recibo de cobranza · correlativo único" />
+      <TarjetaTitulo titulo="Series de comprobantes" subtitulo="Una serie activa por tipo (Maestros → Catálogos → Comprobantes de venta) y la del recibo · correlativo único" />
       {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setSeries(null); void cargar(); }} />
         : series === null ? <TablaEsqueleto filas={2} columnas={4} />
         : <div className="table-wrap"><table className="table table--compacta">
         <thead><tr><th>Tipo</th><th>Serie</th><th className="t-right">Último número</th><th>Estado</th></tr></thead>
-        <tbody>{series.map((s) => <tr key={s.tipo + s.serie}><td>{s.tipo === 'RECIBO' ? 'Recibo' : 'Nota de venta'}</td><td>{s.serie}</td><td className="t-right">{s.correlativoActual}</td>
+        <tbody>{series.map((s) => <tr key={s.tipo + s.serie}><td>{nombreTipo(s.tipo)}</td><td>{s.serie}</td><td className="t-right">{s.correlativoActual}</td>
           <td><Insignia tono={s.activo ? 'ok' : 'neutral'} punto>{s.activo ? 'Activa' : 'Histórica'}</Insignia></td></tr>)}</tbody>
       </table></div>}
       <div className="form form--2col">
         <label className="field"><span className="field__label">Tipo</span>
-          <select className="field__input" value={nueva.tipo} onChange={(e) => setNueva({ ...nueva, tipo: e.target.value })}><option value="NOTA_VENTA">Nota de venta</option><option value="RECIBO">Recibo</option></select></label>
+          <select className="field__input" value={nueva.tipo} onChange={(e) => setNueva({ ...nueva, tipo: e.target.value })}>{tipos.map((t) => <option key={t.codigo} value={t.codigo}>{t.nombre}</option>)}</select></label>
         <label className="field"><span className="field__label">Nueva serie (4 caracteres)</span>
           <input className="field__input" maxLength={4} value={nueva.serie} onChange={(e) => setNueva({ ...nueva, serie: e.target.value.toUpperCase() })} /></label>
       </div>
