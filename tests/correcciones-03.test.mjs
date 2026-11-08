@@ -121,3 +121,11 @@ test('Cancelación múltiple: se cancelan los que se pueden, el resto se informa
   if (entregado) assert.equal(r.b.rechazados[0].codigo, entregado);
   assert.equal(sql(`SELECT count(*) FROM audit.evento WHERE accion = 'PEDIDO_CANCELADO' AND entidad_id IN ('${a.b.codigo}','${b.b.codigo}')`), '2');
 });
+
+test('Peso de receta por familia de unidad: el empaque no es masa; un insumo en kg pesa lo que dice', () => {
+  const peso = (where) => Number(sql(`SELECT core.peso_unitario_kg(i.id) FROM core.insumo i LEFT JOIN core.tipo_insumo t ON t.codigo = i.tipo WHERE ${where} LIMIT 1`));
+  assert.equal(peso(`t.es_empaque`), 0, 'una bolsa no suma a la masa ni al % panadero');
+  assert.equal(peso(`i.unidad = 'KG'`), 1, '1 kg pesa 1 kg aunque la ficha traiga otra equivalencia');
+  // La masa del lote es la suma de los pesos: ninguna receta cuenta empaques.
+  assert.equal(sql(`SELECT count(*) FROM core.receta_detalle d JOIN core.insumo i ON i.id = d.insumo_id JOIN core.tipo_insumo t ON t.codigo = i.tipo WHERE t.es_empaque AND d.peso_kg <> 0`), '0');
+});

@@ -386,14 +386,23 @@ class _PedidosState extends State<Pedidos> {
   Widget _barraSeleccion(List<Map<String, dynamic>> lista) {
     final cancelables = lista.where(_cancelable).map((p) => '${p['codigo']}').toList();
     return Panel(
-      padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
-      child: Row(children: [
-        Expanded(child: Text(_marcados.isEmpty ? 'Toca los pedidos a cancelar' : '${_marcados.length} seleccionado(s)', style: const TextStyle(fontWeight: FontWeight.w600))),
-        TextButton(onPressed: cancelables.isEmpty ? null : () => setState(() => _marcados.length == cancelables.length ? _marcados.clear() : _marcados.addAll(cancelables)),
-            child: Text(_marcados.length == cancelables.length && cancelables.isNotEmpty ? 'Ninguno' : 'Todos')),
-        FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: TantaColors.stateDanger),
-          onPressed: _marcados.isEmpty || _ocupado != null ? null : _cancelarMarcados, child: const Text('Cancelar')),
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 8),
+      // Texto arriba y botones abajo: el tema da ancho completo a los botones y en una sola fila aplastaba el texto.
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(_marcados.isEmpty ? 'Toca los pedidos que quieras cancelar' : '${_marcados.length} pedido(s) seleccionado(s)',
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Row(children: [
+          TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(0, 40)),
+            onPressed: cancelables.isEmpty ? null : () => setState(() => _marcados.length == cancelables.length ? _marcados.clear() : _marcados.addAll(cancelables)),
+            child: Text(_marcados.length == cancelables.length && cancelables.isNotEmpty ? 'Quitar todos' : 'Marcar todos')),
+          const Spacer(),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: TantaColors.stateDanger, minimumSize: const Size(0, 40)),
+            onPressed: _marcados.isEmpty || _ocupado != null ? null : _cancelarMarcados,
+            child: Text(_marcados.isEmpty ? 'Cancelar' : 'Cancelar ${_marcados.length}')),
+        ]),
       ]),
     );
   }

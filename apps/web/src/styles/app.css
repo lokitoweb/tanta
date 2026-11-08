@@ -1580,3 +1580,11 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .lista-direcciones li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px;
   border: 1px solid var(--tanta-border-subtle); border-radius: 8px; }
 .lista-direcciones .badge { margin-left: 8px; }
+
+/* Celular: producto a todo el ancho y la cantidad compacta (antes la columna fija de 230px tapaba el producto). */
+@media (max-width: 560px) {
+  .editor-receta__cab, .editor-receta__fila { grid-template-columns: minmax(0, 1fr) 76px 32px; gap: 6px; }
+  .editor-receta__cant { min-width: 0; }
+  .editor-receta__cant span { display: none; }
+  .dialogo__cuerpo .form--dialogo { min-width: 0; }
+}
