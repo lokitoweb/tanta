@@ -58,30 +58,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  /// Build de pruebas: mantener presionado el logo permite apuntar a otro servidor.
-  Future<void> _cambiarServidor() async {
-    if (!Api.pruebas) return;
-    final c = TextEditingController(text: Api.base.replaceAll('/api/v1', ''));
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Servidor (pruebas)'),
-        content: TextField(controller: c, keyboardType: TextInputType.url, autocorrect: false, decoration: const InputDecoration(labelText: 'https://…')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Usar')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await Api.instancia.cambiarServidor(c.text);
-      if (mounted) setState(() => _error = null);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final claim = '${(Api.instancia.config['negocio'] as Map?)?['claim'] ?? ''}';
@@ -104,9 +80,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 child: SafeArea(
                   bottom: false,
                   child: Center(
-                    child: GestureDetector(
-                      onLongPress: _cambiarServidor,
-                      child: FadeTransition(
+                    child: FadeTransition(
                         opacity: CurvedAnimation(parent: _anim, curve: Curves.easeOut),
                         child: ScaleTransition(
                           scale: Tween(begin: 0.86, end: 1.0).animate(CurvedAnimation(parent: _anim, curve: Curves.easeOutBack)),
@@ -119,7 +93,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             ],
                           ]),
                         ),
-                      ),
                     ),
                   ),
                 ),

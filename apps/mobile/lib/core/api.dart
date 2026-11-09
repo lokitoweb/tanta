@@ -29,10 +29,6 @@ class Api {
     defaultValue: '', // sin dirección: la app se activa con el QR de la web
   );
 
-  /// Build de pruebas (--dart-define=PRUEBAS=true): el servidor se cambia desde el login,
-  /// útil con túneles cuya URL cambia. En la build de tienda no existe esta opción.
-  static const bool pruebas = bool.fromEnvironment('PRUEBAS');
-
   static String base = _baseCompilada;
 
   String? _acceso;
@@ -63,8 +59,17 @@ class Api {
   static const _limite = Duration(seconds: 20);
 
   Future<void> cargarSesion() async {
-    // Servidor vigente: el último que indicó el sistema (o el usuario en la build de pruebas).
-    // La dirección compilada solo se usa la primera vez.
+    // Servidor vigente: el último que indicó el sistema (Configuración → App móvil).
+    // Una APK compilada con otro dominio manda sobre lo guardado: al instalarla encima de una anterior
+    // (p. ej. de un túnel que ya no existe) la app no queda apuntando a la dirección vieja.
+    final compiladaAntes = await _seguro.read(key: 'compilada');
+    if (_baseCompilada.isNotEmpty && compiladaAntes != _baseCompilada) {
+      await _seguro.write(key: 'compilada', value: _baseCompilada);
+      if (compiladaAntes != null || await _seguro.read(key: 'servidor') != null) {
+        await _seguro.write(key: 'servidor', value: _baseCompilada);
+        for (final k in ['acceso', 'refresco']) { await _seguro.delete(key: k); }
+      }
+    }
     base = await _seguro.read(key: 'servidor') ?? _baseCompilada;
     // En producción solo HTTPS: un token nunca viaja en claro.
     if (kReleaseMode && base.isNotEmpty && !base.startsWith('https://')) {
@@ -419,10 +424,10 @@ class Api {
     return _trasCambio(ruta, await _decodificar(r));
   }
 
-  /// Solo en la build de pruebas. Acepta "https://x.trycloudflare.com" y completa /api/v1.
+  /// Activación de una app sin dominio compilado. Acepta "https://dominio" y completa /api/v1.
   /// Cambiar de servidor cierra la sesión: los tokens de otro servidor no sirven aquí.
   Future<void> cambiarServidor(String url) async {
-    if (!pruebas && activada) return;
+    if (activada) return;
     // Acepta el enlace del QR (tanta://activar?servidor=…) o la dirección escrita a mano.
     var u = url.trim();
     final enlace = Uri.tryParse(u);

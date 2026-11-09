@@ -1,7 +1,10 @@
-name: APK de pruebas
+name: APK
 
-# Se lanza a mano desde GitHub → Actions → "APK de pruebas" → Run workflow,
-# o con: gh workflow run apk-pruebas.yml -f api_url=https://xxxx.trycloudflare.com
+# APK de producción. Se lanza a mano desde GitHub → Actions → "APK" → Run workflow, o con:
+#   gh workflow run apk.yml                      (usa la variable API_URL del repositorio: el dominio del sistema)
+#   gh workflow run apk.yml -f api_url=https://… (otro dominio solo para esta compilación)
+# Si el sistema cambia de dominio, las apps instaladas se mudan solas (Configuración → App móvil);
+# solo hace falta compilar si el dominio anterior dejó de existir.
 on:
   workflow_dispatch:
     inputs:
@@ -15,7 +18,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: apk-pruebas
+  group: apk
   cancel-in-progress: true
 
 jobs:
@@ -72,14 +75,12 @@ jobs:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
           CLAVE: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE" ]; then echo "::warning::Sin ANDROID_KEYSTORE: se firma con la llave de debug y no se podrá actualizar encima"; exit 0; fi
+          if [ -z "$KEYSTORE" ]; then echo "::error::Falta el secreto ANDROID_KEYSTORE: una APK de producción no se firma con la llave de debug"; exit 1; fi
           echo "$KEYSTORE" | base64 -d > android/app/tanta.jks
           printf 'storeFile=tanta.jks\nstorePassword=%s\nkeyAlias=tanta\nkeyPassword=%s\n' "$CLAVE" "$CLAVE" > android/key.properties
 
-      # Build de pruebas: firmada con la llave de debug (instalable a mano, no para Play)
-      # y con el servidor editable desde el login.
       - name: Compilar
-        run: flutter build apk --release --build-name="$VERSION" --build-number="$BUILD" --dart-define=API_URL="$API" --dart-define=PRUEBAS=true
+        run: flutter build apk --release --build-name="$VERSION" --build-number="$BUILD" --dart-define=API_URL="$API"
 
       - uses: actions/upload-artifact@v4
         with:
