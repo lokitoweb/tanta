@@ -42,12 +42,16 @@ jobs:
           [[ "$API_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]] || { echo "::error::Usa solo https://dominio"; exit 1; }
           echo "API=${API_URL%/}/api/v1" >> "$GITHUB_ENV"
 
-      # Versión: nombre desde pubspec (1.2.0) y número de compilación = número de ejecución,
-      # así cada APK es mayor que la anterior y el aviso de actualización la reconoce.
+      # Versión: nombre desde pubspec (1.2.0) y número de compilación = el del último release + 1,
+      # así cada APK es mayor que la anterior (Android la instala encima y el aviso de actualización la reconoce),
+      # aunque el workflow se renombre o se reinicie su contador.
       - name: Versión
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           echo "VERSION=$(grep '^version:' pubspec.yaml | cut -d' ' -f2 | cut -d+ -f1)" >> "$GITHUB_ENV"
-          echo "BUILD=${{ github.run_number }}" >> "$GITHUB_ENV"
+          ULTIMO=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '[.[].tagName | capture("[+](?<n>[0-9]+)$").n | tonumber] | max // 0')
+          echo "BUILD=$(( ULTIMO + 1 ))" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v4
         with:
