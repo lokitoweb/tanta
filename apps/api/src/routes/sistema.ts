@@ -296,6 +296,12 @@ export async function rutasSistema(app: FastifyInstance) {
     // El dominio por el que se entró manda; el guardado solo sirve si se entra desde localhost.
     const dominio = dominioPublico(req.hostname) ?? String((movil as { urlApi?: string }).urlApi ?? '');
     const { textoPrivacidad: _p, textoTerminos: _t, ...legalPublico } = legal as Record<string, unknown>;
+    // Sin enlaces propios, las páginas legales son las del mismo sistema (/privacidad, /terminos, con el texto base
+    // o el redactado en Configuración): una instalación nueva ya las trae activas, sin configurar nada.
+    const web = dominio.replace(/\/api\/v1$/, '');
+    if (web) for (const [k, ruta] of [['urlPrivacidad', 'privacidad'], ['urlTerminos', 'terminos']] as const) {
+      if (!legalPublico[k]) legalPublico[k] = `${web}/${ruta}`;
+    }
     const p = Object.fromEntries((await q<{ clave: string; valor: string }>("SELECT clave, valor FROM core.parametro WHERE clave IN ('clave_longitud_minima', 'comprobante_leyenda')")).map((x) => [x.clave, x.valor]));
     const claveMin = Math.max(5, Number(p.clave_longitud_minima) || 5);
     return {

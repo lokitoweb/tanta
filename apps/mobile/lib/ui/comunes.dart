@@ -347,3 +347,18 @@ class _PulsableState extends State<Pulsable> {
     );
   }
 }
+
+/// Pie de todo diálogo: la opción secundaria («Cancelar», «Volver») y la principal lado a lado,
+/// mismo alto y ancho. Sin esto el tema (botones a todo el ancho) apilaba «Cancelar» angosto arriba.
+class AccionesDialogo extends StatelessWidget {
+  const AccionesDialogo({super.key, required this.secundaria, required this.principal});
+  final Widget secundaria;
+  final Widget principal;
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        Expanded(child: secundaria),
+        const SizedBox(width: 12),
+        Expanded(child: principal),
+      ]);
+}

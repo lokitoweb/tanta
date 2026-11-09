@@ -88,8 +88,10 @@ class _PedidosState extends State<Pedidos> {
       title: Text(titulo),
       content: TextField(controller: c, autofocus: true, maxLength: 200, maxLines: 3, minLines: 1, decoration: InputDecoration(labelText: etiqueta)),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Volver')),
-        FilledButton(onPressed: () { if (c.text.trim().length >= minimo) Navigator.pop(ctx, c.text.trim()); }, child: const Text('Confirmar')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Volver')),
+          principal: FilledButton(onPressed: () { if (c.text.trim().length >= minimo) Navigator.pop(ctx, c.text.trim()); }, child: const Text('Confirmar')),
+        ),
       ],
     ));
   }
@@ -142,8 +144,10 @@ class _PedidosState extends State<Pedidos> {
       title: Text('Despachar ${p['codigo']}'),
       content: Text('Se registra la venta por ${dinero(_n(p['total']))} a ${p['cliente']} y sale de almacén.\n\nEl pago se registra al entregar: todo, una parte o nada (queda como deuda).'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Despachar')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
+          principal: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Despachar')),
+        ),
       ],
     ));
     if (ok != true || !mounted) return;
@@ -227,8 +231,10 @@ class _PedidosState extends State<Pedidos> {
         ),
       ])),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
+          principal: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+        ),
       ],
     ));
     final nuevos = <Map<String, dynamic>>[

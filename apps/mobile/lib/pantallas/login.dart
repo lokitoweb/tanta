@@ -3,6 +3,7 @@ import '../core/api.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
+import 'legal.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key, required this.onEntrar});
@@ -301,6 +302,11 @@ class _RegistroClienteState extends State<RegistroCliente> {
     }
   }
 
+  Widget _enlaceLegal(String texto, String doc) => GestureDetector(
+        onTap: () => abrirLegal(context, doc),
+        child: Text(texto, style: const TextStyle(fontSize: 12, color: TantaColors.ink800, fontWeight: FontWeight.w600, decoration: TextDecoration.underline)),
+      );
+
   Widget _campo(String k, String etiqueta, IconData icono, {TextInputType? teclado, bool oculto = false, String? ayuda}) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: TextField(controller: _c[k], keyboardType: teclado, obscureText: oculto, autocorrect: false,
@@ -329,7 +335,13 @@ class _RegistroClienteState extends State<RegistroCliente> {
           if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
           FilledButton(onPressed: _enviando ? null : _registrar, child: Text(_enviando ? 'Creando…' : 'Crear cuenta')),
           const SizedBox(height: 10),
-          const Text('Al registrarte aceptas la política de privacidad (Ley 29733).', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+          Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [
+            const Text('Al registrarte aceptas la ', style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+            _enlaceLegal('política de privacidad', 'privacidad'),
+            const Text(' y los ', style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+            _enlaceLegal('términos', 'terminos'),
+            const Text('.', style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+          ]),
         ]),
       ),
     );

@@ -221,8 +221,10 @@ class _DialogoCierreState extends State<_DialogoCierre> {
         ]),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-        FilledButton(onPressed: _aceptar, child: const Text('Cerrar orden')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          principal: FilledButton(onPressed: _aceptar, child: const Text('Cerrar orden')),
+        ),
       ],
     );
   }

@@ -329,8 +329,10 @@ class _RequisicionesState extends State<Requisiciones> {
         ),
       ])),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmar entrega')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          principal: FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmar entrega')),
+        ),
       ],
     ));
     if (ok != true || !mounted) return;
@@ -596,8 +598,10 @@ class _VerificarComprasState extends State<VerificarCompras> {
         ],
       ])),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar verificación')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          principal: FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar verificación')),
+        ),
       ],
     ));
     if (ok != true || !mounted) return;
@@ -858,8 +862,10 @@ class _ConteosState extends State<Conteos> {
         TextField(controller: obs, maxLength: 200, decoration: const InputDecoration(labelText: 'Observación')),
       ])),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar a aprobación')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          principal: FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enviar a aprobación')),
+        ),
       ],
     ));
     if (ok != true || !mounted) return;
@@ -987,8 +993,10 @@ class _MisPedidosState extends State<MisPedidos> {
       title: Text('Cancelar ${p['codigo']}'),
       content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: const InputDecoration(labelText: 'Motivo')),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Volver')),
-        FilledButton(onPressed: () { if (c.text.trim().length >= 3) Navigator.pop(context, c.text.trim()); }, child: const Text('Cancelar pedido')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Volver')),
+          principal: FilledButton(onPressed: () { if (c.text.trim().length >= 3) Navigator.pop(context, c.text.trim()); }, child: const Text('Cancelar pedido')),
+        ),
       ],
     ));
     if (motivo == null || !mounted) return;

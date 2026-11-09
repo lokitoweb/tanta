@@ -6,6 +6,7 @@ import '../core/arranque.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
+import 'legal.dart';
 
 /// Mi perfil: datos, foto, contraseña, privacidad y eliminación de cuenta.
 /// Visible para todos los roles (requisito de App Store y Google Play).
@@ -97,15 +98,15 @@ class _PerfilState extends State<Perfil> {
     final tel = TextEditingController(text: '${p['telefono'] ?? ''}');
     final clave = TextEditingController();
     final ok = await _dialogo('Mis datos', [
-      TextField(controller: nombre, decoration: const InputDecoration(labelText: 'Nombre completo'), textCapitalization: TextCapitalization.words),
+      TextField(controller: nombre, decoration: const InputDecoration(labelText: 'Nombre completo', prefixIcon: Icon(Icons.person_outline)), textCapitalization: TextCapitalization.words),
       const SizedBox(height: 12),
-      TextField(controller: email, decoration: const InputDecoration(labelText: 'Correo'), keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email]),
+      TextField(controller: email, decoration: const InputDecoration(labelText: 'Correo', prefixIcon: Icon(Icons.mail_outline)), keyboardType: TextInputType.emailAddress, autofillHints: const [AutofillHints.email]),
       const SizedBox(height: 12),
-      TextField(controller: tel, decoration: const InputDecoration(labelText: 'Teléfono'), keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber]),
+      TextField(controller: tel, decoration: const InputDecoration(labelText: 'Teléfono', prefixIcon: Icon(Icons.phone_outlined)), keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber]),
       const SizedBox(height: 12),
       TextField(controller: clave, obscureText: true, autofillHints: const [AutofillHints.password],
-          decoration: const InputDecoration(labelText: 'Contraseña actual', helperText: 'Solo si cambias el correo')),
-    ], 'Guardar');
+          decoration: const InputDecoration(labelText: 'Contraseña actual', prefixIcon: Icon(Icons.lock_outline), helperText: 'Solo si cambias el correo')),
+    ], 'Guardar', subtitulo: 'Se usan para avisos y para recuperar tu cuenta.');
     if (ok != true) return;
     await _accion(() async {
       await Api.instancia.actualizarPerfil(nombre: nombre.text.trim(), email: email.text.trim(), telefono: tel.text.trim(), clave: clave.text);
@@ -118,12 +119,12 @@ class _PerfilState extends State<Perfil> {
     final nueva = TextEditingController();
     final repetir = TextEditingController();
     final ok = await _dialogo('Cambiar contraseña', [
-      TextField(controller: actual, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña actual'), autofillHints: const [AutofillHints.password]),
+      TextField(controller: actual, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña actual', prefixIcon: Icon(Icons.lock_outline)), autofillHints: const [AutofillHints.password]),
       const SizedBox(height: 12),
-      TextField(controller: nueva, obscureText: true, decoration: InputDecoration(labelText: 'Nueva (mínimo ${Api.instancia.claveMinima} caracteres)'), autofillHints: const [AutofillHints.newPassword]),
+      TextField(controller: nueva, obscureText: true, decoration: InputDecoration(labelText: 'Nueva contraseña', prefixIcon: const Icon(Icons.key_outlined), helperText: 'Mínimo ${Api.instancia.claveMinima} caracteres'), autofillHints: const [AutofillHints.newPassword]),
       const SizedBox(height: 12),
-      TextField(controller: repetir, obscureText: true, decoration: const InputDecoration(labelText: 'Repite la nueva')),
-    ], 'Cambiar');
+      TextField(controller: repetir, obscureText: true, decoration: const InputDecoration(labelText: 'Repite la nueva', prefixIcon: Icon(Icons.key_outlined))),
+    ], 'Cambiar', subtitulo: 'Al cambiarla se cierran tus sesiones en otros equipos.');
     if (ok != true) return;
     if (nueva.text != repetir.text) return _aviso('Las contraseñas nuevas no coinciden.', error: true);
     if (nueva.text.length < Api.instancia.claveMinima) return _aviso('La nueva contraseña debe tener al menos ${Api.instancia.claveMinima} caracteres.', error: true);
@@ -143,8 +144,8 @@ class _PerfilState extends State<Perfil> {
         style: TextStyle(fontSize: 13, color: TantaColors.textMuted),
       ),
       const SizedBox(height: 14),
-      TextField(controller: clave, obscureText: true, decoration: const InputDecoration(labelText: 'Confirma con tu contraseña')),
-    ], 'Eliminar definitivamente', peligro: true);
+      TextField(controller: clave, obscureText: true, decoration: const InputDecoration(labelText: 'Confirma con tu contraseña', prefixIcon: Icon(Icons.lock_outline))),
+    ], 'Eliminar', peligro: true);
     if (ok != true) return;
     await _accion(() async {
       await Api.instancia.eliminarCuenta(clave.text);
@@ -152,17 +153,28 @@ class _PerfilState extends State<Perfil> {
     }, 'Tu cuenta fue eliminada.');
   }
 
-  Future<bool?> _dialogo(String titulo, List<Widget> campos, String accion, {bool peligro = false}) => showDialog<bool>(
+  Future<bool?> _dialogo(String titulo, List<Widget> campos, String accion, {bool peligro = false, String? subtitulo}) => showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: Text(titulo),
-          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: campos)),
+          title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(titulo),
+            if (subtitulo != null) ...[
+              const SizedBox(height: 4),
+              Text(subtitulo, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: TantaColors.textMuted)),
+            ],
+          ]),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: campos)),
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            FilledButton(
+            AccionesDialogo(
+              secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+              principal: FilledButton(
               style: peligro ? FilledButton.styleFrom(backgroundColor: TantaColors.stateDanger) : null,
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(accion),
+            ),
             ),
           ],
         ),
@@ -225,11 +237,11 @@ class _PerfilState extends State<Perfil> {
         Panel(
           padding: EdgeInsets.zero,
           child: Column(children: [
-            _item(Icons.privacy_tip_outlined, 'Política de privacidad', 'Ley N.° 29733', () => _abrir('${legal['urlPrivacidad'] ?? ''}')),
+            _item(Icons.privacy_tip_outlined, 'Política de privacidad', 'Ley N.° 29733', () => abrirLegal(context, 'privacidad')),
             const Divider(height: 1),
-            _item(Icons.description_outlined, 'Términos y condiciones', null, () => _abrir('${legal['urlTerminos'] ?? ''}')),
+            _item(Icons.description_outlined, 'Términos y condiciones', null, () => abrirLegal(context, 'terminos')),
             const Divider(height: 1),
-            _item(Icons.support_agent_outlined, 'Soporte', '${legal['correoSoporte'] ?? ''}', () => _abrir('mailto:${legal['correoSoporte'] ?? ''}')),
+            if ('${legal['correoSoporte'] ?? ''}'.isNotEmpty) _item(Icons.support_agent_outlined, 'Soporte', '${legal['correoSoporte'] ?? ''}', () => _abrir('mailto:${legal['correoSoporte'] ?? ''}')),
           ]),
         ),
         const SizedBox(height: 14),

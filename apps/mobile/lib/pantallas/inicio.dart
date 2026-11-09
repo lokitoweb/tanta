@@ -69,11 +69,13 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
       title: const Text('Nueva versión disponible'),
       content: Text(v.mensaje.isEmpty ? 'Actualiza Tanta para tener las últimas mejoras.' : v.mensaje),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Más tarde')),
-        FilledButton(
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Más tarde')),
+          principal: FilledButton(
           style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
           onPressed: () { Navigator.pop(ctx); abrirActualizacion(v.url); },
           child: const Text('Actualizar'),
+        ),
         ),
       ],
     ));

@@ -99,8 +99,10 @@ class _HojaProduccionState extends State<HojaProduccion> {
       title: const Text('¿Cerrar pedidos?'),
       content: Text('Los pedidos del ${_dma('${h['fecha']}')} pasan a producción y se crea el lote.'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cerrar pedidos')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
+          principal: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Cerrar pedidos')),
+        ),
       ],
     ));
     if (ok != true || !mounted) return;

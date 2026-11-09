@@ -62,8 +62,10 @@ class _AvisosClientesState extends State<AvisosClientes> {
         title: const Text('¿Enviar este aviso?'),
         content: Text('Lo recibirán $_destinos cliente(s). Una vez enviado no se puede retirar.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enviar aviso')),
+          AccionesDialogo(
+            secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            principal: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Enviar aviso')),
+          ),
         ],
       ),
     );

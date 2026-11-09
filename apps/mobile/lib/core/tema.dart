@@ -41,9 +41,14 @@ ThemeData construirTema() {
       margin: EdgeInsets.zero,
     ),
     // Misma curvatura que botones y campos (12): sobria, no "burbuja".
+    // Diálogos: márgenes amplios, título sobrio y pie con los dos botones a lo ancho (AccionesDialogo).
     dialogTheme: DialogThemeData(
       backgroundColor: TantaColors.surfaceCard,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      titleTextStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: TantaColors.textPrimary),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,

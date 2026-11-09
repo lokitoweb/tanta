@@ -547,6 +547,8 @@ class Api {
   Future<Map<String, dynamic>> notificaciones() async => await _get('/notificaciones') as Map<String, dynamic>;
   Future<void> marcarLeidas(List<int>? ids) async => await _post('/notificaciones/leidas', {if (ids != null) 'ids': ids});
 
+  /// Texto de la política de privacidad o de los términos (público, sin sesión).
+  Future<Map<String, dynamic>> legal(String doc) async => await _get('/legal/$doc') as Map<String, dynamic>;
   Future<Map<String, dynamic>> perfil() async => await _get('/perfil') as Map<String, dynamic>;
 
   Future<void> actualizarPerfil({required String nombre, required String email, required String telefono, String? clave}) async {

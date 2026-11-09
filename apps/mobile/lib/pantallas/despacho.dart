@@ -79,8 +79,10 @@ class _DespachoState extends State<Despacho> {
         TextField(controller: conductor, maxLength: 80, decoration: const InputDecoration(labelText: 'Conductor', counterText: '')),
       ]),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          principal: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+        ),
       ],
     ));
     final datos = {'placa': placa.text.trim(), 'descripcion': descripcion.text.trim(), 'conductor': conductor.text.trim(), 'activo': v?['activo'] ?? true};

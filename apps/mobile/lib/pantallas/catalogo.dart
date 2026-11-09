@@ -384,8 +384,10 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
       title: const Text('Nueva dirección'),
       content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: const InputDecoration(labelText: 'Calle, número, distrito')),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-        FilledButton(onPressed: () { if (c.text.trim().length >= 5) Navigator.pop(ctx, c.text.trim()); }, child: const Text('Guardar')),
+        AccionesDialogo(
+          secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          principal: FilledButton(onPressed: () { if (c.text.trim().length >= 5) Navigator.pop(ctx, c.text.trim()); }, child: const Text('Guardar')),
+        ),
       ],
     ));
     if (nueva == null || !mounted) return;
