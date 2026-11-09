@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '@/core/api';
-import { invalidarCatalogos } from '@/core/catalogos';
+import { invalidarCatalogos, useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
 import { Crud, type Campo } from '@/ui/Crud';
 import type { ColRep } from '@/ui/TablaReporte';
@@ -10,7 +10,7 @@ const PESTANAS = [
   ['medios-pago', 'Medios de pago', 'mediosPago'], ['tipos-documento', 'Documentos de compra', 'tiposDocumento'],
   ['tipos-insumo', 'Tipos de insumo', 'tiposInsumo'], ['unidades', 'Unidades', 'unidades'],
   ['presentaciones-compra', 'Presentaciones de compra', 'presentacionesCompra'], ['presentaciones-venta', 'Presentaciones de venta', 'presentacionesVenta'],
-  ['tipos-gasto', 'Tipos de gasto', 'tiposGasto'], ['comprobantes-venta', 'Comprobantes de venta', 'comprobantesVenta'], ['bancos', 'Bancos', 'bancos'],
+  ['tipos-gasto', 'Tipos de gasto', 'tiposGasto'], ['comprobantes-venta', 'Comprobantes de venta', 'comprobantesVenta'], ['cuentas-caja', 'Cuentas de caja', 'cuentasCaja'], ['bancos', 'Bancos', 'bancos'],
 ] as const;
 type Ruta = typeof PESTANAS[number][0];
 
@@ -19,10 +19,10 @@ const comunes: Campo[] = [{ key: 'orden', label: 'Orden en las listas', tipo: 'n
 
 const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; campos: Campo[] }> = {
   'medios-pago': {
-    descripcion: 'Dónde se usa cada medio y sus reglas: n.° de operación obligatorio, pago desde caja chica, venta al crédito.',
-    nuevo: { codigo: '', nombre: '', requiereOperacion: false, enVentas: true, enCobranza: true, enCompras: false, cajaChica: false, esCredito: false, orden: 10, activo: true },
+    descripcion: 'Dónde se usa cada medio y sus reglas: n.° de operación obligatorio, pago desde caja chica, venta al crédito, y a qué cuenta de caja grande llega lo cobrado.',
+    nuevo: { codigo: '', nombre: '', requiereOperacion: false, enVentas: true, enCobranza: true, enCompras: false, cajaChica: false, esCredito: false, cuentaCaja: '', orden: 10, activo: true },
     columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'requiereOperacion', label: 'N.° operación' }, { key: 'enVentas', label: 'Ventas' },
-      { key: 'enCobranza', label: 'Cobranza' }, { key: 'enCompras', label: 'Compras' }, { key: 'cajaChica', label: 'Caja chica' }, { key: 'activo', label: 'Activo' }],
+      { key: 'enCobranza', label: 'Cobranza' }, { key: 'enCompras', label: 'Compras' }, { key: 'cajaChica', label: 'Caja chica' }, { key: 'cuentaCaja', label: 'Llega a' }, { key: 'activo', label: 'Activo' }],
     campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('requiereOperacion', 'Exige número de operación'),
       si('enVentas', 'Se usa en ventas y pedidos'), si('enCobranza', 'Se usa al cobrar a clientes'), si('enCompras', 'Se usa al pagar a proveedores'),
       si('cajaChica', 'Se puede pagar desde caja chica', 'Solo efectivo: no puede exigir n.° de operación'),
@@ -73,6 +73,12 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
     columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'requiereRuc', label: 'Exige RUC' }, { key: 'activo', label: 'Activo' }],
     campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('requiereRuc', 'Exige cliente con RUC', 'Factura: sí · boleta y nota de pedido: no'), ...comunes],
   },
+  'cuentas-caja': {
+    descripcion: 'Dónde está el dinero de la caja grande: efectivo en caja fuerte, cuentas bancarias y billeteras (Yape, Plin). Cada medio de pago indica a cuál llega lo cobrado.',
+    nuevo: { codigo: '', nombre: '', tipo: 'BANCO', banco: '', numero: '', orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'tipo', label: 'Tipo' }, { key: 'numero', label: 'N.° de cuenta' }, { key: 'activo', label: 'Activo' }],
+    campos: [],
+  },
   bancos: {
     descripcion: 'Bancos para las cuentas de los proveedores.',
     nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
@@ -85,9 +91,21 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
 export function Catalogos() {
   const [pestana, setPestana] = useState<Ruta>('medios-pago');
   const { dataset } = useApp();
+  const cat = useCatalogos();
+  const cuentas = [{ valor: '', texto: 'Ninguna (no cobra)' }, ...cat.cuentasCaja.map((k) => ({ valor: k.codigo, texto: k.nombre }))];
   const insumos = dataset.insumos.filter((i) => i.activo !== false);
   // Presentación de venta: el empaque se elige de los insumos (bolsa 5 x 10").
-  const def = pestana !== 'presentaciones-venta' ? DEF[pestana] : { ...DEF[pestana], campos: [
+  // Campos con opciones que salen de otros catálogos (cuentas de caja, bancos, insumos).
+  const dinamicos: Partial<Record<Ruta, Campo[]>> = {
+    'medios-pago': [...DEF['medios-pago'].campos.slice(0, -2),
+      { key: 'cuentaCaja', label: 'Lo cobrado llega a la cuenta', tipo: 'select', opciones: cuentas, ayuda: 'Caja grande: efectivo → caja fuerte, Yape → su cuenta. Se administran en «Cuentas de caja»' },
+      ...DEF['medios-pago'].campos.slice(-2)],
+    'cuentas-caja': [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60, placeholder: 'BCP soles · Yape del negocio' },
+      { key: 'tipo', label: 'Tipo', tipo: 'select', opciones: [{ valor: 'EFECTIVO', texto: 'Efectivo (caja fuerte)' }, { valor: 'BANCO', texto: 'Cuenta bancaria' }, { valor: 'BILLETERA', texto: 'Billetera (Yape, Plin)' }] },
+      { key: 'banco', label: 'Banco', tipo: 'select', opciones: [{ valor: '', texto: '—' }, ...cat.bancos.map((b) => ({ valor: b.codigo, texto: b.nombre }))] },
+      { key: 'numero', label: 'N.° de cuenta o celular', max: 40 }, ...comunes],
+  };
+  const def = dinamicos[pestana] ? { ...DEF[pestana], campos: dinamicos[pestana]! } : pestana !== 'presentaciones-venta' ? DEF[pestana] : { ...DEF[pestana], campos: [
     { key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60, placeholder: 'Paquete x 6 unid' },
     { key: 'equivalencia', label: 'Equivalencia (panes que lleva)', tipo: 'numero', requerido: true, ayuda: 'Al vender 1 paquete x 6 el stock baja 6 panes' },
     { key: 'insumoId', label: 'Producto adicional a descontar', tipo: 'select', opciones: [{ valor: '', texto: 'Ninguno' }, ...insumos.map((i) => ({ valor: i.id, texto: `${i.nombre} (${(i.unidadInventario ?? i.unidad).toLowerCase()})` }))],
@@ -105,7 +123,7 @@ export function Catalogos() {
       </div></div>
       <Crud key={pestana} titulo={PESTANAS.find((p) => p[0] === pestana)![1]} nombreExport={`catalogo-${pestana}`} descripcion={def.descripcion}
         cargar={async () => ((await api<Record<string, Reg[]>>('/catalogos/administrar'))[clave] ?? []).map((r) => ({ ...r, id: String(r.codigo),
-          insumo: r.insumoId ? `${r.cantidadInsumo} × ${insumos.find((i) => i.id === r.insumoId)?.nombre ?? 'insumo'}` : '', insumoId: r.insumoId ?? '', cantidadInsumo: r.cantidadInsumo ?? '' }))}
+          insumo: r.insumoId ? `${r.cantidadInsumo} × ${insumos.find((i) => i.id === r.insumoId)?.nombre ?? 'insumo'}` : '', insumoId: r.insumoId ?? '', cantidadInsumo: r.cantidadInsumo ?? '', ...(pestana === 'medios-pago' || pestana === 'cuentas-caja' ? { cuentaCaja: r.cuentaCaja ?? '', banco: r.banco ?? '', numero: r.numero ?? '' } : {}) }))}
         nuevo={def.nuevo}
         crear={(d) => guardar(d)} editar={(id, d) => { const { codigo: _c, id: _i, insumo: _x, ...resto } = d; return guardar(resto, id); }}
         columnas={def.columnas}

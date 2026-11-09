@@ -175,7 +175,7 @@ export function Productos() {
         // Alta en dos pasos: se crea (código, nombre, categoría, precio) y se guardan los datos de producción con la misma validación de la edición.
         crear={edita ? async (d) => {
           const g = aGuardar(d);
-          const r = await api<{ id: string }>('/productos', { method: 'POST', body: { ...g, mermaPct: 0.03 } });
+          const r = await api<{ id: string }>('/productos', { method: 'POST', body: g });
           await api(`/productos/${r.id}`, { method: 'PATCH', body: { ...g, codigo: undefined } });
           await refrescarDatos();
         } : undefined}

@@ -9,6 +9,9 @@ export const money = (n: number) => (Number.isFinite(n) ? PEN.format(Math.abs(n)
 export const moneyShort = (n: number) => (!Number.isFinite(n) ? "—" : Math.abs(n) >= 1000 ? PEN0.format(n) : PEN.format(n));
 export const num = (n: number) => NUM.format(n ?? 0);
 export const num2 = (n: number) => NUM2.format(n ?? 0);
+const NUM4 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+/** Cantidades de insumo (kg, L, unid): hasta 4 decimales; 0.284 kg no se muestra como «0». */
+export const cant = (n: number) => NUM4.format(n ?? 0);
 
 /** Recibe fracción (0.55) y devuelve "55,0 %". */
 export function pct(fraccion: number, decimales = 1): string {

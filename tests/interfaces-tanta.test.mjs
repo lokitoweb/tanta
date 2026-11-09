@@ -6,7 +6,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
-import { flujoCompras, hoyLima, nroUnico } from './_compras.mjs';
+import { flujoCompras, hoyLima, nroUnico, fondearCajaGrande } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -213,15 +213,19 @@ test('pagos de costos: caja grande con n.° de operación; caja chica descuenta 
   // Caja chica propia de esta prueba.
   sqlScript(`UPDATE core.caja_apertura SET estado = 'CERRADA', cerrada_en = now(), monto_contado = 0, observacion = 'Cierre por prueba' WHERE estado = 'ABIERTA';`);
   assert.equal((await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'CHICA', medio: 'EFECTIVO' })).s, 409, 'sin caja chica abierta');
+  fondearCajaGrande();
   const a = await api(await login('cmedina'), 'POST', '/cajas/chica/abrir', { montoInicial: 100 });
   assert.equal(a.s, 201, JSON.stringify(a.b));
-  const c = await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'CHICA', medio: 'EFECTIVO', monto: 30 });
+  // Administración paga desde la caja chica del vendedor indicándola (cada usuario tiene la suya).
+  const deLaCaja = { aperturaCodigo: a.b.codigo };
+  const saldoChica = async () => (await api(adm, 'GET', '/cajas/chica')).b.abiertas.find((x) => x.codigo === a.b.codigo).saldo;
+  const c = await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'CHICA', medio: 'EFECTIVO', monto: 30, ...deLaCaja });
   assert.equal(c.s, 201, JSON.stringify(c.b));
   limpiar.push(`DELETE FROM core.pago_costo WHERE codigo = '${c.b.codigo}'`);
-  assert.equal((await api(adm, 'GET', '/cajas/chica')).b.abierta.saldo, 70, 'la caja chica baja con el pago de costos');
-  assert.equal((await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'CHICA', medio: 'EFECTIVO', monto: 80 })).s, 422, 'no supera el saldo');
+  assert.equal(await saldoChica(), 70, 'la caja chica baja con el pago de costos');
+  assert.equal((await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'CHICA', medio: 'EFECTIVO', monto: 80, ...deLaCaja })).s, 422, 'no supera el saldo');
   assert.equal((await api(adm, 'POST', `/pagos-costos/${c.b.codigo}/anular`, { motivo: 'Prueba de anulación' })).s, 200);
-  assert.equal((await api(adm, 'GET', '/cajas/chica')).b.abierta.saldo, 100, 'el dinero vuelve a la caja');
+  assert.equal(await saldoChica(), 100, 'el dinero vuelve a la caja');
   const lista = (await api(adm, 'GET', `/pagos-costos?anio=${base.periodoAnio}&mes=${base.periodoMes}`)).b;
   assert.ok(lista.some((p) => p.codigo === g.b.codigo && p.estado === 'VIGENTE'));
   sqlScript(`UPDATE core.caja_apertura SET estado = 'CERRADA', cerrada_en = now(), monto_contado = 100, observacion = 'Cierre por prueba' WHERE codigo = '${a.b.codigo}';`);

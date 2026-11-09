@@ -7,11 +7,11 @@ import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
 import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
+import { SelectorOrigen, disponible, origenInicial, useCajas, type Origen } from './OrigenPago';
 
-interface Pago { codigo: string; fecha: string; caja: string; medio: string; monto: number; nroOperacion: string | null; estado: string; autoriza: string; motivoAnulacion: string | null; apertura: string | null; comprobanteUrl: string | null }
+interface Pago { codigo: string; fecha: string; caja: string; cuenta?: string | null; medio: string; monto: number; nroOperacion: string | null; estado: string; autoriza: string; motivoAnulacion: string | null; apertura: string | null; comprobanteUrl: string | null }
 interface Deuda { codigo: string; estadoPago: 'PENDIENTE' | 'PARCIAL' | 'PAGADO'; documento: string; fecha: string; vencePago: string | null; dias: number | null;
   proveedor: string; ruc: string; cuentas: Array<{ banco: string; numero: string }>; total: number; pagado: number; saldo: number; pagos: Pago[] }
-interface Caja { codigo: string; saldo: number }
 
 const TONO = { PENDIENTE: 'warn', PARCIAL: 'info', PAGADO: 'ok' } as const;
 
@@ -26,19 +26,17 @@ export function Deudas() {
   const [cargaError, setCargaError] = useState<string | null>(null);
   const deudas = lista ?? [];
   const [filtro, setFiltro] = useState<'abiertas' | 'PAGADO'>('abiertas');
-  const [caja, setCaja] = useState<Caja | null>(null);
   const [ver, setVer] = useState<Deuda | null>(null);
-  const [pago, setPago] = useState<{ caja: 'CHICA' | 'GRANDE'; medio: string; monto: string; nroOperacion: string; comprobante: string | null } | null>(null);
+  const [pago, setPago] = useState<{ origen: Origen; medio: string; monto: string; nroOperacion: string; comprobante: string | null } | null>(null);
   const [anular, setAnular] = useState<{ codigo: string; motivo: string } | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const paga = puede('compras.pagar');
   const medios = useCatalogos().mediosPago.filter((m) => m.enCompras);
-  const mediosCaja = (caja: string) => medios.filter((m) => caja !== 'CHICA' || m.cajaChica);
+  const cajas = useCajas(paga);
 
   const cargar = async () => {
-    if (paga) api<{ abierta: Caja | null }>('/cajas/chica').then((r) => setCaja(r.abierta))
-      .catch((e) => { setCaja(null); setAviso({ tono: 'danger', texto: `No se pudo leer la caja chica: ${e.message}` }); });
+    cajas.recargar();
     const l = await api<Deuda[]>('/deudas-compra').catch((e) => { setCargaError(e.message); return null; });
     if (!l) return;
     setLista(l);
@@ -52,10 +50,11 @@ export function Deudas() {
   const vencido = porPagar.filter((d) => (d.dias ?? 1) < 0).reduce((s, d) => s + d.saldo, 0);
 
   const digital = !!pago && !!medios.find((m) => m.codigo === pago.medio)?.requiereOperacion;
+  const origen = pago ? disponible(pago.origen, cajas) : null;
   const monto = Number(pago?.monto);
   const errorPago = !pago || !ver ? '' : !(monto > 0) ? 'Indica el monto.' : monto > ver.saldo + 0.005 ? `No puede superar el saldo (${money(ver.saldo)}).`
-    : pago.caja === 'CHICA' && !caja ? 'No hay caja chica abierta: el vendedor debe abrirla.'
-      : pago.caja === 'CHICA' && caja && monto > caja.saldo + 0.005 ? `La caja chica solo tiene ${money(caja.saldo)}: paga el resto desde caja grande.`
+    : !origen ? (pago.origen.caja === 'CHICA' ? 'Elige la caja chica.' : 'Elige la cuenta de caja grande.')
+      : monto > origen.saldo + 0.005 ? `${origen.nombre} solo tiene ${money(origen.saldo)} disponibles.`
         : digital && pago.nroOperacion.trim().length < 3 ? 'Indica el número de operación.' : '';
 
   const registrar = async () => {
@@ -63,7 +62,7 @@ export function Deudas() {
     setOcupado(true);
     try {
       const r = await api<{ codigo: string; saldo: number; estadoPago: string }>(`/compras/${ver.codigo}/pagos`, { method: 'POST', conIdempotencia: true,
-        body: { caja: pago.caja, medio: pago.medio, monto, nroOperacion: pago.nroOperacion.trim(), comprobante: pago.comprobante } });
+        body: { ...pago.origen, medio: pago.medio, monto, nroOperacion: pago.nroOperacion.trim(), comprobante: pago.comprobante } });
       setPago(null);
       setAviso({ tono: 'ok', texto: `Pago ${r.codigo} registrado: ${r.estadoPago === 'PAGADO' ? 'deuda cancelada' : `queda ${money(r.saldo)} por pagar`}.` });
       await cargar();
@@ -89,7 +88,7 @@ export function Deudas() {
       <div className="grid grid--auto">
         <Kpi label="Por pagar" valor={money(porPagar.reduce((s, d) => s + d.saldo, 0))} nota={`${porPagar.length} compra(s)`} icono="wallet" />
         <Kpi label="Vencido" valor={money(vencido)} nota="saldo con vencimiento pasado" icono="alert" />
-        {paga && <Kpi label="Caja chica" valor={caja ? money(caja.saldo) : 'Cerrada'} nota={caja ? `${caja.codigo} · disponible` : 'el vendedor la abre con un monto inicial'} icono="wallet" />}
+        {paga && <Kpi label="Caja grande" valor={money(cajas.cuentas.reduce((t, k) => t + k.saldo, 0))} nota={`${cajas.cuentas.length} cuenta(s) · ${cajas.abiertas.length} caja(s) chica(s) abierta(s)`} icono="wallet" />}
       </div>
       <div className="toolbar"><div className="chips">
         <button className={`chipfilter ${filtro === 'abiertas' ? 'is-active' : ''}`} onClick={() => setFiltro('abiertas')}>Por pagar <b>{porPagar.length}</b></button>
@@ -102,7 +101,7 @@ export function Deudas() {
         acciones={ver && (pago
           ? <><Boton onClick={() => setPago(null)}>Volver</Boton><Boton variant="primary" disabled={!!errorPago || ocupado} onClick={() => void registrar()}>{ocupado ? 'Registrando…' : `Pagar ${money(monto || 0)}`}</Boton></>
           : anular ? <><Boton onClick={() => setAnular(null)}>Volver</Boton><Boton variant="primary" disabled={anular.motivo.trim().length < 5 || ocupado} onClick={() => void anularPago()}>Anular pago</Boton></>
-            : <>{paga && ver.saldo > 0 && <Boton variant="primary" onClick={() => setPago({ caja: 'GRANDE', medio: mediosCaja('GRANDE')[0]?.codigo ?? '', monto: ver.saldo.toFixed(2), nroOperacion: '', comprobante: null })}>Registrar pago</Boton>}
+            : <>{paga && ver.saldo > 0 && <Boton variant="primary" onClick={() => { cajas.recargar(); const m = medios[0]; setPago({ origen: origenInicial(cajas.cuentas, m), medio: m?.codigo ?? '', monto: ver.saldo.toFixed(2), nroOperacion: '', comprobante: null }); }}>Registrar pago</Boton>}
               <Boton onClick={() => setVer(null)}>Cerrar</Boton></>)}>
         {ver && (<>
           <p className="dialogo__nota">Total {money(ver.total)} · pagado {money(ver.pagado)} · <b>saldo {money(ver.saldo)}</b></p>
@@ -113,7 +112,7 @@ export function Deudas() {
               <tbody>{ver.pagos.map((p) => (
                 <tr key={p.codigo}>
                   <td>{p.codigo}</td><td>{new Date(p.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}</td>
-                  <td>{p.caja === 'CHICA' ? `Chica ${p.apertura ?? ''}` : 'Grande'}</td>
+                  <td>{p.caja === 'CHICA' ? `Chica ${p.apertura ?? ''}` : `Grande${p.cuenta ? ` · ${p.cuenta}` : ''}`}</td>
                   <td>{p.medio.toLowerCase()}{p.nroOperacion ? ` · ${p.nroOperacion}` : ''}{p.comprobanteUrl && <> · <VerComprobante url={p.comprobanteUrl} texto="comprobante" /></>}</td>
                   <td className="t-right">{money(p.monto)}</td>
                   <td>{p.estado === 'VIGENTE' ? <Insignia tono="ok">Vigente</Insignia> : <Insignia tono="neutral">Anulado</Insignia>}</td>
@@ -124,12 +123,8 @@ export function Deudas() {
           )}
           {pago && (
             <div className="form form--2col form--dialogo">
-              <label className="field"><span className="field__label">Caja</span>
-                <select className="field__input" value={pago.caja} onChange={(e) => setPago({ ...pago, caja: e.target.value as 'CHICA' | 'GRANDE', medio: mediosCaja(e.target.value).some((m) => m.codigo === pago.medio) ? pago.medio : (mediosCaja(e.target.value)[0]?.codigo ?? '') })}>
-                  <option value="GRANDE">Caja grande</option><option value="CHICA">Caja chica{caja ? ` (${money(caja.saldo)} disponible)` : ' (cerrada)'}</option></select></label>
-              <label className="field"><span className="field__label">Medio</span>
-                <select className="field__input" value={pago.medio} onChange={(e) => setPago({ ...pago, medio: e.target.value })}>
-                  {mediosCaja(pago.caja).map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}</select></label>
+              <SelectorOrigen valor={pago.origen} onChange={(o) => setPago((x) => x && { ...x, origen: o })} cajas={cajas} medios={medios}
+                medio={pago.medio} onMedio={(m) => setPago((x) => x && { ...x, medio: m })} />
               <label className="field"><span className="field__label">Monto (S/)</span>
                 <input className="field__input" type="number" min="0" step="0.01" max={ver.saldo} value={pago.monto} onChange={(e) => setPago({ ...pago, monto: e.target.value })} /></label>
               <label className="field"><span className="field__label">N.° de operación{digital ? '' : ' (opcional)'}</span>

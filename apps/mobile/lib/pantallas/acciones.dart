@@ -711,13 +711,13 @@ class _CajaChicaState extends State<CajaChica> {
           if (_error != null) ErrorReintentar(mensaje: _error!, onReintentar: _cargar)
           else if (_datos == null) const Esqueleto(filas: 3)
           else if (a == null) ...[
-            const Text('No hay caja chica abierta. Sin ella, Administración solo paga desde caja grande.'),
+            const Text('No tienes una caja abierta. El fondo sale del efectivo de la caja grande; si solo vas a cobrar, puede ser 0.'),
             const SizedBox(height: 12),
             TextField(controller: _monto, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(labelText: 'Monto inicial (S/)')),
+                decoration: const InputDecoration(labelText: 'Fondo inicial (S/)', prefixIcon: Icon(Icons.payments_outlined))),
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: _n(_monto) > 0 ? () => _accion(() async {
+              onPressed: _n(_monto) >= 0 ? () => _accion(() async {
                 final r = await Api.instancia.abrirCajaChica(_n(_monto));
                 _monto.clear();
                 return 'Caja ${r['codigo']} abierta';
@@ -726,14 +726,16 @@ class _CajaChicaState extends State<CajaChica> {
             ),
           ] else ...[
             Text('Disponible ${dinero(saldo)}', style: Theme.of(context).textTheme.headlineSmall),
-            Text('${a['codigo']} · inicial ${dinero(((a['montoInicial'] as num?) ?? 0).toDouble())} · pagado ${dinero(((a['pagado'] as num?) ?? 0).toDouble())}'),
+            Text('${a['codigo']} · fondo ${dinero(((a['montoInicial'] as num?) ?? 0).toDouble())} · gastos y pagos ${dinero(((a['pagado'] as num?) ?? 0).toDouble())}'),
             const SizedBox(height: 12),
             for (final p in ((a['pagos'] as List?) ?? const []).cast<Map<String, dynamic>>())
               ListTile(dense: true, contentPadding: EdgeInsets.zero,
-                  title: Text('${p['proveedor']} · ${p['compra']}'), subtitle: Text('${p['estado']}'.toLowerCase()),
+                  title: Text(p['compra'] == null ? '${p['proveedor']}' : '${p['proveedor']} · ${p['compra']}'), subtitle: Text('${p['estado']}'.toLowerCase()),
                   trailing: Text(dinero(((p['monto'] as num?) ?? 0).toDouble()))),
             const Divider(height: 28),
             Text('Cerrar caja', style: Theme.of(context).textTheme.titleMedium),
+            const Padding(padding: EdgeInsets.only(top: 4, bottom: 8),
+                child: Text('Cuenta el efectivo que queda: vuelve a la caja grande y la diferencia queda registrada.', style: TextStyle(fontSize: 12.5, color: TantaColors.textMuted))),
             TextField(controller: _contado, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(labelText: 'Efectivo contado (S/)',
                     helperText: _n(_contado) >= 0 ? 'Diferencia ${dinero(_n(_contado) - saldo)}' : 'Esperado ${dinero(saldo)}')),
@@ -744,7 +746,7 @@ class _CajaChicaState extends State<CajaChica> {
                 _contado.clear();
                 _obs.clear();
                 final dif = ((r['diferencia'] as num?) ?? 0).toDouble();
-                return dif == 0 ? 'Caja cerrada sin diferencias' : 'Caja cerrada con diferencia de ${dinero(dif)}';
+                return dif == 0 ? 'Caja cerrada sin diferencias: el efectivo volvió a caja grande' : 'Caja cerrada con diferencia de ${dinero(dif)}';
               }) : null,
               child: const Text('Cerrar caja'),
             ),

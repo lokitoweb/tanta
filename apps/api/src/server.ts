@@ -19,6 +19,7 @@ import { rutasHojas } from './routes/hojas.js';
 import { rutasDespacho } from './routes/despacho.js';
 import { rutasCompras } from './routes/compras.js';
 import { rutasPagos, rutasPagosCostos, despacharAvisosPago } from './routes/pagos.js';
+import { rutasCajaGrande } from './routes/cajaGrande.js';
 import { rutasCatalogos } from './routes/catalogos.js';
 import { rutasFlujo } from './routes/flujo.js';
 
@@ -148,6 +149,7 @@ export async function construir() {
     await api.register(rutasCompras);
     await api.register(rutasPagos);
     await api.register(rutasPagosCostos);
+    await api.register(rutasCajaGrande);
     await api.register(rutasCatalogos);
     await api.register(rutasFlujo);
   }, { prefix: '/api/v1' });

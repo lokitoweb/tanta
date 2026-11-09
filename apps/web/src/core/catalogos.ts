@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 
 /** Catálogos administrables (Maestros → Catálogos). Las reglas salen de sus atributos, no del código. */
-export interface MedioPago { codigo: string; nombre: string; requiereOperacion: boolean; enVentas: boolean; enCobranza: boolean; enCompras: boolean; cajaChica: boolean; esCredito: boolean; activo: boolean; orden: number }
+export interface MedioPago { codigo: string; nombre: string; requiereOperacion: boolean; enVentas: boolean; enCobranza: boolean; enCompras: boolean; cajaChica: boolean; esCredito: boolean; cuentaCaja: string | null; activo: boolean; orden: number }
 export interface TipoDocumento { codigo: string; nombre: string; creditoFiscal: boolean; activo: boolean; orden: number }
 export interface TipoInsumo { codigo: string; nombre: string; esHarina: boolean; activo: boolean; orden: number }
 export interface Unidad { codigo: string; descripcion: string; familia: 'MASA' | 'VOLUMEN' | 'CONTEO'; factorAPatron: number; activo: boolean; orden: number }
@@ -11,11 +11,13 @@ export interface PresentacionVenta { codigo: string; nombre: string; equivalenci
 export interface Banco { codigo: string; nombre: string; activo: boolean; orden: number }
 export interface TipoGasto { codigo: string; nombre: string; activo: boolean; orden: number }
 /** Boleta, factura, nota de pedido… lo elige el cliente al cerrar su pedido. */
+/** Caja grande: efectivo (caja fuerte), cuenta bancaria o billetera (Yape, Plin). */
+export interface CuentaCaja { codigo: string; nombre: string; tipo: 'EFECTIVO' | 'BANCO' | 'BILLETERA'; banco: string | null; numero: string | null; activo: boolean; orden: number }
 export interface ComprobanteVenta { codigo: string; nombre: string; requiereRuc: boolean; activo: boolean; orden: number }
 export interface Catalogos { tiposGasto: TipoGasto[]; mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[];
-  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[]; comprobantesVenta: ComprobanteVenta[] }
+  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[]; comprobantesVenta: ComprobanteVenta[]; cuentasCaja: CuentaCaja[] }
 
-const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [], comprobantesVenta: [] };
+const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [], comprobantesVenta: [], cuentasCaja: [] };
 let cache: Promise<Catalogos> | null = null;
 
 /** Recarga los catálogos (tras editarlos en Maestros → Catálogos). */

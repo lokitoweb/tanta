@@ -8,6 +8,7 @@ import { notificar } from './notificaciones.js';
 import { actor, fallo, responder } from './almacen.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
 import { guardarImagen } from './sistema.js';
+import { moverCaja, anularMovimientos, cuentaEfectivo } from './cajaGrande.js';
 
 /**
  * Deudas por pagar y cajas (informe de compra de insumos v1.1, secciones 3.2, 5.5 y RN-10 a RN-13).
@@ -29,19 +30,41 @@ export async function actualizarEstadoPago(c: PoolClient, compraId: string) {
 
 /** RN-09: al anular una compra, sus pagos vigentes pasan a ANULADO (el dinero vuelve a su caja). */
 export async function anularPagosDeCompra(c: PoolClient, compraId: string, usuarioId: string, motivo: string) {
-  const r = await c.query(`UPDATE core.pago_compra SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
+  const r = await c.query<{ id: string }>(`UPDATE core.pago_compra SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
     WHERE compra_id = $1 AND estado = 'VIGENTE' RETURNING id`, [compraId, usuarioId, `Compra anulada: ${motivo}`.slice(0, 300)]);
+  for (const g of r.rows) await anularMovimientos(c, g.id, usuarioId, `Compra anulada: ${motivo}`);
   await actualizarEstadoPago(c, compraId);
   return r.rowCount ?? 0;
+}
+
+/**
+ * Caja chica de la que sale un pago: la que indique quien paga (Administración elige entre las abiertas)
+ * o la propia abierta. Se bloquea para que dos pagos no la sobregiren.
+ */
+async function aperturaPara(c: PoolClient, usuario: { id: string; permisos: Set<string> }, codigo: string | null) {
+  if (codigo && !usuario.permisos.has('compras.pagar')) throw fallo(403, 'Solo Administración paga desde la caja chica de otra persona.');
+  const a = (await c.query<{ id: string; codigo: string }>("SELECT id, codigo FROM core.caja_apertura WHERE estado = 'ABIERTA' AND (codigo = $1 OR ($1::text IS NULL AND abierta_por = $2)) FOR UPDATE",
+    [codigo, usuario.id])).rows[0];
+  if (!a) throw fallo(409, codigo ? `La caja chica ${codigo} no está abierta.` : 'No tienes una caja chica abierta: ábrela o paga desde caja grande.');
+  return a;
+}
+
+/** Caja grande: cuenta de la que sale el pago (la elegida o la asignada al medio). */
+function cuentaDeSalida(d: { cuentaCaja: string | null }, medio: { cuenta_caja: string | null; nombre: string }) {
+  const cuenta = d.cuentaCaja ?? medio.cuenta_caja;
+  if (!cuenta) throw fallo(422, `Elige la cuenta de caja grande de la que sale el pago (${medio.nombre.toLowerCase()} no tiene una asignada).`);
+  return cuenta;
 }
 
 export async function rutasPagos(app: FastifyInstance) {
   /* --------------------------------------------------------------- caja chica */
   app.get('/cajas/chica', { preHandler: autenticar }, async (req, reply) => {
     if (!['caja.abrir', 'compras.pagar'].some((x) => req.usuario!.permisos.has(x))) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso caja.abrir.'));
+    // Cada uno ve su caja; Administración (paga desde cualquiera) y quien ve caja grande ven todas.
+    const todas = ['compras.pagar', 'caja.grande.ver'].some((x) => req.usuario!.permisos.has(x));
     const filas = await q<Record<string, string>>(`
       SELECT a.id, a.codigo, a.estado, a.monto_inicial, a.abierta_en::text abierta_en, a.cerrada_en::text cerrada_en, a.monto_contado, a.observacion,
-             ua.nombre abierta_por, uc.nombre cerrada_por,
+             ua.nombre abierta_por, a.abierta_por abierta_por_id, uc.nombre cerrada_por,
              a.monto_inicial - core.saldo_caja(a.id) pagado,
              coalesce((SELECT json_agg(x ORDER BY x.fecha DESC) FROM (
                SELECT p.codigo, k.codigo compra, pr.razon_social proveedor, p.monto, p.fecha_pago fecha, p.estado
@@ -49,26 +72,30 @@ export async function rutasPagos(app: FastifyInstance) {
                UNION ALL
                SELECT g.codigo, NULL, g.concepto, g.monto, g.creado_en, g.estado FROM core.pago_costo g WHERE g.apertura_id = a.id) x), '[]') pagos
       FROM core.caja_apertura a JOIN core.usuario ua ON ua.id = a.abierta_por LEFT JOIN core.usuario uc ON uc.id = a.cerrada_por
-      ORDER BY a.abierta_en DESC LIMIT 30`);
+      WHERE $1::boolean OR a.abierta_por = $2
+      ORDER BY (a.estado = 'ABIERTA') DESC, a.abierta_en DESC LIMIT 60`, [todas, req.usuario!.id]);
     const lista = filas.map((f) => ({
-      id: f.id, codigo: f.codigo, estado: f.estado, montoInicial: num(f.monto_inicial), pagado: num(f.pagado), saldo: num(f.monto_inicial) - num(f.pagado),
+      id: f.id, codigo: f.codigo, estado: f.estado, propia: f.abierta_por_id === req.usuario!.id, montoInicial: num(f.monto_inicial), pagado: num(f.pagado), saldo: num(f.monto_inicial) - num(f.pagado),
       abiertaEn: f.abierta_en, abiertaPor: f.abierta_por, cerradaEn: f.cerrada_en, cerradaPor: f.cerrada_por,
       montoContado: f.monto_contado === null ? null : num(f.monto_contado), observacion: f.observacion,
       pagos: (f.pagos as unknown as Array<Record<string, string>>).map((p) => ({ ...p, monto: num(p.monto) })),
     }));
-    return { abierta: lista.find((a) => a.estado === 'ABIERTA') ?? null, historial: lista };
+    return { abierta: lista.find((a) => a.estado === 'ABIERTA' && a.propia) ?? null, abiertas: lista.filter((a) => a.estado === 'ABIERTA'), historial: lista };
   });
 
-  // El vendedor abre la caja chica con su monto inicial (5.6). Solo una abierta a la vez.
+  // Cada usuario que cobra abre su caja chica (una abierta por persona). El fondo sale del efectivo de caja grande; puede ser 0.
   app.post('/cajas/chica/abrir', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'caja.abrir')) return;
-    const p = z.object({ montoInicial: z.number().positive().max(1_000_000) }).safeParse(req.body);
-    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el monto inicial (mayor a cero).'));
+    const p = z.object({ montoInicial: z.number().min(0).max(1_000_000) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el fondo inicial (0 o más).'));
     return responder(reply, 'CAJA_INVALIDA', async () => {
       const r = await tx(async (c) => {
-        if ((await c.query(`SELECT 1 FROM core.caja_apertura WHERE tipo = 'CHICA' AND estado = 'ABIERTA'`)).rowCount) throw fallo(409, 'Ya hay una caja chica abierta: ciérrala antes de abrir otra.');
+        if ((await c.query(`SELECT 1 FROM core.caja_apertura WHERE estado = 'ABIERTA' AND abierta_por = $1`, [req.usuario!.id])).rowCount) throw fallo(409, 'Ya tienes una caja chica abierta: ciérrala antes de abrir otra.');
+        const cuenta = await cuentaEfectivo(c);
         const codigo = `CCH-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.caja_apertura WHERE codigo ~ '^CCH-[0-9]+$'`)).rows[0].n)).padStart(5, '0')}`;
-        await c.query('INSERT INTO core.caja_apertura (codigo, monto_inicial, abierta_por) VALUES ($1,$2,$3)', [codigo, p.data.montoInicial.toFixed(2), req.usuario!.id]);
+        const a = (await c.query<{ id: string }>('INSERT INTO core.caja_apertura (codigo, monto_inicial, abierta_por, cuenta_origen) VALUES ($1,$2,$3,$4) RETURNING id',
+          [codigo, p.data.montoInicial.toFixed(2), req.usuario!.id, cuenta])).rows[0];
+        await moverCaja(c, { cuenta, monto: -p.data.montoInicial, tipo: 'FONDO_CAJA_CHICA', concepto: `Fondo de la caja chica ${codigo} (${req.usuario!.nombre})`, referencia: codigo, origenId: a.id, usuarioId: req.usuario!.id });
         return codigo;
       });
       await auditar({ ...actor(req), accion: 'CAJA_CHICA_ABIERTA', entidad: 'caja_apertura', entidadId: r, detalle: p.data });
@@ -84,11 +111,15 @@ export async function rutasPagos(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el efectivo contado.'));
     return responder(reply, 'CAJA_INVALIDA', async () => {
       const r = await tx(async (c) => {
-        const a = (await c.query<{ id: string }>(`SELECT id FROM core.caja_apertura WHERE codigo = $1 AND estado = 'ABIERTA' FOR UPDATE`, [codigo])).rows[0];
+        const a = (await c.query<{ id: string; abierta_por: string; cuenta_origen: string | null }>(`SELECT id, abierta_por, cuenta_origen FROM core.caja_apertura WHERE codigo = $1 AND estado = 'ABIERTA' FOR UPDATE`, [codigo])).rows[0];
         if (!a) throw fallo(409, 'La caja no está abierta.');
+        if (a.abierta_por !== req.usuario!.id && !req.usuario!.permisos.has('compras.pagar')) throw fallo(403, 'Solo cierras tu propia caja chica.');
         const esperado = await saldoCaja(c, a.id);
         await c.query(`UPDATE core.caja_apertura SET estado = 'CERRADA', cerrada_por = $2, cerrada_en = now(), monto_contado = $3, observacion = NULLIF($4,'') WHERE id = $1`,
           [a.id, req.usuario!.id, p.data.montoContado.toFixed(2), p.data.observacion]);
+        // Lo contado vuelve al efectivo de caja grande (la diferencia queda registrada en la caja).
+        await moverCaja(c, { cuenta: a.cuenta_origen ?? await cuentaEfectivo(c), monto: p.data.montoContado, tipo: 'CIERRE_CAJA_CHICA',
+          concepto: `Cierre de la caja chica ${codigo}`, referencia: codigo, origenId: a.id, usuarioId: req.usuario!.id });
         return { esperado, diferencia: Math.round((p.data.montoContado - esperado) * 100) / 100 };
       });
       await auditar({ ...actor(req), accion: 'CAJA_CHICA_CERRADA', entidad: 'caja_apertura', entidadId: codigo, detalle: { ...p.data, ...r } });
@@ -109,7 +140,7 @@ export async function rutasPagos(app: FastifyInstance) {
              coalesce((SELECT sum(monto) FROM core.pago_compra WHERE compra_id = k.id AND estado = 'VIGENTE'), 0) pagado,
              CASE WHEN k.vence_pago IS NULL THEN NULL ELSE k.vence_pago - (now() AT TIME ZONE 'America/Lima')::date END dias,
              coalesce((SELECT json_agg(json_build_object('codigo', g.codigo, 'fecha', g.fecha_pago, 'caja', g.caja, 'medio', g.medio_pago, 'monto', g.monto,
-               'nroOperacion', g.nro_operacion, 'estado', g.estado, 'autoriza', u.nombre, 'motivoAnulacion', g.motivo_anulacion, 'apertura', a.codigo,
+               'nroOperacion', g.nro_operacion, 'estado', g.estado, 'autoriza', u.nombre, 'cuenta', (SELECT nombre FROM core.cuenta_caja WHERE codigo = g.cuenta_caja), 'motivoAnulacion', g.motivo_anulacion, 'apertura', a.codigo,
                'comprobanteUrl', CASE WHEN g.comprobante_id IS NULL THEN NULL ELSE '/comprobantes/' || g.comprobante_id END) ORDER BY g.fecha_pago)
                FROM core.pago_compra g JOIN core.usuario u ON u.id = g.usuario_autoriza LEFT JOIN core.caja_apertura a ON a.id = g.apertura_id WHERE g.compra_id = k.id), '[]') pagos
       FROM core.compra k JOIN core.proveedor pr ON pr.id = k.proveedor_id
@@ -131,6 +162,9 @@ export async function rutasPagos(app: FastifyInstance) {
     nroOperacion: z.string().trim().toUpperCase().max(30).default(''),
     // Excel: imagen del comprobante (voucher, captura de Yape…), opcional. Data URL PNG/JPEG/WebP.
     comprobante: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
+    // Caja grande: cuenta de la que sale (vacío = la del medio). Caja chica: cuál (vacío = la propia).
+    cuentaCaja: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
+    aperturaCodigo: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
   });
   /** Guarda el comprobante (si llega) antes de la transacción: una imagen inválida no deja el pago a medias. */
   const comprobante = async (img: string | null, usuarioId: string) => (img ? guardarImagen(img, usuarioId, true) : null);
@@ -162,17 +196,18 @@ export async function rutasPagos(app: FastifyInstance) {
         const saldo = Math.round((num(k.total) - pagado) * 100) / 100;
         if (d.monto > saldo + 0.005) throw fallo(422, `RN-13: el pago supera el saldo de la compra (S/ ${saldo.toFixed(2)}).`);
         let aperturaId: string | null = null;
+        let cuenta: string | null = null;
         if (d.caja === 'CHICA') {
-          // RN-11: apertura vigente y sin superar su saldo; se bloquea para que dos pagos no la sobregiren.
-          const a = (await c.query<{ id: string; codigo: string }>(`SELECT id, codigo FROM core.caja_apertura WHERE tipo = 'CHICA' AND estado = 'ABIERTA' FOR UPDATE`)).rows[0];
-          if (!a) throw fallo(409, 'RN-11: no hay una caja chica abierta. Paga desde caja grande o pide al vendedor que abra caja.');
+          // RN-11: apertura vigente y sin superar su saldo.
+          const a = await aperturaPara(c, req.usuario!, d.aperturaCodigo);
           const disponible = await saldoCaja(c, a.id);
           if (d.monto > disponible + 0.005) throw fallo(422, `RN-11: la caja chica ${a.codigo} solo tiene S/ ${disponible.toFixed(2)} disponibles. Las deudas mayores se pagan desde caja grande.`);
           aperturaId = a.id;
-        }
+        } else cuenta = cuentaDeSalida(d, medio);
         const cod = `PAG-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.pago_compra WHERE codigo ~ '^PAG-[0-9]+$'`)).rows[0].n)).padStart(6, '0')}`;
-        await c.query(`INSERT INTO core.pago_compra (codigo, compra_id, caja, medio_pago, monto, nro_operacion, apertura_id, usuario_autoriza, idempotency_key, comprobante_id)
-          VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10)`, [cod, k.id, d.caja, d.medio, d.monto.toFixed(2), d.nroOperacion, aperturaId, req.usuario!.id, clave, comprobanteId]);
+        const pago = (await c.query<{ id: string }>(`INSERT INTO core.pago_compra (codigo, compra_id, caja, medio_pago, monto, nro_operacion, apertura_id, usuario_autoriza, idempotency_key, comprobante_id, cuenta_caja)
+          VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11) RETURNING id`, [cod, k.id, d.caja, d.medio, d.monto.toFixed(2), d.nroOperacion, aperturaId, req.usuario!.id, clave, comprobanteId, cuenta])).rows[0];
+        if (cuenta) await moverCaja(c, { cuenta, monto: -d.monto, tipo: 'PAGO_COMPRA', concepto: `Pago ${cod} · compra ${codigo}`, referencia: cod, origenId: pago.id, usuarioId: req.usuario!.id });
         await actualizarEstadoPago(c, k.id);
         const estado = (await c.query<{ estado_pago: string }>('SELECT estado_pago FROM core.compra WHERE id = $1', [k.id])).rows[0].estado_pago;
         return { codigo: cod, estadoPago: estado, saldo: Math.round((saldo - d.monto) * 100) / 100 };
@@ -190,9 +225,10 @@ export async function rutasPagos(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo (mínimo 5 caracteres).'));
     return responder(reply, 'PAGO_INVALIDO', async () => {
       const compra = await tx(async (c) => {
-        const g = (await c.query<{ compra_id: string; codigo: string }>(`UPDATE core.pago_compra g SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
-          FROM core.compra k WHERE g.codigo = $1 AND g.estado = 'VIGENTE' AND k.id = g.compra_id RETURNING g.compra_id, k.codigo`, [codigo, req.usuario!.id, p.data.motivo])).rows[0];
+        const g = (await c.query<{ id: string; compra_id: string; codigo: string }>(`UPDATE core.pago_compra g SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
+          FROM core.compra k WHERE g.codigo = $1 AND g.estado = 'VIGENTE' AND k.id = g.compra_id RETURNING g.id, g.compra_id, k.codigo`, [codigo, req.usuario!.id, p.data.motivo])).rows[0];
         if (!g) throw fallo(409, 'El pago no existe o ya está anulado.');
+        await anularMovimientos(c, g.id, req.usuario!.id, `Pago ${codigo} anulado: ${p.data.motivo}`);
         await actualizarEstadoPago(c, g.compra_id);
         return g.codigo;
       });
@@ -225,6 +261,8 @@ export async function rutasPagosCostos(app: FastifyInstance) {
     docSerie: z.string().trim().toUpperCase().max(10).default(''),
     docNumero: z.string().trim().toUpperCase().max(20).default(''),
     autorizadoPor: z.string().trim().max(80).default(''),
+    cuentaCaja: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
+    aperturaCodigo: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
   }).refine((d) => d.costoIndirectoId || d.concepto.length >= 2, { message: 'Elige el costo indirecto o escribe el concepto.', path: ['concepto'] });
 
   app.get('/pagos-costos', { preHandler: autenticar }, async (req, reply) => {
@@ -277,19 +315,20 @@ export async function rutasPagosCostos(app: FastifyInstance) {
           concepto = concepto || k.concepto;
         }
         let aperturaId: string | null = null;
+        let cuenta: string | null = null;
         if (d.caja === 'CHICA') {
-          const a = (await c.query<{ id: string; codigo: string }>(`SELECT id, codigo FROM core.caja_apertura WHERE tipo = 'CHICA' AND estado = 'ABIERTA' FOR UPDATE`)).rows[0];
-          if (!a) throw fallo(409, 'No hay una caja chica abierta: paga desde caja grande o pide que se abra la caja.');
+          const a = await aperturaPara(c, req.usuario!, d.aperturaCodigo);
           const disponible = await saldoCaja(c, a.id);
           if (d.monto > disponible + 0.005) throw fallo(422, `La caja chica ${a.codigo} solo tiene S/ ${disponible.toFixed(2)} disponibles.`);
           aperturaId = a.id;
-        }
+        } else cuenta = cuentaDeSalida(d, medio);
         const cod = `PGC-${String(num((await c.query<{ n: string }>(`SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 n FROM core.pago_costo WHERE codigo ~ '^PGC-[0-9]+$'`)).rows[0].n)).padStart(6, '0')}`;
-        await c.query(`INSERT INTO core.pago_costo (codigo, costo_indirecto_id, concepto, fecha_operacion, periodo_mes, periodo_anio, monto, caja, apertura_id,
-            medio_pago, nro_operacion, comprobante_id, usuario_id, idempotency_key, tipo_gasto, doc_tipo, doc_serie, doc_numero, autorizado_por)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14,$15,$16,NULLIF($17,''),NULLIF($18,''),NULLIF($19,''))`,
+        const pago = (await c.query<{ id: string }>(`INSERT INTO core.pago_costo (codigo, costo_indirecto_id, concepto, fecha_operacion, periodo_mes, periodo_anio, monto, caja, apertura_id,
+            medio_pago, nro_operacion, comprobante_id, usuario_id, idempotency_key, tipo_gasto, doc_tipo, doc_serie, doc_numero, autorizado_por, cuenta_caja)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),$12,$13,$14,$15,$16,NULLIF($17,''),NULLIF($18,''),NULLIF($19,''),$20) RETURNING id`,
           [cod, d.costoIndirectoId, concepto, d.fechaOperacion, d.periodoMes, d.periodoAnio, d.monto.toFixed(2), d.caja, aperturaId, d.medio, d.nroOperacion,
-            comprobanteId, req.usuario!.id, clave, d.tipoGasto, d.docTipo, d.docSerie, d.docNumero, d.autorizadoPor]);
+            comprobanteId, req.usuario!.id, clave, d.tipoGasto, d.docTipo, d.docSerie, d.docNumero, d.autorizadoPor, cuenta])).rows[0];
+        if (cuenta) await moverCaja(c, { cuenta, monto: -d.monto, tipo: 'PAGO_COSTO', concepto: `Pago ${cod} · ${concepto}`, referencia: cod, origenId: pago.id, usuarioId: req.usuario!.id });
         return { codigo: cod, concepto };
       });
       await auditar({ ...actor(req), accion: 'PAGO_COSTO_REGISTRADO', entidad: 'pago_costo', entidadId: r.codigo,
@@ -303,8 +342,12 @@ export async function rutasPagosCostos(app: FastifyInstance) {
     const { codigo } = req.params as { codigo: string };
     const p = z.object({ motivo: z.string().trim().min(5).max(300) }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo (mínimo 5 caracteres).'));
-    const r = await uno(`UPDATE core.pago_costo SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
-      WHERE codigo = $1 AND estado = 'VIGENTE' RETURNING codigo`, [codigo, req.usuario!.id, p.data.motivo]);
+    const r = await tx(async (c) => {
+      const g = (await c.query<{ id: string }>(`UPDATE core.pago_costo SET estado = 'ANULADO', anulado_por = $2, anulado_en = now(), motivo_anulacion = $3
+        WHERE codigo = $1 AND estado = 'VIGENTE' RETURNING id`, [codigo, req.usuario!.id, p.data.motivo])).rows[0];
+      if (g) await anularMovimientos(c, g.id, req.usuario!.id, `Pago ${codigo} anulado: ${p.data.motivo}`);
+      return g;
+    });
     if (!r) return reply.code(409).send(error(409, 'PAGO_INVALIDO', 'El pago no existe o ya está anulado.'));
     await auditar({ ...actor(req), accion: 'PAGO_COSTO_ANULADO', entidad: 'pago_costo', entidadId: codigo, detalle: { motivo: p.data.motivo } });
     return { codigo, estado: 'ANULADO' };

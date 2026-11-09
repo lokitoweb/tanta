@@ -29,12 +29,15 @@ const ESQUEMAS = {
   'medios-pago': {
     tabla: 'core.medio_pago',
     campos: z.object({ ...base, requiereOperacion: z.boolean().default(false), enVentas: z.boolean().default(false), enCobranza: z.boolean().default(false),
-      enCompras: z.boolean().default(false), cajaChica: z.boolean().default(false), esCredito: z.boolean().default(false) })
+      enCompras: z.boolean().default(false), cajaChica: z.boolean().default(false), esCredito: z.boolean().default(false),
+      // Caja grande: cuenta a la que llega lo cobrado con este medio (efectivo → caja fuerte, Yape → su cuenta…).
+      cuentaCaja: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null) })
       .refine((d) => !d.esCredito || !(d.enCobranza || d.enCompras || d.cajaChica || d.requiereOperacion),
         { message: 'El crédito no cobra, no paga a proveedores, no sale de caja ni lleva n.° de operación.' })
-      .refine((d) => !d.cajaChica || !d.requiereOperacion, { message: 'La caja chica es efectivo: no lleva n.° de operación.' }),
+      .refine((d) => !d.cajaChica || !d.requiereOperacion, { message: 'La caja chica es efectivo: no lleva n.° de operación.' })
+      .refine((d) => d.esCredito || !d.enCobranza || d.cuentaCaja, { message: 'Indica a qué cuenta de caja grande llega lo cobrado con este medio.' }),
     columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', requiereOperacion: 'requiere_operacion', enVentas: 'en_ventas', enCobranza: 'en_cobranza',
-      enCompras: 'en_compras', cajaChica: 'caja_chica', esCredito: 'es_credito' },
+      enCompras: 'en_compras', cajaChica: 'caja_chica', esCredito: 'es_credito', cuentaCaja: 'cuenta_caja' },
     enUso: `SELECT 1 FROM core.venta WHERE forma_pago = $1 UNION ALL SELECT 1 FROM core.cobranza WHERE medio = $1 UNION ALL SELECT 1 FROM core.pago_compra WHERE medio_pago = $1 LIMIT 1`,
   },
   'tipos-insumo': {
@@ -80,6 +83,14 @@ const ESQUEMAS = {
     columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', requiereRuc: 'requiere_ruc' },
     enUso: 'SELECT 1 FROM core.pedido WHERE comprobante_tipo = $1 UNION ALL SELECT 1 FROM core.venta WHERE comprobante_tipo = $1 LIMIT 1',
   },
+  // Caja grande: dónde está el dinero (efectivo en caja fuerte, cuentas bancarias, billeteras).
+  'cuentas-caja': {
+    tabla: 'core.cuenta_caja',
+    campos: z.object({ ...base, tipo: z.enum(['EFECTIVO', 'BANCO', 'BILLETERA']),
+      banco: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null), numero: z.string().trim().max(40).default('') }),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', tipo: 'tipo', banco: 'banco', numero: 'numero' },
+    enUso: 'SELECT 1 FROM core.movimiento_caja WHERE cuenta = $1 UNION ALL SELECT 1 FROM core.medio_pago WHERE cuenta_caja = $1 LIMIT 1',
+  },
   bancos: {
     tabla: 'core.banco',
     campos: z.object(base),
@@ -102,17 +113,17 @@ export async function leerCatalogos(todos = false) {
     tiposDocumento: await leer('core.tipo_documento_compra'), mediosPago: await leer('core.medio_pago'),
     tiposInsumo: await leer('core.tipo_insumo'), unidades: await leer('core.unidad_medida'),
     presentacionesCompra: await leer('core.presentacion_compra'), presentacionesVenta: await leer('core.presentacion_venta'), tiposGasto: await leer('core.tipo_gasto'), bancos: await leer('core.banco'),
-    comprobantesVenta: await leer('core.tipo_comprobante_venta'),
+    comprobantesVenta: await leer('core.tipo_comprobante_venta'), cuentasCaja: await leer('core.cuenta_caja'),
   };
 }
 
 /* ------------------------------------------------------------ validación de operaciones */
-export interface MedioPago { codigo: string; nombre: string; requiere_operacion: boolean; caja_chica: boolean; es_credito: boolean }
+export interface MedioPago { codigo: string; nombre: string; requiere_operacion: boolean; caja_chica: boolean; es_credito: boolean; cuenta_caja: string | null }
 export type UsoMedio = 'ventas' | 'cobranza' | 'compras';
 
 /** El medio debe existir, estar activo y estar habilitado para el proceso. */
 export async function medioPago(c: PoolClient | null, cod: string, uso: UsoMedio): Promise<MedioPago> {
-  const sql = `SELECT codigo, nombre, requiere_operacion, caja_chica, es_credito FROM core.medio_pago WHERE codigo = $1 AND activo AND en_${uso}`;
+  const sql = `SELECT codigo, nombre, requiere_operacion, caja_chica, es_credito, cuenta_caja FROM core.medio_pago WHERE codigo = $1 AND activo AND en_${uso}`;
   const m = c ? (await c.query<MedioPago>(sql, [cod])).rows[0] : await uno<MedioPago>(sql, [cod]);
   if (!m) throw fallo(422, `El medio de pago ${cod} no existe o no está habilitado para ${uso}.`);
   return m;
@@ -151,6 +162,10 @@ export async function rutasCatalogos(app: FastifyInstance) {
     const d = p.data as Record<string, unknown>;
     const cols = Object.entries(def.columnas) as Array<[string, string]>;
     return responder(reply, 'CATALOGO_INVALIDO', async () => {
+      if (catalogo === 'medios-pago' && d.cuentaCaja && !(await uno('SELECT 1 FROM core.cuenta_caja WHERE codigo = $1 AND activo', [d.cuentaCaja]))) {
+        throw fallo(422, 'La cuenta de caja grande no existe o está inactiva.');
+      }
+      if (catalogo === 'cuentas-caja' && d.banco && !(await uno('SELECT 1 FROM core.banco WHERE codigo = $1', [d.banco]))) throw fallo(422, 'El banco no existe.');
       if (catalogo === 'presentaciones-venta' && d.insumoId && !(await uno('SELECT 1 FROM core.insumo WHERE id = $1 AND activo', [d.insumoId]))) {
         throw fallo(422, 'El insumo a descontar no existe o está inactivo.');
       }

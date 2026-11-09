@@ -50,7 +50,7 @@ async function insumosDe(filas: Fila[]) {
   const minimos = new Map((await q<{ id: string; minimo: string }>('SELECT id, minimo FROM core.insumo WHERE id = ANY($1::uuid[])', [[...acumulado.keys()]])).map((m) => [m.id, num(m.minimo)]));
   const insumos = [...acumulado.values()].map((a) => {
     const restante = a.stock - a.cantidad, minimo = minimos.get(a.insumoId) ?? 0;
-    return { ...a, cantidad: Number(a.cantidad.toFixed(3)), restante: Number(restante.toFixed(3)), minimo, estado: restante < 0 ? 'FALTA' : restante < minimo ? 'ALERTA' : 'NORMAL' };
+    return { ...a, cantidad: Number(a.cantidad.toFixed(4)), restante: Number(restante.toFixed(4)), minimo, estado: restante < 0 ? 'FALTA' : restante < minimo ? 'ALERTA' : 'NORMAL' };
   });
   return { insumos, sinReceta };
 }

@@ -41,3 +41,11 @@ export function flujoCompras(api, login) {
 /** Al terminar una prueba: anula las compras de los proveedores de prueba (no deben quedar como deudas). */
 export const ANULAR_COMPRAS_DE_PRUEBA = `UPDATE core.compra SET estado = 'ANULADA', anulado_en = now(), motivo_anulacion = 'Prueba automática'
   WHERE estado <> 'ANULADA' AND proveedor_id IN (SELECT id FROM core.proveedor WHERE razon_social LIKE 'Proveedor prueba %' OR razon_social LIKE 'Molino prueba %');`;
+
+/**
+ * Caja grande con saldo para las pruebas que pagan desde ella o abren caja chica (el fondo sale de su efectivo).
+ * Un ajuste grande en cada cuenta activa; solo en la base de pruebas.
+ */
+export const fondearCajaGrande = () => sql(`INSERT INTO core.movimiento_caja (cuenta, tipo, monto, concepto, usuario_id)
+  SELECT k.codigo, 'AJUSTE', 1000000, 'Fondo para pruebas', (SELECT id FROM core.usuario WHERE usuario = 'superadmin')
+  FROM core.cuenta_caja k WHERE k.activo AND core.saldo_cuenta(k.codigo) < 500000`);

@@ -51,7 +51,7 @@ test('punto 4: con factura (crédito fiscal) el costo del insumo va sin IGV; con
 
 test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.° de operación, desactivación)', async () => {
   assert.equal((await api(vendedor, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: `Billetera QA ${sufijo}`, enVentas: true })).s, 403, 'solo el Administrador');
-  const r = await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: `Billetera QA ${sufijo}`, requiereOperacion: true, enVentas: true, enCobranza: true });
+  const r = await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: `Billetera QA ${sufijo}`, requiereOperacion: true, enVentas: true, enCobranza: true, cuentaCaja: 'BANCO' });
   assert.equal(r.s, 201, JSON.stringify(r.b));
   assert.equal((await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: 'Otra' })).s, 409, 'código único');
   assert.ok((await api(vendedor, 'GET', '/catalogos')).b.mediosPago.some((m) => m.codigo === nuevo.medio), 'aparece en los formularios');
@@ -59,7 +59,7 @@ test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.°
   const venta = (extra) => api(vendedor, 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 1 }], formaPago: nuevo.medio, ...extra });
   assert.equal((await venta({})).s, 422, 'exige n.° de operación por su atributo');
   assert.equal((await venta({ referenciaPago: 'QA-123' })).s, 201);
-  assert.equal((await api(admin, 'PATCH', `/catalogos/medios-pago/${nuevo.medio}`, { nombre: `Billetera QA ${sufijo}`, requiereOperacion: true, enVentas: true, enCobranza: true, activo: false })).s, 200);
+  assert.equal((await api(admin, 'PATCH', `/catalogos/medios-pago/${nuevo.medio}`, { nombre: `Billetera QA ${sufijo}`, requiereOperacion: true, enVentas: true, enCobranza: true, cuentaCaja: 'BANCO', activo: false })).s, 200);
   assert.equal((await venta({ referenciaPago: 'QA-124' })).s, 422, 'desactivado ya no se usa');
   assert.ok(!(await api(vendedor, 'GET', '/catalogos')).b.mediosPago.some((m) => m.codigo === nuevo.medio), 'ni se ofrece');
   assert.equal((await api(admin, 'POST', '/catalogos/medios-pago', { codigo: `QA_MAL_${sufijo}`, nombre: 'Crédito raro', esCredito: true, enCompras: true })).s, 422,

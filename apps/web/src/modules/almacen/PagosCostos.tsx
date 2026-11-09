@@ -7,6 +7,7 @@ import { money } from '@/core/format';
 import { exportarExcel } from '@/core/exportar';
 import { Dialogo } from '@/ui/Dialogo';
 import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
+import { SelectorOrigen, disponible, origenInicial, useCajas } from './OrigenPago';
 import { ComprobanteInput } from './Deudas';
 
 interface PagoCosto {
@@ -14,7 +15,7 @@ interface PagoCosto {
   apertura: string | null; medio: string; nroOperacion: string | null; estado: 'VIGENTE' | 'ANULADO'; motivoAnulacion: string | null; usuario: string; comprobanteUrl: string | null;
 }
 interface Cif { id: string; codigo: string; concepto: string; montoMensual: number; activo: boolean }
-interface Form { costoIndirectoId: string; concepto: string; fechaOperacion: string; periodoMes: number; periodoAnio: number; monto: string; caja: 'CHICA' | 'GRANDE'; medio: string; nroOperacion: string; comprobante: string | null }
+interface Form { costoIndirectoId: string; concepto: string; fechaOperacion: string; periodoMes: number; periodoAnio: number; monto: string; caja: 'CHICA' | 'GRANDE'; aperturaCodigo: string; cuentaCaja: string; medio: string; nroOperacion: string; comprobante: string | null }
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
@@ -31,7 +32,6 @@ export function PagosCostos() {
   const [mes, setMes] = useState(ahora.getUTCMonth() + 1);
   const [lista, setLista] = useState<PagoCosto[] | null>(null);
   const [cifs, setCifs] = useState<Cif[]>([]);
-  const [caja, setCaja] = useState<{ codigo: string; saldo: number } | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [anular, setAnular] = useState<{ codigo: string; motivo: string } | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
@@ -39,11 +39,11 @@ export function PagosCostos() {
   const [cargaError, setCargaError] = useState<string | null>(null);
   const paga = puede('compras.pagar');
   const medios = useCatalogos().mediosPago.filter((m) => m.enCompras);
-  const mediosCaja = (c: string) => medios.filter((m) => c !== 'CHICA' || m.cajaChica);
+  const cajas = useCajas(paga);
 
   const cargar = () => {
     api<PagoCosto[]>(`/pagos-costos?anio=${anio}&mes=${mes}`).then((l) => { setLista(l); setCargaError(null); }).catch((e) => setCargaError(e.message));
-    if (paga) api<{ abierta: { codigo: string; saldo: number } | null }>('/cajas/chica').then((r) => setCaja(r.abierta)).catch(() => setCaja(null));
+    cajas.recargar();
   };
   useEffect(() => { setLista(null); cargar(); }, [anio, mes]);
   useEffect(() => { if (puede('maestros.editar')) api<{ items: Cif[] }>('/costos-indirectos').then((r) => setCifs(r.items)).catch(() => setCifs([])); }, []);
@@ -53,13 +53,14 @@ export function PagosCostos() {
   const presupuesto = cifs.filter((c) => c.activo).reduce((s, c) => s + c.montoMensual, 0);
   const pagadoDe = (id: string) => vigentes.filter((p) => p.cif === cifs.find((c) => c.id === id)?.codigo).reduce((s, p) => s + p.monto, 0);
 
-  const nuevo = () => setForm({ costoIndirectoId: '', concepto: '', fechaOperacion: hoy(), periodoMes: mes, periodoAnio: anio, monto: '', caja: 'GRANDE',
-    medio: mediosCaja('GRANDE')[0]?.codigo ?? '', nroOperacion: '', comprobante: null });
+  const nuevo = () => { cajas.recargar(); setForm({ costoIndirectoId: '', concepto: '', fechaOperacion: hoy(), periodoMes: mes, periodoAnio: anio, monto: '',
+    ...origenInicial(cajas.cuentas, medios[0]), medio: medios[0]?.codigo ?? '', nroOperacion: '', comprobante: null }); };
+  const origen = form ? disponible(form, cajas) : null;
   const digital = !!form && !!medios.find((m) => m.codigo === form.medio)?.requiereOperacion;
   const monto = Number(form?.monto);
   const errorForm = !form ? '' : !form.costoIndirectoId && form.concepto.trim().length < 2 ? 'Elige el costo o escribe el concepto.'
-    : !(monto > 0) ? 'Indica el monto.' : form.caja === 'CHICA' && !caja ? 'No hay caja chica abierta.'
-      : form.caja === 'CHICA' && caja && monto > caja.saldo + 0.005 ? `La caja chica solo tiene ${money(caja.saldo)}.`
+    : !(monto > 0) ? 'Indica el monto.' : !origen ? (form.caja === 'CHICA' ? 'Elige la caja chica.' : 'Elige la cuenta de caja grande.')
+      : monto > origen.saldo + 0.005 ? `${origen.nombre} solo tiene ${money(origen.saldo)} disponibles.`
         : digital && form.nroOperacion.trim().length < 3 ? 'Indica el número de operación.' : '';
 
   const registrar = async () => {
@@ -102,10 +103,10 @@ export function PagosCostos() {
       <div className="grid grid--auto">
         <Kpi label="Pagado en el período" valor={money(pagado)} nota={`${vigentes.length} pago(s)`} icono="wallet" />
         {cifs.length > 0 && <Kpi label="Presupuesto mensual" valor={money(presupuesto)} nota={`por pagar ${money(Math.max(0, presupuesto - pagado))}`} icono="ledger" />}
-        {paga && <Kpi label="Caja chica" valor={caja ? money(caja.saldo) : 'Cerrada'} nota={caja ? `${caja.codigo} · disponible` : 'se abre en Comercial → Caja chica'} icono="wallet" />}
+        {paga && <Kpi label="Caja grande" valor={money(cajas.cuentas.reduce((t, k) => t + k.saldo, 0))} nota={`${cajas.cuentas.length} cuenta(s) · ${cajas.abiertas.length} caja(s) chica(s) abierta(s)`} icono="wallet" />}
       </div>
 
-      <Dialogo abierto={form !== null} titulo="Registrar pago de costo" descripcion="El pago queda en el período elegido y, si sale de caja chica, descuenta su saldo."
+      <Dialogo abierto={form !== null} titulo="Registrar pago de costo" descripcion="El pago queda en el período elegido y descuenta el saldo de la caja o de la cuenta de la que sale."
         onCerrar={() => setForm(null)}
         acciones={<><Boton onClick={() => setForm(null)}>Cancelar</Boton><Boton variant="primary" disabled={!!errorForm || ocupado} onClick={() => void registrar()}>{ocupado ? 'Registrando…' : `Pagar ${money(monto || 0)}`}</Boton></>}>
         {form && (
@@ -128,12 +129,8 @@ export function PagosCostos() {
               </div></label>
             <label className="field"><span className="field__label">Monto (S/)</span>
               <input className="field__input" type="number" min="0" step="0.01" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} /></label>
-            <label className="field"><span className="field__label">Origen del pago</span>
-              <select className="field__input" value={form.caja} onChange={(e) => setForm({ ...form, caja: e.target.value as 'CHICA' | 'GRANDE', medio: mediosCaja(e.target.value).some((m) => m.codigo === form.medio) ? form.medio : (mediosCaja(e.target.value)[0]?.codigo ?? '') })}>
-                <option value="GRANDE">Caja grande</option><option value="CHICA">Caja chica{caja ? ` (${money(caja.saldo)} disponible)` : ' (cerrada)'}</option></select></label>
-            <label className="field"><span className="field__label">Medio de pago</span>
-              <select className="field__input" value={form.medio} onChange={(e) => setForm({ ...form, medio: e.target.value })}>
-                {mediosCaja(form.caja).map((m) => <option key={m.codigo} value={m.codigo}>{m.nombre}</option>)}</select></label>
+            <SelectorOrigen valor={form} onChange={(o) => setForm((x) => x && { ...x, ...o })} cajas={cajas} medios={medios}
+              medio={form.medio} onMedio={(m) => setForm((x) => x && { ...x, medio: m })} />
             <label className="field"><span className="field__label">N.° de operación{digital ? '' : ' (opcional)'}</span>
               <input className="field__input" maxLength={30} value={form.nroOperacion} onChange={(e) => setForm({ ...form, nroOperacion: e.target.value.toUpperCase() })} /></label>
             <ComprobanteInput valor={form.comprobante} onChange={(c) => setForm({ ...form, comprobante: c })} onError={(t) => setAviso({ tono: 'danger', texto: t })} />

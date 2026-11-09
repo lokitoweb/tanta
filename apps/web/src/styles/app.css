@@ -1588,3 +1588,13 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   .editor-receta__cant span { display: none; }
   .dialogo__cuerpo .form--dialogo { min-width: 0; }
 }
+
+/* Dato calculado dentro de un formulario: se lee como campo, pero no se escribe. */
+.field__input--info { display: flex; align-items: center; background: var(--tanta-surface-sunken, var(--tanta-sand-50)); color: var(--tanta-text-secondary); font-size: 0.8125rem; }
+
+/* Caja grande: cada cuenta es un indicador que filtra sus movimientos al tocarlo. */
+.kpi-boton { all: unset; display: block; cursor: pointer; border-radius: var(--tanta-radius-lg); }
+.kpi-boton:focus-visible { outline: 2px solid var(--tanta-sand-500); outline-offset: 2px; }
+.kpi-boton.is-active > * { border-color: var(--tanta-ink-800); box-shadow: 0 0 0 1px var(--tanta-ink-800); }
+.table tr.is-anulado td { color: var(--tanta-text-muted); text-decoration: line-through; text-decoration-color: var(--tanta-border-strong); }
+.table tr.is-anulado td:last-child, .table tr.is-anulado td:nth-last-child(2) { text-decoration: none; }

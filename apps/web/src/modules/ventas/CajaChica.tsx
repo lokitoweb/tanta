@@ -10,15 +10,19 @@ interface Apertura {
 }
 const fecha = (x: string) => new Date(x).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' });
 
-/** Caja chica (informe de compra de insumos 5.6): el vendedor la abre con un monto inicial; Administración paga compras desde ella. */
+/**
+ * Caja chica de cada usuario que cobra (audio del cliente, 09/11/2026): la abre con un fondo que sale del efectivo de
+ * caja grande (puede ser 0), paga sus gastos desde ella y al cerrarla cuenta el efectivo, que vuelve a caja grande.
+ * Lo cobrado se rinde aparte en Cobranza (rendición del día) y también termina en caja grande.
+ */
 export function CajaChica() {
-  const [datos, setDatos] = useState<{ abierta: Apertura | null; historial: Apertura[] } | null>(null);
+  const [datos, setDatos] = useState<{ abierta: Apertura | null; abiertas: Apertura[]; historial: Apertura[] } | null>(null);
   const [monto, setMonto] = useState('');
   const [contado, setContado] = useState('');
   const [obs, setObs] = useState('');
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
-  const cargar = () => api<{ abierta: Apertura | null; historial: Apertura[] }>('/cajas/chica').then((d) => { setDatos(d); setCargaError(null); }).catch((e) => setCargaError(e.message));
+  const cargar = () => api<{ abierta: Apertura | null; abiertas: Apertura[]; historial: Apertura[] }>('/cajas/chica').then((d) => { setDatos(d); setCargaError(null); }).catch((e) => setCargaError(e.message));
   useEffect(() => { void cargar(); }, []);
   const accion = async (fn: () => Promise<string>) => {
     try { setAviso({ tono: 'ok', texto: await fn() }); await cargar(); } catch (e) { setAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo completar.' }); }
@@ -27,17 +31,18 @@ export function CajaChica() {
 
   return (
     <>
-      <Encabezado titulo="Caja chica" descripcion="Se abre con un monto inicial · Administración paga compras pequeñas desde aquí · al cerrar se cuenta el efectivo" />
+      <Encabezado titulo="Caja chica" descripcion="Tu caja del día · el fondo sale del efectivo de caja grande · al cerrarla, lo contado vuelve a caja grande" />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
       {datos === null && !cargaError && <Tarjeta><PilaEsqueleto lineas={3} /></Tarjeta>}
       {a ? (<>
         <div className="grid grid--auto">
           <Kpi label="Disponible" valor={money(a.saldo)} nota={`${a.codigo} · abierta por ${a.abiertaPor}`} icono="wallet" />
-          <Kpi label="Monto inicial" valor={money(a.montoInicial)} nota={fecha(a.abiertaEn)} icono="clock" />
-          <Kpi label="Pagado a proveedores" valor={money(a.pagado)} nota={`${a.pagos.filter((p) => p.estado === 'VIGENTE').length} pago(s)`} icono="chart" />
+          <Kpi label="Fondo inicial" valor={money(a.montoInicial)} nota={fecha(a.abiertaEn)} icono="clock" />
+          <Kpi label="Gastos y pagos" valor={money(a.pagado)} nota={`${a.pagos.filter((p) => p.estado === 'VIGENTE').length} movimiento(s)`} icono="chart" />
         </div>
         <Tarjeta>
           <h3 className="card__title">Cerrar caja</h3>
+          <p className="t-muted">Cuenta el efectivo que queda: vuelve a la caja grande y la diferencia queda registrada.</p>
           <div className="form form--2col">
             <label className="field"><span className="field__label">Efectivo contado (S/)</span>
               <input className="field__input" type="number" min="0" step="0.01" value={contado} onChange={(e) => setContado(e.target.value)} /></label>
@@ -48,18 +53,18 @@ export function CajaChica() {
           <div className="form__acciones"><Boton variant="primary" disabled={contado === '' || Number(contado) < 0} onClick={() => void accion(async () => {
             const r = await api<{ diferencia: number }>(`/cajas/chica/${a.codigo}/cerrar`, { method: 'POST', body: { montoContado: Number(contado), observacion: obs } });
             setContado(''); setObs('');
-            return `Caja ${a.codigo} cerrada${r.diferencia ? ` con una diferencia de ${money(r.diferencia)}` : ' sin diferencias'}.`;
+            return `Caja ${a.codigo} cerrada${r.diferencia ? ` con una diferencia de ${money(r.diferencia)}` : ' sin diferencias'}: ${money(Number(contado))} volvió a la caja grande.`;
           })}>Cerrar caja</Boton></div>
         </Tarjeta>
       </>) : datos && (
         <Tarjeta>
           <h3 className="card__title">Abrir caja chica</h3>
-          <p className="t-muted">No hay caja abierta. Sin ella, Administración solo puede pagar desde caja grande.</p>
+          <p className="t-muted">No tienes una caja abierta. El fondo sale del efectivo de la caja grande; si solo vas a cobrar, puede ser 0.</p>
           <div className="form form--2col">
-            <label className="field"><span className="field__label">Monto inicial (S/)</span>
+            <label className="field"><span className="field__label">Fondo inicial (S/)</span>
               <input className="field__input" type="number" min="0" step="0.01" value={monto} onChange={(e) => setMonto(e.target.value)} /></label>
           </div>
-          <div className="form__acciones"><Boton variant="primary" disabled={!(Number(monto) > 0)} onClick={() => void accion(async () => {
+          <div className="form__acciones"><Boton variant="primary" disabled={monto === '' || !(Number(monto) >= 0)} onClick={() => void accion(async () => {
             const r = await api<{ codigo: string }>('/cajas/chica/abrir', { method: 'POST', body: { montoInicial: Number(monto) } });
             setMonto('');
             return `Caja ${r.codigo} abierta con ${money(Number(monto))}.`;
@@ -67,6 +72,10 @@ export function CajaChica() {
         </Tarjeta>
       )}
       <Tarjeta padding="none">
+        {datos && datos.abiertas.some((x) => x.codigo !== a?.codigo) && (
+          <div className="card__head card__head--padded"><div><h3 className="card__title">Cajas abiertas ahora</h3>
+            <p className="card__sub">{datos.abiertas.filter((x) => x.codigo !== a?.codigo).map((x) => `${x.codigo} · ${x.abiertaPor} · ${money(x.saldo)}`).join('  ·  ')}</p></div></div>
+        )}
         {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setDatos(null); void cargar(); }} />
           : datos === null ? <TablaEsqueleto columnas={7} />
           : !datos.historial.length ? <Vacio titulo="Sin aperturas de caja" icono="wallet" /> : (

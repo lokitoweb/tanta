@@ -26,6 +26,9 @@ export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (
   const [guardando, setGuardando] = useState(false);
   const insumos = dataset.insumos;
   const primera = receta.version === 0;
+  // Con peso de masa en el producto (Maestros → Productos), las unidades por lote salen de la masa: no se escriben aquí.
+  const pesoMasaG = Number((dataset.productos.find((x) => x.id === receta.productoId) as { pesoMasaG?: number | null } | undefined)?.pesoMasaG ?? 0);
+  const desdeMasa = pesoMasaG > 0;
 
   const set = (i: number, k: keyof Linea, v: string) => setLineas((ls) => ls.map((l, j) => {
     if (j !== i) return l;
@@ -41,7 +44,7 @@ export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (
     try {
       const r = await api<{ costoConMerma: number; cifUnitario: number }>(`/recetas/${receta.productoId}`, {
         method: 'PUT',
-        body: { rendimiento: Number(rend), mermaEstandar: Number(merma) / 100, lineas: lineas.map((l) => ({ insumoId: l.insumoId, cantidad: Number(l.cantidad), unidad: l.unidad || undefined })) },
+        body: { rendimiento: desdeMasa ? (Number(rend) > 0 ? Number(rend) : 1) : Number(rend), mermaEstandar: Number(merma) / 100, lineas: lineas.map((l) => ({ insumoId: l.insumoId, cantidad: Number(l.cantidad), unidad: l.unidad || undefined })) },
       });
       await refrescarDatos();
       onCerrar(`${primera ? `Receta de ${receta.producto} registrada` : `Versión ${receta.version + 1} guardada`} · insumos por unidad ${money(r.costoConMerma)}`);
@@ -57,11 +60,18 @@ export function EditorReceta({ receta, onCerrar }: { receta: Receta; onCerrar: (
         <Boton variant="primary" onClick={() => void guardar()} disabled={guardando || lineas.length === 0 || lineas.some((l) => !l.insumoId || !(Number(l.cantidad) > 0))}>
           {guardando ? 'Guardando…' : primera ? 'Guardar receta' : `Guardar versión ${receta.version + 1}`}</Boton></>}>
       <div className="form form--2col form--dialogo">
-        <label className="field"><span className="field__label">Rendimiento declarado (unidades por lote)</span>
-          <input className="field__input" type="number" min="0.01" step="any" value={rend} onChange={(e) => setRend(e.target.value)} />
-          <span className="field__ayuda">Si el producto tiene peso de masa, las unidades se calculan solas desde la masa.</span></label>
+        {desdeMasa ? (
+          <div className="field"><span className="field__label">Unidades por lote</span>
+            <span className="field__input field__input--info">Se calculan solas: masa del lote ÷ {pesoMasaG} g</span>
+            <span className="field__ayuda">El peso de masa se cambia en Maestros → Productos.</span></div>
+        ) : (
+          <label className="field"><span className="field__label">Rendimiento declarado (unidades por lote)</span>
+            <input className="field__input" type="number" min="0.01" step="any" value={rend} onChange={(e) => setRend(e.target.value)} />
+            <span className="field__ayuda">Para productos sin peso de masa. Con peso de masa, las unidades se calculan solas.</span></label>
+        )}
         <label className="field"><span className="field__label">Merma de proceso (%)</span>
-          <input className="field__input" type="number" min="0" max="95" step="0.1" value={merma} onChange={(e) => setMerma(e.target.value)} /></label>
+          <input className="field__input" type="number" min="0" max="95" step="0.1" value={merma} onChange={(e) => setMerma(e.target.value)} />
+          <span className="field__ayuda">La de un producto nuevo sale de Parámetros (merma de proceso por defecto).</span></label>
         <div className="field--ancho editor-receta">
           <div className="editor-receta__cab"><span>Insumo</span><span>Cantidad por lote</span><span /></div>
           {lineas.map((l, i) => {

@@ -129,3 +129,20 @@ test('Peso de receta por familia de unidad: el empaque no es masa; un insumo en 
   // La masa del lote es la suma de los pesos: ninguna receta cuenta empaques.
   assert.equal(sql(`SELECT count(*) FROM core.receta_detalle d JOIN core.insumo i ON i.id = d.insumo_id JOIN core.tipo_insumo t ON t.codigo = i.tipo WHERE t.es_empaque AND d.peso_kg <> 0`), '0');
 });
+
+test('Merma por defecto administrable: un producto nuevo nace con el parámetro (0 por regla de Tanta), no con 3 % fijo', async () => {
+  const adm = await login('lbermudez');
+  const cat = sql(`SELECT id FROM core.categoria ORDER BY orden LIMIT 1`);
+  const crear = async () => (await api(adm, 'POST', '/productos', { nombre: `Pan merma ${randomUUID().slice(0, 6)}`, categoriaId: cat, precioConIgv: 1 })).b.id;
+  const merma = (id) => Number(sql(`SELECT merma_pct FROM core.producto WHERE id = '${id}'`));
+  const antes = sql(`SELECT valor FROM core.parametro WHERE clave = 'merma_proceso_defecto'`);
+  try {
+    param('merma_proceso_defecto', '0');
+    const a = await crear();
+    assert.equal(merma(a), 0);
+    param('merma_proceso_defecto', '0.02');
+    const b = await crear();
+    assert.equal(merma(b), 0.02, 'sale del parámetro, no del código');
+    sql(`UPDATE core.producto SET estado = 'INACTIVO' WHERE id IN ('${a}','${b}')`);
+  } finally { param('merma_proceso_defecto', antes); }
+});

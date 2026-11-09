@@ -6,6 +6,7 @@ import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
+import { moverCaja, cuentaEfectivo } from './cajaGrande.js';
 import { guardarImagen } from './sistema.js';
 
 /**
@@ -218,9 +219,37 @@ export async function rutasCobranza(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const p = z.object({ efectivoRecibido: z.number({ message: 'Indica el efectivo recibido' }).min(0).max(10_000_000), nota: z.string().trim().max(300).default('') }).safeParse(req.body);
     if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.success ? 'Rendición inválida.' : p.error.issues[0]?.message ?? 'Datos inválidos.'));
-    const r = await uno<{ fecha: string; vendedor_id: string; efectivo_esperado: string }>(`UPDATE core.rendicion_cobranza SET estado = 'RECIBIDA', efectivo_recibido = $2, nota_caja = NULLIF($3,''),
-        recibido_por = $4, recibido_en = now(), actualizado_en = now()
-      WHERE id = $1 AND estado = 'PENDIENTE' RETURNING fecha::text, vendedor_id, efectivo_esperado`, [id, p.data.efectivoRecibido.toFixed(2), p.data.nota, req.usuario!.id]);
+    let r: { fecha: string; vendedor_id: string; efectivo_esperado: string; vendedor: string } | undefined;
+    try {
+      r = await tx(async (c) => {
+        const f = (await c.query<{ fecha: string; vendedor_id: string; efectivo_esperado: string; esperado: Record<string, number>; vendedor: string }>(`UPDATE core.rendicion_cobranza x SET estado = 'RECIBIDA', efectivo_recibido = $2, nota_caja = NULLIF($3,''),
+            recibido_por = $4, recibido_en = now(), actualizado_en = now()
+          FROM core.usuario u WHERE x.id = $1 AND x.estado = 'PENDIENTE' AND u.id = x.vendedor_id
+          RETURNING x.fecha::text, x.vendedor_id, x.efectivo_esperado, x.esperado, u.nombre vendedor`, [id, p.data.efectivoRecibido.toFixed(2), p.data.nota, req.usuario!.id])).rows[0];
+        if (!f) return undefined;
+        // Caja grande: cada medio entra a su cuenta (Catálogos → Medios de pago); el efectivo, por lo que se contó al recibir.
+        const medios = (await c.query<{ codigo: string; caja_chica: boolean; cuenta_caja: string | null; nombre: string }>(
+          'SELECT codigo, caja_chica, cuenta_caja, nombre FROM core.medio_pago WHERE codigo = ANY($1)', [Object.keys(f.esperado)])).rows;
+        const efectivoCuenta = await cuentaEfectivo(c);
+        let efectivoPuesto = false;
+        for (const m of medios) {
+          const monto = m.caja_chica ? (efectivoPuesto ? 0 : p.data.efectivoRecibido) : Number(f.esperado[m.codigo] ?? 0);
+          if (m.caja_chica) efectivoPuesto = true;
+          const cuenta = m.caja_chica ? (m.cuenta_caja ?? efectivoCuenta) : m.cuenta_caja;
+          if (!cuenta && monto > 0) throw Object.assign(new Error(`El medio ${m.nombre} no tiene cuenta de caja grande: asígnala en Maestros → Catálogos → Medios de pago.`), { status: 422 });
+          if (cuenta) await moverCaja(c, { cuenta, monto, tipo: 'RENDICION', concepto: `Rendición de ${f.vendedor} del ${f.fecha} · ${m.nombre.toLowerCase()}`, referencia: `REN ${f.fecha}`, origenId: id, usuarioId: req.usuario!.id });
+        }
+        // El efectivo entregado aunque no haya cobros en efectivo registrados (p. ej. un sobrante) también entra.
+        if (!efectivoPuesto && p.data.efectivoRecibido > 0) {
+          await moverCaja(c, { cuenta: efectivoCuenta, monto: p.data.efectivoRecibido, tipo: 'RENDICION', concepto: `Rendición de ${f.vendedor} del ${f.fecha} · efectivo`, referencia: `REN ${f.fecha}`, origenId: id, usuarioId: req.usuario!.id });
+        }
+        return f;
+      });
+    } catch (e) {
+      const x = e as { status?: number; message: string };
+      if (!x.status) throw e;
+      return reply.code(x.status).send(error(x.status, 'CAJA_GRANDE', x.message));
+    }
     if (!r) return reply.code(409).send(error(409, 'YA_RECIBIDA', 'La rendición no existe o ya fue recibida.'));
     const dif = Number((p.data.efectivoRecibido - num(r.efectivo_esperado)).toFixed(2));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RENDICION_RECIBIDA', entidad: 'rendicion_cobranza', entidadId: id,

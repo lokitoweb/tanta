@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { exportarExcel } from '@/core/exportar';
-import { money, num } from '@/core/format';
+import { cant, money, num } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
 import { InputNumero } from '@/ui/InputNumero';
 import { Boton, Encabezado, Insignia, PilaEsqueleto, Segmentado, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
@@ -117,7 +117,7 @@ export function HojaProduccion() {
             <div className="card__head card__head--padded"><TarjetaTitulo titulo="Kárdex de insumos" subtitulo={faltaInsumo ? 'Hay insumos que no alcanzan: al cerrar la producción se exige el stock' : 'Acumulado de lo pedido; se descarga al cerrar la producción'} /></div>
             <div className="table-wrap"><table className="table table--compacta">
               <thead><tr><th>Insumo</th><th className="t-right">Cantidad</th><th className="t-right">Stock restante</th><th className="t-right">Estado</th></tr></thead>
-              <tbody>{hoja.insumos.map((i) => <tr key={i.insumoId}><td>{i.insumo}</td><td className="t-right">{num(i.cantidad)} {i.unidad.toLowerCase()}</td><td className="t-right">{num(i.restante)} {i.unidad.toLowerCase()}</td>
+              <tbody>{hoja.insumos.map((i) => <tr key={i.insumoId}><td>{i.insumo}</td><td className="t-right">{cant(i.cantidad)} {i.unidad.toLowerCase()}</td><td className="t-right">{cant(i.restante)} {i.unidad.toLowerCase()}</td>
                 <td className="t-right"><Insignia tono={TONO[i.estado]} punto>{i.estado === 'NORMAL' ? 'Normal' : i.estado === 'ALERTA' ? 'Alerta' : 'Falta'}</Insignia></td></tr>)}</tbody>
             </table></div>
           </Tarjeta>
@@ -165,14 +165,14 @@ export function HojaProduccion() {
           {det.insumosUsados.length > 0 && (<>
             <h4 className="hoja__titulo">Insumos utilizados</h4>
             <div className="table-wrap"><table className="table table--compacta"><tbody>
-              {det.insumosUsados.map((i) => <tr key={i.insumo}><td>{i.insumo}</td><td className="t-right">{num(i.cantidad)} {i.unidad.toLowerCase()}</td>{i.costo !== undefined && <td className="t-right">{money(i.costo)}</td>}</tr>)}
+              {det.insumosUsados.map((i) => <tr key={i.insumo}><td>{i.insumo}</td><td className="t-right">{cant(i.cantidad)} {i.unidad.toLowerCase()}</td>{i.costo !== undefined && <td className="t-right">{money(i.costo)}</td>}</tr>)}
             </tbody></table></div>
           </>)}
           {det.estado === 'CERRADA' && (det.insumosPorComprar.length ? (<>
             <h4 className="hoja__titulo">Insumos por comprar (bajo el mínimo)</h4>
             <div className="table-wrap"><table className="table table--compacta">
               <thead><tr><th>Insumo</th><th className="t-right">Stock</th><th className="t-right">Mínimo</th><th className="t-right">Falta</th></tr></thead>
-              <tbody>{det.insumosPorComprar.map((i) => <tr key={i.insumo}><td>{i.insumo}</td><td className="t-right">{num(i.stock)}</td><td className="t-right">{num(i.minimo)}</td><td className="t-right t-neg">{num(i.falta)} {i.unidad.toLowerCase()}</td></tr>)}</tbody>
+              <tbody>{det.insumosPorComprar.map((i) => <tr key={i.insumo}><td>{i.insumo}</td><td className="t-right">{cant(i.stock)}</td><td className="t-right">{cant(i.minimo)}</td><td className="t-right t-neg">{cant(i.falta)} {i.unidad.toLowerCase()}</td></tr>)}</tbody>
             </table></div>
           </>) : <p className="dialogo__nota">Ningún insumo está bajo su stock mínimo.</p>)}
         </>}

@@ -6,7 +6,8 @@ import '../core/tokens.dart';
 import '../ui/comunes.dart';
 
 double _n(Object? v) => (v as num?)?.toDouble() ?? 0;
-String _c(num v) => v == v.roundToDouble() ? '${v.toInt()}' : v.toStringAsFixed(2);
+// Hasta 4 decimales sin ceros de sobra: 0.284 kg no se muestra como 0.28 ni como 0.
+String _c(num v) => v == v.roundToDouble() ? '${v.toInt()}' : v.toStringAsFixed(4).replaceFirst(RegExp(r'0+$'), '');
 String _dma(String x) => x.split('-').reversed.join('/');
 
 /// Excel real (.xlsx), igual que en la web: una columna por cliente. Se comparte con la app que el usuario elija.

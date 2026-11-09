@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql, sqlScript } from './_sql.mjs';
-import { flujoCompras, ANULAR_COMPRAS_DE_PRUEBA } from './_compras.mjs';
+import { flujoCompras, ANULAR_COMPRAS_DE_PRUEBA, fondearCajaGrande } from './_compras.mjs';
 
 const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
@@ -24,6 +24,9 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
 
 const { proveedor, registrar, verificar } = flujoCompras(api, login);
 let admin, vendedor, compras, prov, insumoId;
+// Caja chica del vendedor: cada usuario tiene la suya; Administración paga desde ella indicándola.
+let cajaVen = '';
+const cajaDe = async (t) => (await api(t, 'GET', '/cajas/chica')).b.abiertas.find((x) => x.codigo === cajaVen);
 
 /** Compra verificada por `total` soles (1 línea), lista para pagar. */
 const deuda = async (total) => {
@@ -41,24 +44,27 @@ before(async () => {
   insumoId = sql(`WITH i AS (INSERT INTO core.insumo (codigo, nombre, unidad, cpp, stock, minimo) VALUES ('T-${randomUUID().slice(0, 8).toUpperCase()}', 'Insumo prueba pagos', 'KG', 1, 0, 0) RETURNING id) SELECT id FROM i`);
   // Cada corrida empieza con la caja chica cerrada (otra prueba pudo dejarla abierta).
   sqlScript(`UPDATE core.caja_apertura SET estado = 'CERRADA', cerrada_en = now(), monto_contado = 0, observacion = 'Cierre por prueba' WHERE estado = 'ABIERTA';`);
+  // El fondo de la caja chica y los pagos desde caja grande necesitan saldo en sus cuentas.
+  fondearCajaGrande();
 });
 
 test('RN-11: sin caja chica abierta no se paga desde ella; el vendedor la abre una sola vez', async () => {
   const codigo = await deuda(100);
   const sin = await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 50 });
   assert.equal(sin.s, 409);
-  assert.match(sin.b.detail, /no hay una caja chica abierta/);
+  assert.match(sin.b.detail, /no tienes una caja chica abierta/i);
   assert.equal((await api(compras, 'POST', '/cajas/chica/abrir', { montoInicial: 300 })).s, 403, 'Compras no abre caja');
   const a = await api(vendedor, 'POST', '/cajas/chica/abrir', { montoInicial: 300 });
   assert.equal(a.s, 201, JSON.stringify(a.b));
-  assert.equal((await api(vendedor, 'POST', '/cajas/chica/abrir', { montoInicial: 100 })).s, 409, 'una sola caja chica abierta');
+  cajaVen = a.b.codigo;
+  assert.equal((await api(vendedor, 'POST', '/cajas/chica/abrir', { montoInicial: 100 })).s, 409, 'una caja chica abierta por persona');
   assert.equal((await api(vendedor, 'GET', '/cajas/chica')).b.abierta.saldo, 300);
 });
 
 test('criterio 8 / RN-10: deuda de S/ 1,200 pagada con S/ 200 de caja chica en efectivo y S/ 1,000 de caja grande por transferencia', async () => {
   const codigo = await deuda(1200);
   assert.equal(estadoPago(codigo), 'PENDIENTE');
-  const chica = await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 200 });
+  const chica = await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 200, aperturaCodigo: cajaVen });
   assert.equal(chica.s, 201, JSON.stringify(chica.b));
   assert.equal(chica.b.estadoPago, 'PARCIAL');
   assert.equal(chica.b.saldo, 1000);
@@ -73,24 +79,24 @@ test('criterio 8 / RN-10: deuda de S/ 1,200 pagada con S/ 200 de caja chica en e
 });
 
 test('criterio 9 / RN-11: un pago de caja chica mayor a su saldo disponible se rechaza', async () => {
-  const caja = (await api(admin, 'GET', '/cajas/chica')).b.abierta;
+  const caja = await cajaDe(admin);
   assert.equal(caja.saldo, 100, 'S/ 300 iniciales menos S/ 200 pagados');
   const codigo = await deuda(500);
-  const r = await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 150 });
+  const r = await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 150, aperturaCodigo: cajaVen });
   assert.equal(r.s, 422);
   assert.match(r.b.detail, /solo tiene S\/ 100\.00 disponibles/);
-  assert.equal((await pagar(codigo, { caja: 'CHICA', medio: 'YAPE', monto: 10, nroOperacion: 'YP-1' })).s, 422, 'la caja chica solo paga en efectivo');
-  assert.equal((await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 100 })).s, 201, 'hasta el saldo sí');
-  assert.equal((await api(admin, 'GET', '/cajas/chica')).b.abierta.saldo, 0);
+  assert.equal((await pagar(codigo, { caja: 'CHICA', medio: 'YAPE', monto: 10, nroOperacion: 'YP-1', aperturaCodigo: cajaVen })).s, 422, 'la caja chica solo paga en efectivo');
+  assert.equal((await pagar(codigo, { caja: 'CHICA', medio: 'EFECTIVO', monto: 100, aperturaCodigo: cajaVen })).s, 201, 'hasta el saldo sí');
+  assert.equal((await cajaDe(admin)).saldo, 0);
 });
 
 test('RN-09: anular una compra pagada anula sus pagos y devuelve el dinero a la caja chica', async () => {
-  const codigo = (await api(admin, 'GET', '/deudas-compra')).b.find((x) => x.pagos.some((p) => p.caja === 'CHICA' && p.monto === 100)).codigo;
+  const codigo = (await api(admin, 'GET', '/deudas-compra')).b.find((x) => x.pagos.some((p) => p.caja === 'CHICA' && p.monto === 100 && p.apertura === cajaVen)).codigo;
   const an = await api(admin, 'POST', `/compras/${codigo}/anular`, { motivo: 'Factura duplicada del proveedor' });
   assert.equal(an.s, 200, JSON.stringify(an.b));
   assert.equal(an.b.pagosAnulados, 1);
   assert.equal(sql(`SELECT string_agg(p.estado, ',') FROM core.pago_compra p JOIN core.compra k ON k.id = p.compra_id WHERE k.codigo = '${codigo}'`), 'ANULADO');
-  assert.equal((await api(admin, 'GET', '/cajas/chica')).b.abierta.saldo, 100, 'el efectivo vuelve a la caja chica');
+  assert.equal((await cajaDe(admin)).saldo, 100, 'el efectivo vuelve a la caja chica');
 });
 
 test('un pago mal registrado se anula con motivo y la compra vuelve a tener saldo', async () => {

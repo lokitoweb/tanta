@@ -205,7 +205,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     categoriaId: z.string().min(1),
     unidad: z.string().min(1).max(20).default('UNIDAD'),
     precioConIgv: z.number().min(0).max(100000),
-    mermaPct: z.number().min(0).max(0.5).default(0.03),
+    // Sin dato: el parámetro «merma_proceso_defecto» (regla de Tanta: sin merma).
+    mermaPct: z.number().min(0).max(0.5).optional(),
     // Vacío = el sistema genera el siguiente (P001, P002…).
     codigo: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{2,20}$/, 'El código lleva de 2 a 20 letras, números o guiones').optional().or(z.literal('')),
     imagenUrl: ImagenProducto,
@@ -217,6 +218,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Datos inválidos.'));
 
     const { imagenUrl, codigo, ...d } = parseo.data;
+    const mermaPct = d.mermaPct ?? num((await uno<{ v: string }>("SELECT valor v FROM core.parametro WHERE clave = 'merma_proceso_defecto'"))?.v ?? '0');
     if (codigo && await uno('SELECT 1 FROM core.producto WHERE upper(codigo) = $1', [codigo])) {
       return reply.code(409).send(error(409, 'CODIGO_DUPLICADO', `El código ${codigo} ya lo usa otro producto.`));
     }
@@ -227,7 +229,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
       `INSERT INTO core.producto (codigo, nombre, categoria_id, unidad, precio_con_igv, merma_pct, imagen_id)
        VALUES (coalesce($7, 'P' || lpad((SELECT coalesce(max(substring(codigo from 2)::int), 0) + 1 FROM core.producto WHERE codigo ~ '^P[0-9]+$')::text, 3, '0')), $1,$2,$3,$4,$5,$6)
        RETURNING id`,
-      [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), d.mermaPct.toFixed(6), imagenId, codigo || null],
+      [d.nombre, d.categoriaId, d.unidad, d.precioConIgv.toFixed(4), mermaPct.toFixed(6), imagenId, codigo || null],
     );
     invalidar('cat:');
     await auditar({
