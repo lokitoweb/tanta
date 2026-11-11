@@ -73,6 +73,7 @@ jobs:
           PGPASSWORD: tanta_ci
           PGDATABASE: tanta
           LOGIN_RATE_MAX: '500'
+          MFA_OBLIGATORIO: 'false'   # las pruebas cambian roles a «dos pasos»; aquí se entra solo con la clave
           RATE_MAX: '20000'
         run: |
           node apps/api/dist/src/server.js &

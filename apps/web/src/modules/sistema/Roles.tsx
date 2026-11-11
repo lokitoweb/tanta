@@ -155,9 +155,9 @@ export function Roles() {
               <fieldset className="permisos__grupo">
                 <legend>Seguridad del ingreso</legend>
                 <label className="check check--bloque">
-                  <input type="checkbox" checked={rol.exigeMfa} disabled={guardando || protegido} onChange={(e) => void cambiarMfa(e.target.checked)} />
-                  <span><strong>Exige verificación en dos pasos (contraseña + código de la app autenticadora), en la web y en la app</strong>
-                    <code>{protegido ? 'siempre activa para el Superadministrador' : 'quitarla solo lo puede el Superadministrador'}</code></span>
+                  <input type="checkbox" checked={rol.exigeMfa} disabled={guardando} onChange={(e) => void cambiarMfa(e.target.checked)} />
+                  <span><strong>Pedir verificación en dos pasos al entrar (contraseña + código de la app autenticadora), en la web y en la app</strong>
+                    <code>opcional · la primera vez cada usuario escanea un código QR · quitarla solo lo puede el Superadministrador</code></span>
                 </label>
               </fieldset>
             )}

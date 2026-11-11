@@ -487,14 +487,13 @@ export async function rutasSistema(app: FastifyInstance) {
     return reply.code(201).send({ id, ...p.data });
   });
 
-  // Verificación en dos pasos por rol. Exigirla lo puede cualquiera que gestione roles; quitarla, solo el
-  // Superadministrador (baja la seguridad), y el rol Superadministrador siempre la exige.
+  // Verificación en dos pasos por rol: la decide el dueño. Exigirla lo puede cualquiera que gestione roles;
+  // quitarla baja la seguridad, así que solo el Superadministrador.
   app.patch('/sistema/roles/:id/seguridad', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'roles.gestionar')) return;
     const { id } = req.params as { id: string };
     const p = z.object({ exigeMfa: z.boolean() }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica si el rol exige verificación en dos pasos.'));
-    if (!p.data.exigeMfa && id === 'SUPERADMIN') return reply.code(409).send(error(409, 'ROL_PROTEGIDO', 'El Superadministrador siempre exige verificación en dos pasos.'));
     if (!p.data.exigeMfa && req.usuario!.rol !== 'SUPERADMIN') return reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo el Superadministrador quita la verificación en dos pasos de un rol.'));
     const r = await q('UPDATE core.rol SET exige_mfa = $2 WHERE id = $1 RETURNING id', [id, p.data.exigeMfa]);
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El rol no existe.'));

@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import QRCode from 'qrcode';
 import { q, uno, tx } from '../db.js';
 import {
   ACCESO_MIN, REFRESCO_DIAS, autenticar, error, firmarAcceso, firmarTicketMfa, verificarTicketMfa, nuevoRefreshToken,
@@ -135,17 +136,14 @@ export async function rutasAuth(app: FastifyInstance) {
     // Qué roles exigen segundo factor se administra en Usuarios y roles (rol.exige_mfa).
     const exigeMfa = (await uno<{ exige: boolean }>('SELECT exige_mfa exige FROM core.rol WHERE id = $1', [rol]))?.exige === true;
 
-    // Segundo factor: si ya está activo se pide; si es obligatorio y falta, se enrola.
-    if (fila.mfa_activo) {
+    // Segundo factor: lo decide el dueño por rol (Roles y permisos). Si el rol no lo exige, se entra con la
+    // contraseña aunque el usuario lo haya activado antes (su clave queda guardada para cuando se vuelva a exigir).
+    // MFA_OBLIGATORIO=false solo lo apaga en entornos de prueba; nunca obliga a nadie.
+    if (exigeMfa && process.env.MFA_OBLIGATORIO !== 'false') {
       const ticket = await firmarTicketMfa({ sub: fila.id, nombre: fila.nombre, rol });
-      return reply.send({ mfaRequerido: true, ticket, usuario: { nombre: fila.nombre } });
-    }
-    // En producción el segundo factor es obligatorio para estos perfiles; en
-    // desarrollo se puede desactivar con MFA_OBLIGATORIO=false para no frenar las pruebas.
-    const mfaObligatorio = (process.env.MFA_OBLIGATORIO ?? (ES_PROD ? 'true' : 'false')) !== 'false';
-    if (exigeMfa && mfaObligatorio) {
-      const ticket = await firmarTicketMfa({ sub: fila.id, nombre: fila.nombre, rol });
-      return reply.send({ mfaEnrolamiento: true, ticket, usuario: { nombre: fila.nombre } });
+      return reply.send(fila.mfa_activo
+        ? { mfaRequerido: true, ticket, usuario: { nombre: fila.nombre } }
+        : { mfaEnrolamiento: true, ticket, usuario: { nombre: fila.nombre } });
     }
 
     return emitirSesion(req, reply, fila.id, fila.nombre, rol, undefined, parseo.data.recordar);
@@ -165,10 +163,13 @@ export async function rutasAuth(app: FastifyInstance) {
     if (!enrolado) return reply.code(409).send(error(409, 'MFA_YA_ACTIVO', 'El segundo factor ya está activo. Ingresa el código de tu app autenticadora.'));
     const cuenta = await uno<{ usuario: string }>('SELECT usuario FROM core.usuario WHERE id = $1', [carga.sub]);
 
+    const otpauth = urlOtpauth(secreto, cuenta?.usuario ?? carga.nombre);
     return reply.send({
       secreto,
-      otpauth: urlOtpauth(secreto, cuenta?.usuario ?? carga.nombre),
-      instrucciones: 'Escanea el código en Google Authenticator o Authy, y confirma con los 6 dígitos.',
+      otpauth,
+      // Imagen PNG lista para mostrar (web y app): se escanea con Google Authenticator, Microsoft Authenticator o Authy.
+      qr: await QRCode.toDataURL(otpauth, { errorCorrectionLevel: 'M', margin: 1, width: 240 }),
+      instrucciones: 'Escanea el código QR con Google Authenticator o Authy, y confirma con los 6 dígitos.',
     });
   });
 

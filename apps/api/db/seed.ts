@@ -247,8 +247,6 @@ async function main() {
         await c.query('INSERT INTO core.rol_permiso (rol_id, permiso_id) VALUES ($1,$2)', [id, p]);
       }
     }
-    // Verificación en dos pasos: por defecto en los roles que ven dinero y configuración (administrable en Roles).
-    await c.query("UPDATE core.rol SET exige_mfa = true WHERE id IN ('SUPERADMIN','GERENTE','ADMINISTRADOR')");
 
     // -------------------------------------------------------- navegación
     for (const [id, grupo, etiqueta, ruta, icono, permiso, orden, grupoOrden] of NAV) {

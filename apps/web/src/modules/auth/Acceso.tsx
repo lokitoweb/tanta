@@ -20,7 +20,7 @@ const usuarios = demo.usuarios as DemoUsuario[];
 type Paso =
   | { tipo: 'credenciales' }
   | { tipo: 'codigo'; ticket: string; nombre: string }
-  | { tipo: 'enrolar'; ticket: string; secreto: string; otpauth: string; nombre: string }
+  | { tipo: 'enrolar'; ticket: string; secreto: string; otpauth: string; qr: string; nombre: string }
   | { tipo: 'codigos'; codigos: string[] };
 
 export function Acceso({ onSesion }: { onSesion: () => void }) {
@@ -60,7 +60,7 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
       const alta = await enrolarMfa(r.ticket);
       setPaso({
         tipo: 'enrolar', ticket: r.ticket, secreto: alta.secreto,
-        otpauth: alta.otpauth, nombre: r.usuario.nombre,
+        otpauth: alta.otpauth, qr: alta.qr, nombre: r.usuario.nombre,
       });
       setCodigo('');
     } catch (e) {
@@ -230,12 +230,15 @@ export function Acceso({ onSesion }: { onSesion: () => void }) {
           {paso.tipo === 'enrolar' && (
             <form className="form" onSubmit={(e) => { e.preventDefault(); if (codigo.length === 6) void confirmarCodigo(); }}>
               <div className="mfa__secreto">
-                <span className="field__label">Clave secreta</span>
-                <code className="mfa__clave">{paso.secreto}</code>
+                <img className="mfa__qr" src={paso.qr} width={200} height={200} alt="Código QR para la app autenticadora" />
                 <p className="mfa__ayuda">
-                  Escanéala o cópiala en Google Authenticator, Authy o 1Password. Después confirma con el
-                  primer código que genere.
+                  Abre Google Authenticator, Microsoft Authenticator o Authy, toca «Agregar» → «Escanear código QR» y
+                  apunta a este código. Después escribe el número de 6 dígitos que aparece.
                 </p>
+                <details className="mfa__alternativa">
+                  <summary>¿No puedes escanear? Escribe la clave</summary>
+                  <code className="mfa__clave">{paso.secreto}</code>
+                </details>
               </div>
 
               <label className="field">

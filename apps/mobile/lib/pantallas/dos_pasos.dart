@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -91,22 +92,28 @@ class _DosPasosState extends State<DosPasos> {
                 style: TextStyle(fontSize: 14)),
             const SizedBox(height: 12),
             const Text('1. Instala Google Authenticator, Microsoft Authenticator o Authy.\n'
-                '2. Agrega una cuenta con la clave de abajo (o con el botón, si la app está en este teléfono).\n'
+                '2. Si la app está en este teléfono, toca «Abrir en la app autenticadora»; si está en otro, escanea el código QR.\n'
                 '3. Escribe el código de 6 dígitos que te muestra.', style: TextStyle(fontSize: 13, color: TantaColors.textMuted, height: 1.5)),
             const SizedBox(height: 16),
             if (esperandoEnrolamiento && _error == null) const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator())),
             if (e != null) ...[
-              const Text('Clave de configuración', style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+              if ('${e['qr'] ?? ''}'.contains('base64,'))
+                Center(child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+                  child: Image.memory(base64Decode('${e['qr']}'.split('base64,').last), width: 200, height: 200, filterQuality: FilterQuality.none),
+                )),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                  onPressed: () => launchUrl(Uri.parse('${e['otpauth']}'), mode: LaunchMode.externalApplication).catchError((_) => false),
+                  icon: const Icon(Icons.open_in_new, size: 18), label: const Text('Abrir en la app autenticadora')),
+              const SizedBox(height: 12),
+              const Text('¿No puedes escanear? Escribe esta clave', style: TextStyle(fontSize: 12, color: TantaColors.textMuted)),
               const SizedBox(height: 4),
               SelectableText('${e['secreto']}', style: const TextStyle(fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 1)),
               const SizedBox(height: 8),
-              Wrap(spacing: 8, children: [
-                OutlinedButton.icon(onPressed: () => Clipboard.setData(ClipboardData(text: '${e['secreto']}')),
-                    icon: const Icon(Icons.copy, size: 18), label: const Text('Copiar clave')),
-                OutlinedButton.icon(
-                    onPressed: () => launchUrl(Uri.parse('${e['otpauth']}'), mode: LaunchMode.externalApplication).catchError((_) => false),
-                    icon: const Icon(Icons.open_in_new, size: 18), label: const Text('Abrir en la app autenticadora')),
-              ]),
+              Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => Clipboard.setData(ClipboardData(text: '${e['secreto']}')),
+                  icon: const Icon(Icons.copy, size: 18), label: const Text('Copiar clave'))),
               const SizedBox(height: 20),
             ],
           ] else ...[

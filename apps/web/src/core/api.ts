@@ -205,7 +205,7 @@ export async function verificarMfa(ticket: string, codigo: string): Promise<Sesi
   return r;
 }
 
-export async function enrolarMfa(ticket: string): Promise<{ secreto: string; otpauth: string; instrucciones: string }> {
+export async function enrolarMfa(ticket: string): Promise<{ secreto: string; otpauth: string; qr: string; instrucciones: string }> {
   return api('/auth/mfa/enrolar', { method: 'POST', body: { ticket }, sinAuth: true });
 }
 

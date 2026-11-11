@@ -117,9 +117,10 @@ test('la orden de producción congela su receta: editar la receta no cambia lo q
 
 test('verificación en dos pasos por rol: administrable y protegida', async () => {
   const roles = (await api(sa, 'GET', '/sistema/roles')).b.roles;
-  assert.equal(roles.find((r) => r.id === 'GERENTE').exigeMfa, true, 'Gerencia la exige por defecto');
-  assert.equal(roles.find((r) => r.id === 'VENDEDOR').exigeMfa, false);
-  assert.equal((await api(sa, 'PATCH', '/sistema/roles/SUPERADMIN/seguridad', { exigeMfa: false })).s, 409, 'el Superadministrador siempre la exige');
+  assert.ok(roles.every((r) => r.exigeMfa === false), 'ningún rol la trae impuesta: la decide el dueño');
+  // El dueño también decide la suya.
+  assert.equal((await api(sa, 'PATCH', '/sistema/roles/SUPERADMIN/seguridad', { exigeMfa: true })).s, 200);
+  assert.equal((await api(sa, 'PATCH', '/sistema/roles/SUPERADMIN/seguridad', { exigeMfa: false })).s, 200);
   assert.equal((await api(sa, 'PATCH', '/sistema/roles/COMPRAS/seguridad', { exigeMfa: true })).s, 200);
   assert.equal(sql(`SELECT exige_mfa::text FROM core.rol WHERE id = 'COMPRAS'`), 'true');
   // Quitarla baja la seguridad: solo el Superadministrador.
