@@ -461,8 +461,10 @@ class Api {
 
   /// Activación de una app sin dominio compilado. Acepta "https://dominio" y completa /api/v1.
   /// Cambiar de servidor cierra la sesión: los tokens de otro servidor no sirven aquí.
-  Future<void> cambiarServidor(String url) async {
-    if (activada) return;
+  /// [forzar]: cambiarlo aunque la app ya tenga uno (enlace «Cambiar servidor» del inicio de sesión;
+  /// un túnel temporal cambia de dirección y la app no debe quedar apuntando a la nada).
+  Future<void> cambiarServidor(String url, {bool forzar = false}) async {
+    if (activada && !forzar) return;
     // Acepta el enlace del QR (tanta://activar?servidor=…) o la dirección escrita a mano.
     var u = url.trim();
     final enlace = Uri.tryParse(u);
