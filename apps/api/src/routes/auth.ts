@@ -5,7 +5,7 @@ import { q, uno, tx } from '../db.js';
 import {
   ACCESO_MIN, REFRESCO_DIAS, autenticar, error, firmarAcceso, firmarTicketMfa, verificarTicketMfa, nuevoRefreshToken,
   permisosDeRol, rolDeUsuario, sha256, verificarClaveDetalle, hashClave,
-  generarSecretoMfa, verificarTotp, urlOtpauth, claveCorta,
+  generarSecretoMfa, verificarTotp, urlOtpauth, claveCorta, totpUnaVez, mfaBloqueado, registrarFalloMfa,
 } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { enviarCorreo, correoDisponible } from '../correo.js';
@@ -224,6 +224,7 @@ export async function rutasAuth(app: FastifyInstance) {
       'SELECT mfa_secreto, nombre, estado FROM core.usuario WHERE id = $1', [carga.sub],
     );
     if (!fila || fila.estado !== 'ACTIVO') return reply.code(401).send(error(401, 'SESION_INVALIDA', 'Cuenta no disponible.'));
+    if (mfaBloqueado(carga.sub)) return reply.code(429).send(error(429, 'MFA_BLOQUEADO', 'Demasiados códigos incorrectos. Espera 15 minutos.'));
 
     const esRecuperacion = codigo.replace(/-/g, '').length >= 8;
     let valido = false;
@@ -234,10 +235,11 @@ export async function rutasAuth(app: FastifyInstance) {
         await auditar({ actorId: carga.sub, actor: fila.nombre, accion: 'MFA_RECUPERACION', entidad: 'usuario', entidadId: carga.sub, ip: req.ip });
       }
     } else if (fila.mfa_secreto) {
-      valido = verificarTotp(fila.mfa_secreto, codigo);
+      valido = totpUnaVez(carga.sub, fila.mfa_secreto, codigo);
     }
 
     if (!valido) {
+      registrarFalloMfa(carga.sub);
       await auditar({ actorId: carga.sub, actor: fila.nombre, accion: 'MFA_FALLIDO', entidad: 'usuario', entidadId: carga.sub, ip: req.ip });
       return reply.code(422).send(error(422, 'CODIGO_INCORRECTO',
         esRecuperacion ? 'El código de recuperación no es válido o ya se usó.' : 'El código no es válido.'));
@@ -426,11 +428,10 @@ export async function rutasAuth(app: FastifyInstance) {
     if (!u) return invalido();
     const r = await uno<{ id: string; codigo_hash: string; intentos: number }>(
       'SELECT id, codigo_hash, intentos FROM core.recuperacion WHERE usuario_id = $1 AND usado_en IS NULL AND expira_en > now() ORDER BY id DESC LIMIT 1', [u.id]);
-    if (!r || r.intentos >= 5) return invalido();
-    if (r.codigo_hash !== sha256(p.data.codigo)) {
-      await q('UPDATE core.recuperacion SET intentos = intentos + 1 WHERE id = $1', [r.id]);
-      return invalido();
-    }
+    if (!r) return invalido();
+    // El intento se cuenta ANTES de comparar y de forma atómica: peticiones en paralelo no prueban más de 5 códigos.
+    const cuenta = await uno<{ intentos: number }>('UPDATE core.recuperacion SET intentos = intentos + 1 WHERE id = $1 AND intentos < 5 RETURNING intentos', [r.id]);
+    if (!cuenta || r.codigo_hash !== sha256(p.data.codigo)) return invalido();
     await tx(async (c) => {
       await c.query('UPDATE core.recuperacion SET usado_en = now() WHERE id = $1', [r.id]);
       await c.query('UPDATE core.usuario SET clave_hash = $1 WHERE id = $2', [hashClave(p.data.nueva), u.id]);

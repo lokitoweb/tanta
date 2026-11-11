@@ -68,7 +68,7 @@ test('presentación de venta: paquete x 6 con SKU y precio propio; descuenta 6 p
   assert.equal(c.s, 201, JSON.stringify(c.b));
   assert.equal((await api(adm, 'POST', '/catalogos/presentaciones-venta', { codigo: 'X' + pres, nombre: 'Mala', equivalencia: 2, insumoId: bolsa })).s, 422, 'insumo sin cantidad');
 
-  const prod = sql('SELECT id FROM core.producto WHERE stock >= 20 AND insumo_id IS NULL AND estado = \'ACTIVO\' ORDER BY nombre LIMIT 1');
+  const prod = sql('SELECT id FROM core.producto WHERE stock - reservado >= 20 AND insumo_id IS NULL AND estado = \'ACTIVO\' ORDER BY nombre LIMIT 1');
   assert.ok(prod, 'hay un pan con stock en los datos de prueba');
   const p = (await api(adm, 'GET', '/datos')).b.productos.find((x) => x.id === prod);
   const ficha = { nombre: p.nombre, categoriaId: p.categoriaId, unidad: p.unidad, precioConIgv: p.precioConIgv, estado: 'ACTIVO' };

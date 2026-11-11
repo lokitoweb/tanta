@@ -169,7 +169,7 @@ export async function rutasCompras(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Compra inválida.'));
     const clave = (req.headers['idempotency-key'] as string | undefined) ?? null;
     if (clave) {
-      const previa = await uno<{ codigo: string }>('SELECT codigo FROM core.compra WHERE idempotency_key = $1', [clave]);
+      const previa = await uno<{ codigo: string }>('SELECT codigo FROM core.compra WHERE idempotency_key = $1 AND registrado_por = $2', [clave, req.usuario!.id]);
       if (previa) return reply.code(201).send((await detalleCompra('c.codigo = $1', [previa.codigo], true))[0]);
     }
     return responder(reply, 'COMPRA_INVALIDA', async () => {

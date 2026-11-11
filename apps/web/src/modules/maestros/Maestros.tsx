@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { InputNumero } from '@/ui/InputNumero';
 import { api } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
@@ -7,7 +7,7 @@ import { money, num, pct } from '@/core/format';
 import { exportarExcel } from '@/core/exportar';
 import { Crud, type Campo } from '@/ui/Crud';
 import { Dialogo } from '@/ui/Dialogo';
-import { Boton, Encabezado, Insignia, Kpi, Tarjeta, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Kpi, PilaEsqueleto, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Importar } from '@/ui/Importar';
 import type { ColRep } from '@/ui/TablaReporte';
 import type { Producto } from '@/core/types';
@@ -132,6 +132,8 @@ export function Productos() {
   const equiv = (codigo: unknown) => cat.presentacionesVenta.find((p) => p.codigo === codigo)?.equivalencia ?? 1;
   // El precio del producto se guarda por unidad (costos y margen son por unidad): SKU #1 «Paquete x 6» a S/ 48 = S/ 8 la unidad.
   // La unidad de stock de una sub-receta es la del insumo que produce.
+  // Si el segundo paso del alta falla, el reintento completa el producto ya creado en vez de crear otro.
+  const creados = useRef(new Map<string, string>());
   const aGuardar = (d: Reg): Reg => ({
     ...d, precioConIgv: Math.round((n(d.precioConIgv) / equiv(d.presentacionCodigo)) * 10_000) / 10_000,
     unidad: dataset.insumos.find((i) => i.id === d.insumoId)?.unidadInventario ?? (d.insumoId ? d.unidad : 'UNIDAD'),
@@ -175,8 +177,11 @@ export function Productos() {
         // Alta en dos pasos: se crea (código, nombre, categoría, precio) y se guardan los datos de producción con la misma validación de la edición.
         crear={edita ? async (d) => {
           const g = aGuardar(d);
-          const r = await api<{ id: string }>('/productos', { method: 'POST', body: g });
-          await api(`/productos/${r.id}`, { method: 'PATCH', body: { ...g, codigo: undefined } });
+          const k = String(d.nombre ?? '').trim().toLowerCase();
+          let id = creados.current.get(k);
+          if (!id) { id = (await api<{ id: string }>('/productos', { method: 'POST', body: g })).id; creados.current.set(k, id); }
+          await api(`/productos/${id}`, { method: 'PATCH', body: { ...g, codigo: undefined } });
+          creados.current.delete(k);
           await refrescarDatos();
         } : undefined}
         editar={edita ? async (id, d) => { await api(`/productos/${id}`, { method: 'PATCH', body: aGuardar(d) }); await refrescarDatos(); } : undefined}
@@ -452,7 +457,7 @@ function AjustarCostos({ insumoId, onCerrar }: { insumoId: string; onCerrar: (te
       onCerrar={() => onCerrar()}
       acciones={<><Boton onClick={() => onCerrar()}>Cerrar</Boton>
         {puedeActualizar && <Boton variant="primary" disabled={!d || !(Number(nuevo) >= 0) || nuevo === '' || guardando} onClick={() => void actualizar()}>{guardando ? 'Actualizando…' : 'Actualizar'}</Boton>}</>}>
-      {!d ? (error ? <p className="form__error">{error}</p> : <p className="t-muted">Cargando…</p>) : (<>
+      {!d ? (error ? <p className="form__error">{error}</p> : <PilaEsqueleto lineas={5} />) : (<>
         <div className="grid grid--auto">
           <Kpi label="Costo actual (fórmulas)" valor={money(d.costoFormulas)} nota={d.manual ? `fijado ${d.actualizadoEn?.slice(0, 10) ?? ''} por ${d.actualizadoPor ?? ''}` : 'sigue a las compras'} icono="tag" />
           <Kpi label="P. compra anterior" valor={d.precioAnterior === null ? '—' : money(d.precioAnterior)} nota={`por ${u}`} icono="ledger" />
@@ -502,7 +507,7 @@ function InformeVariacion({ onCerrar }: { onCerrar: (cambio: boolean) => void })
       acciones={<><Boton icono="download" disabled={!filas?.length} onClick={exportar}>Excel</Boton><Boton icono="report" disabled={!filas?.length} onClick={() => window.print()}>Imprimir</Boton>
         <Boton onClick={() => onCerrar(cambio)}>Cerrar</Boton></>}>
       {error && <p className="form__error" role="alert">{error}</p>}
-      {filas === null ? <p className="t-muted">Cargando…</p> : filas.length === 0 ? <Vacio titulo="Sin variaciones" detalle="Los costos de las fórmulas coinciden con los de las compras." /> : (
+      {filas === null ? <TablaEsqueleto filas={5} columnas={4} /> : filas.length === 0 ? <Vacio titulo="Sin variaciones" detalle="Los costos de las fórmulas coinciden con los de las compras." /> : (
         <div className="table-wrap"><table className="table table--compacta">
           <thead><tr><th>Código</th><th>Insumo</th><th className="t-right">Costo actual</th><th className="t-right">Costo sugerido</th><th className="t-right">Variación</th>{actualiza && <th />}</tr></thead>
           <tbody>{filas.map((v) => (

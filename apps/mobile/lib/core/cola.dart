@@ -144,6 +144,7 @@ class ColaOffline {
     sincronizando.value = true;
     var aplicadas = 0;
     final rechazos = <String>[];
+    var sesionVencida = false;
 
     try {
       // Las de otro usuario esperan a que él vuelva a entrar en este equipo.
@@ -167,7 +168,8 @@ class ColaOffline {
             await _guardar();
             rechazos.add(e.mensaje);
           } else {
-            break; // 429 o 5xx: se reintenta después
+            if (e.status == 401) sesionVencida = true;
+            break; // 401, 429 o 5xx: se reintenta después
           }
         } catch (_) {
           break;
@@ -178,7 +180,9 @@ class ColaOffline {
       sincronizando.value = false;
     }
 
-    if (rechazos.isNotEmpty) {
+    if (sesionVencida) {
+      ultimoAviso.value = 'Tu sesión venció: vuelve a iniciar sesión para enviar lo guardado (no se perdió nada).';
+    } else if (rechazos.isNotEmpty) {
       ultimoAviso.value = 'No se pudo aplicar: ${rechazos.first}';
     } else if (aplicadas > 0) {
       ultimoAviso.value = '$aplicadas ${aplicadas == 1 ? 'operación sincronizada' : 'operaciones sincronizadas'}';
@@ -212,9 +216,9 @@ class ColaOffline {
         // Seguro de reintentar: el servidor solo entrega un pedido «En camino» (no cobra dos veces).
         await api.entregarPedido('${op.datos['codigo']}',
             pagos: ((op.datos['pagos'] as List?) ?? const []).cast<Map<String, dynamic>>(),
-            observaciones: '${op.datos['observaciones'] ?? ''}', voucher: op.datos['voucher'] as String?);
+            observaciones: '${op.datos['observaciones'] ?? ''}', voucher: op.datos['voucher'] as String?, claveIdempotencia: op.clave);
       case 'pedido':
-        await api.cambiarEstadoPedido('${op.datos['codigo']}', '${op.datos['estado']}');
+        await api.cambiarEstadoPedido('${op.datos['codigo']}', '${op.datos['estado']}', claveIdempotencia: op.clave);
       default:
         throw ApiException(400, 'Tipo de operación desconocido: ${op.tipo}');
     }

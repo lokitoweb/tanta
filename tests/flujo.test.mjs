@@ -74,7 +74,7 @@ test('OP: requerimiento, requisición entregada por Almacén y cierre sin doble 
 test('venta al crédito: la deuda es con IGV y vence según los días del cliente', async () => {
   const v = await login('cmedina');
   const d = (await api(v, 'GET', '/datos')).b;
-  const prod = d.productos.find((p) => p.stock >= 5);
+  const prod = d.productos.find((p) => p.stock - (p.reservado ?? 0) >= 5);
   // Cliente propio de la prueba: 7 días de crédito y límite holgado.
   const nuevo = await api(await login('lbermudez'), 'POST', '/clientes', {
     nombre: 'QA Crédito ' + Date.now(), docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '',
@@ -90,7 +90,7 @@ test('venta al crédito: la deuda es con IGV y vence según los días del client
 
 test('descuento: dentro del tope se aplica; por encima se rechaza', async () => {
   const v = await login('cmedina');
-  const prod = (await api(v, 'GET', '/datos')).b.productos.find((p) => p.stock >= 5);
+  const prod = (await api(v, 'GET', '/datos')).b.productos.find((p) => p.stock - (p.reservado ?? 0) >= 5);
   const ok = await api(v, 'POST', '/ventas', { items: [{ productoId: prod.id, cantidad: 1 }], formaPago: 'EFECTIVO', descuentoPct: 0.1 });
   assert.equal(ok.s, 201);
   assert.ok(Math.abs(ok.b.ventasNetas - prod.precioConIgv * 0.9 / 1.18) < 0.01);

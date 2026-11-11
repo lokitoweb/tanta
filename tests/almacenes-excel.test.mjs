@@ -32,7 +32,7 @@ test('MAE-10: cada movimiento queda en el almacén de su tipo', async () => {
   const ins = sql("SELECT id FROM core.insumo WHERE activo AND stock >= 5 ORDER BY nombre LIMIT 1");
   assert.equal((await api(alm, 'POST', '/inventario/movimientos', { tipo: 'MERMA', insumoId: ins, cantidad: 0.01, motivo: 'Prueba de almacén' })).s, 200);
   assert.equal(sql(`SELECT almacen_id FROM core.movimiento_inventario WHERE insumo_id = '${ins}' ORDER BY id DESC LIMIT 1`), principal('INSUMOS'));
-  const prod = sql('SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1');
+  const prod = sql('SELECT id FROM core.producto WHERE stock - reservado >= 5 ORDER BY nombre LIMIT 1');
   assert.equal((await api(alm, 'POST', '/inventario/productos', { productoId: prod, cantidad: 1, motivoTipo: 'MERMA', motivo: 'Prueba de almacén' })).s, 200);
   assert.equal(sql(`SELECT almacen_id FROM core.movimiento_inventario WHERE producto_id = '${prod}' ORDER BY id DESC LIMIT 1`), principal('PRODUCTOS'));
   const codigo = sql(`SELECT codigo FROM core.insumo WHERE id = '${ins}'`);

@@ -2,6 +2,9 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+// En producción la clave de la base nunca cae en el valor de desarrollo.
+if (process.env.NODE_ENV === 'production' && !process.env.PGPASSWORD) throw new Error('Falta PGPASSWORD en producción.');
+
 export const pool = new Pool({
   host: process.env.PGHOST ?? '127.0.0.1',
   port: Number(process.env.PGPORT ?? 5433),
@@ -14,6 +17,8 @@ export const pool = new Pool({
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 8_000,
   application_name: 'tanta-api',
+  // Fechas del negocio en hora de Lima: current_date, ::date y los rangos de los reportes cuadran con el cierre del día.
+  options: '-c TimeZone=America/Lima',
   // pg ya devuelve `numeric` como string: el dinero nunca pasa por un float.
 });
 

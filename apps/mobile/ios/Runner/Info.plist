@@ -9,9 +9,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>Tanta</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Tanta usa la cámara solo para tomar tu foto de perfil.</string>
+	<string>Tanta usa la cámara para tu foto de perfil y para fotografiar comprobantes de pago y de gastos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Tanta accede a tus fotos solo para elegir tu foto de perfil.</string>
+	<string>Tanta accede a tus fotos para elegir tu foto de perfil y adjuntar comprobantes de pago y de gastos.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UIBackgroundModes</key>

@@ -45,7 +45,8 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [
     });
   }, [filas, orden, texto]);
   const pag = usePaginado(ordenadas, 50);
-  const sumables = columnas.filter((c) => c.tipo === 'dinero' && filas.length > 1 && filas.every((f) => typeof f[c.key] === 'number' && !f.tipo));
+  // El total sigue a la búsqueda: suma lo que se ve, no todo el reporte.
+  const sumables = columnas.filter((c) => c.tipo === 'dinero' && ordenadas.length > 1 && ordenadas.every((f) => typeof f[c.key] === 'number' && !f.tipo));
 
   return (
     <>
@@ -90,7 +91,7 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [
         {sumables.length > 0 && (
           <tfoot><tr>{columnas.map((c, i) => (
             <td key={c.key} className={sumables.includes(c) ? 't-right' : ''}>
-              {i === 0 ? <strong>Total</strong> : sumables.includes(c) ? <strong>{money(filas.reduce((s, f) => s + (f[c.key] as number), 0))}</strong> : null}
+              {i === 0 ? <strong>Total</strong> : sumables.includes(c) ? <strong>{money(ordenadas.reduce((s, f) => s + (f[c.key] as number), 0))}</strong> : null}
             </td>))}</tr></tfoot>
         )}
       </table>

@@ -128,6 +128,36 @@ export function verificarTotp(secreto: string, codigo: string, ventana = 1): boo
   return false;
 }
 
+/**
+ * Igual que verificarTotp pero de un solo uso por cuenta: un código interceptado no sirve otra vez
+ * y 5 fallos seguidos bloquean el segundo factor 15 minutos aunque el atacante rote de IP.
+ * ponytail: en memoria (un solo proceso del API); con varias réplicas pasar a una tabla.
+ */
+const ultimoPasoMfa = new Map<string, number>();
+const fallosMfa = new Map<string, { n: number; desde: number }>();
+export function mfaBloqueado(usuarioId: string): boolean {
+  const f = fallosMfa.get(usuarioId);
+  if (f && Date.now() - f.desde > 15 * 60_000) { fallosMfa.delete(usuarioId); return false; }
+  return !!f && f.n >= 5;
+}
+export function registrarFalloMfa(usuarioId: string) {
+  const f = fallosMfa.get(usuarioId);
+  fallosMfa.set(usuarioId, f && Date.now() - f.desde <= 15 * 60_000 ? { n: f.n + 1, desde: f.desde } : { n: 1, desde: Date.now() });
+}
+export function totpUnaVez(usuarioId: string, secreto: string, codigo: string): boolean {
+  const limpio = codigo.replace(/\D/g, '');
+  if (limpio.length !== 6) return false;
+  const ahora = Math.floor(Date.now() / 1000 / 30);
+  for (let p = -1; p <= 1; p++) {
+    if (codigoTotp(secreto, p) !== limpio) continue;
+    if (ahora + p <= (ultimoPasoMfa.get(usuarioId) ?? -1)) return false;
+    ultimoPasoMfa.set(usuarioId, ahora + p);
+    fallosMfa.delete(usuarioId);
+    return true;
+  }
+  return false;
+}
+
 export function urlOtpauth(secreto: string, cuenta: string, emisor = 'Tanta'): string {
   const etiqueta = encodeURIComponent(`${emisor}:${cuenta}`);
   return `otpauth://totp/${etiqueta}?secret=${secreto}&issuer=${encodeURIComponent(emisor)}&algorithm=SHA1&digits=6&period=30`;
@@ -250,6 +280,19 @@ export interface UsuarioActual {
   rol: string;
   permisos: Set<string>;
 }
+
+const CAMPO_COSTO = /costo|cpp|valor|margen|utilidad|desglose|impacto/i;
+
+/** Quita, a cualquier profundidad, los campos de costo o margen si el usuario no tiene `costos.ver`. */
+export function proyectarCostos<T>(u: UsuarioActual, o: T): T {
+  if (u.permisos.has('costos.ver')) return o;
+  const limpiar = (v: unknown): unknown => Array.isArray(v) ? v.map(limpiar)
+    : v && typeof v === 'object' && !(v instanceof Date)
+      ? Object.fromEntries(Object.entries(v).filter(([k]) => !CAMPO_COSTO.test(k)).map(([k, x]) => [k, limpiar(x)]))
+      : v;
+  return limpiar(o) as T;
+}
+export const esCampoCosto = (k: string) => CAMPO_COSTO.test(k);
 
 declare module 'fastify' {
   interface FastifyRequest {

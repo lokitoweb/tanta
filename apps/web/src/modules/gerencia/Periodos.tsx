@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
-import { money, pct } from '@/core/format';
+import { money } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 
@@ -125,7 +125,6 @@ export function Periodos() {
             <div><dt>Período</dt><dd>{MES[confirmar.mes]} {confirmar.anio}</dd></div>
             <div><dt>Ventas netas</dt><dd>{money(confirmar.netas)}</dd></div>
             <div><dt>Documentos</dt><dd>{confirmar.ventas}</dd></div>
-            <div><dt>Margen actual</dt><dd>{pct(0)}</dd></div>
           </dl>
         )}
         <p className="dialogo__nota">

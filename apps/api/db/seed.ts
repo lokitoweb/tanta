@@ -8,6 +8,12 @@ import { hashClave } from '../src/seguridad.js';
  * porque se calculan, no se escriben a mano.
  */
 
+// La semilla BORRA la operación y crea usuarios con clave de demostración: nunca en producción.
+if (process.env.NODE_ENV === 'production' && process.env.SEED_FORZAR !== 'si') {
+  console.error('Semilla bloqueada en producción (NODE_ENV=production). Usa SEED_FORZAR=si solo en un servidor de demostración.');
+  process.exit(1);
+}
+
 const d = (n: number, dec = 6) => n.toFixed(dec);
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -274,6 +280,7 @@ async function main() {
       ['tolerancia_produccion', '0.10', 'porcentaje', 'Diferencia entre lo producido y lo solicitado a partir de la cual se pide confirmar antes de grabar la producción (0.10 = 10 %; 0 = no avisar)'],
       ['tolerancia_varianza', '0.03', 'porcentaje', 'Tolerancia del consumo real frente al teórico'],
       ['merma_proceso_defecto', '0', 'porcentaje', 'Merma de proceso con que nace un producto nuevo y su primera receta (0.03 = 3 %). Cada receta puede tener la suya'],
+      ['dias_alerta_pago', '3', 'numero', 'Días antes del vencimiento del pago de una compra para avisar a Administración'],
       ['dias_alerta_vencimiento', '7', 'numero', 'Días antes del vencimiento de un lote de insumo para avisar a Almacén y Gerencia'],
     ]) {
       await c.query('INSERT INTO core.parametro (clave,valor,tipo,descripcion) VALUES ($1,$2,$3,$4)', [clave, valor, tipo, desc]);

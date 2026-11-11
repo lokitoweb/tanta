@@ -181,8 +181,9 @@ export async function rutasHojas(app: FastifyInstance) {
           const l = reales.get(op.producto_id);
           if (!l) throw fallo(422, `Falta la producción real de ${op.producto}.`);
           const total = l.real + l.merma;
-          await cierreOP(c, { codigo: op.codigo, cantidadProducida: l.real, unidadesMerma: l.merma, mermaReal: total > 0 ? l.merma / total : 0, motivoMerma: '', usuarioId: req.usuario!.id });
+          await cierreOP(c, { codigo: op.codigo, cantidadProducida: l.real, unidadesMerma: l.merma, mermaReal: total > 0 ? l.merma / total : 0, motivoMerma: '', usuarioId: req.usuario!.id, sinRecalcular: true });
         }
+        await c.query('SELECT core.recalcular_costos()');
         await c.query(`UPDATE core.hoja_produccion SET estado = 'CERRADA', cerrada_por = $2, cerrada_en = now() WHERE id = $1`, [h.id, req.usuario!.id]);
         // Con lo producido, los pedidos del lote quedan listos por orden de llegada; el que no alcance sigue en producción.
         const pedidos = (await c.query<{ id: string; codigo: string }>(`SELECT id, codigo FROM core.pedido WHERE hoja_id = $1 AND estado = 'EN_PRODUCCION' ORDER BY creado_en FOR UPDATE`, [h.id])).rows;

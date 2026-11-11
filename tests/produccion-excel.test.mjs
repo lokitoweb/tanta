@@ -42,7 +42,11 @@ before(async () => {
 });
 
 test('CP-12/13/14/15: lotes completos y proporcional, consumo de harina y alerta FALTA', async () => {
-  const lc = (await api(pro, 'GET', `/produccion/requerimiento?productoId=${productoId}&cantidad=1000&criterio=LOTES_COMPLETOS`)).b;
+  // Gerencia ve el costo; Producción recibe el mismo requerimiento sin soles (no tiene costos.ver).
+  const lc = (await api(ger, 'GET', `/produccion/requerimiento?productoId=${productoId}&cantidad=1000&criterio=LOTES_COMPLETOS`)).b;
+  const sinCosto = (await api(pro, 'GET', `/produccion/requerimiento?productoId=${productoId}&cantidad=1000&criterio=LOTES_COMPLETOS`)).b;
+  assert.equal(sinCosto.lotes, 4);
+  assert.equal(sinCosto.insumos[0].costo, undefined, 'Producción no recibe costos');
   assert.equal(lc.lotes, 4, 'CP-12: 4 lotes completos');
   cerca(lc.unidadesObtenidas, 1155.9, 0.2, 'CP-12: unidades que se obtendrían');
   cerca(lc.masaKg, 65.536, 0.001, 'CP-12: masa total (kg)');
@@ -91,8 +95,11 @@ test('CP-17/18/35: requisición, salida al entregar, cierre con merma y varianza
     consumoReal: [{ insumoId: levadura, cantidad: teoricaLev * 1.075 }] });
   assert.equal(cierre.s, 200, JSON.stringify(cierre.b));
   cerca(stockPan() - antes, 1100, 0.001, 'CP-18: el stock de panes sube en las unidades buenas');
-  cerca(cierre.b.costoUnitario, cierre.b.costoTotal / 1100, 0.0001, 'RN-28: costo unitario = costo de la OP ÷ unidades buenas');
-  cerca(cierre.b.desglose.insumos, Number(sql(`SELECT sum(costo_entregado) FROM core.requisicion_detalle d JOIN core.requisicion q ON q.id = d.requisicion_id WHERE q.codigo = '${req.codigo}'`)), 0.01, 'insumos = lo entregado');
+  assert.equal(cierre.b.costoTotal, undefined, 'Producción no recibe el costo de la OP');
+  const [costoTotal, costoUnitario] = sql(`SELECT costo_total || '|' || costo_unitario_real FROM core.orden_produccion WHERE codigo = '${op.b.codigo}'`).split('|').map(Number);
+  cerca(costoUnitario, costoTotal / 1100, 0.0001, 'RN-28: costo unitario = costo de la OP ÷ unidades buenas');
+  const insumosOp = Number(sql(`SELECT sum(costo_entregado) FROM core.requisicion_detalle d JOIN core.requisicion q ON q.id = d.requisicion_id WHERE q.codigo = '${req.codigo}'`));
+  assert.ok(insumosOp > 0 && insumosOp <= costoTotal + 0.01, 'insumos = lo entregado, dentro del costo total');
 
   const hoy = new Date().toISOString().slice(0, 10);
   const v = (await api(ger, 'GET', `/reportes/P-02?desde=${hoy}&hasta=${hoy}&producto=${productoId}`)).b;

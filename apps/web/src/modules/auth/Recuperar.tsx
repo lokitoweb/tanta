@@ -55,7 +55,7 @@ export function Recuperar({ onVolver }: { onVolver: (aviso?: string) => void }) 
       </label>
       <label className="field">
         <span className="field__label">Contraseña nueva (mínimo {claveMin} caracteres)</span>
-        <input className="field__input" type="password" value={nueva} onChange={(e) => setNueva(e.target.value)} minLength={10} maxLength={128} autoComplete="new-password" required />
+        <input className="field__input" type="password" value={nueva} onChange={(e) => setNueva(e.target.value)} minLength={claveMin} maxLength={128} autoComplete="new-password" required />
       </label>
       <label className="field">
         <span className="field__label">Repite la contraseña</span>

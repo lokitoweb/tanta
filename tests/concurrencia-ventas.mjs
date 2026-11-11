@@ -16,7 +16,7 @@ const login = await fetch(`${API}/auth/login`, {
 
 const cab = { Authorization: `Bearer ${login.accessToken}` };
 const datos = await fetch(`${API}/datos`, { headers: cab }).then((r) => r.json());
-const productos = datos.productos.filter((p) => p.stock > 2).slice(0, N);
+const productos = datos.productos.filter((p) => p.stock - (p.reservado ?? 0) > 2).slice(0, N);
 if (productos.length < N) console.warn(`solo hay ${productos.length} productos con stock`);
 
 console.log(`Lanzando ${productos.length} ventas simultáneas…`);

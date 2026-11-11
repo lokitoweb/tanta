@@ -55,15 +55,21 @@ class _NuevaVentaState extends State<NuevaVenta> {
       );
       final comprobante = r['comprobante'] as Map<String, dynamic>?;
       final cliente = _lista(widget.datos, 'clientes').where((c) => c['id'] == _cliente).firstOrNull?['nombre'] ?? 'Público general';
-      await compartirComprobante(
-        titulo: 'Nota de venta', numero: '${comprobante?['numero'] ?? r['codigo']}', cliente: '$cliente', vendedor: Api.instancia.nombre, total: dinero(_total),
-        lineas: [
-          for (final e in _cant.entries.where((e) => e.value > 0))
-            ('${e.value} × ${productos.firstWhere((p) => p['id'] == e.key)['nombre']}', ''),
-        ],
-      );
+      // La venta ya quedó registrada: un fallo del PDF no debe invitar a reintentarla (la duplicaría).
       aviso.showSnackBar(SnackBar(content: Text('Nota de venta ${comprobante?['numero'] ?? r['codigo']} registrada')));
       nav.pop(true);
+      try {
+        await compartirComprobante(
+          titulo: 'Nota de venta', numero: '${comprobante?['numero'] ?? r['codigo']}', cliente: '$cliente', vendedor: Api.instancia.nombre,
+          total: dinero((comprobante?['total'] as num?)?.toDouble() ?? _total),
+          lineas: [
+            for (final e in _cant.entries.where((e) => e.value > 0))
+              ('${e.value} × ${productos.firstWhere((p) => p['id'] == e.key)['nombre']}', ''),
+          ],
+        );
+      } catch (_) {
+        aviso.showSnackBar(const SnackBar(content: Text('Venta registrada; no se pudo generar el PDF.')));
+      }
     } catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
     } finally {

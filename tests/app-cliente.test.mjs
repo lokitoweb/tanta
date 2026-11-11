@@ -112,7 +112,7 @@ test('avisos a clientes: solo con permiso, a todos o a los elegidos, y queda en 
 
 test('una venta avisa a Gerencia (permiso alertas.ventas)', async () => {
   const ger = await login('osquilcate');
-  const v = await api(await login('cmedina'), 'POST', '/ventas', { items: [{ productoId: sql('SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1'), cantidad: 1 }], formaPago: 'EFECTIVO' });
+  const v = await api(await login('cmedina'), 'POST', '/ventas', { items: [{ productoId: sql('SELECT id FROM core.producto WHERE stock - reservado >= 5 ORDER BY nombre LIMIT 1'), cantidad: 1 }], formaPago: 'EFECTIVO' });
   assert.equal(v.s, 201, JSON.stringify(v.b));
   assert.ok(await esperarAviso(ger, v.b.comprobante.numero), 'el gerente recibe la venta');
 });

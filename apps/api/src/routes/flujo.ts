@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q, tx, uno, num, type Cliente } from '../db.js';
-import { autenticar, exigir, error } from '../seguridad.js';
+import { autenticar, exigir, error, proyectarCostos } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
@@ -235,7 +235,7 @@ export async function rutasFlujo(app: FastifyInstance) {
               WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' AND v.serie IS NOT NULL LIMIT 1) AS comprobante,
              (SELECT sum(x.saldo) FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA') AS "porCobrar",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
-               'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion) ORDER BY d.id)
+               'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion, 'promocionId', d.promocion_id) ORDER BY d.id)
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
       FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
       WHERE ($1::uuid IS NULL OR p.cliente_id = $1)
@@ -399,7 +399,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Producto y cantidad requeridos.'));
     const c = await calcularOrden(p.data.productoId, p.data.cantidad, p.data.criterio);
     if (!c) return reply.code(422).send(error(422, 'SIN_RECETA', 'El producto no tiene receta vigente.'));
-    return { ...c, suficiente: c.insumos.every((x) => x.falta === 0) };
+    return proyectarCostos(req.usuario!, { ...c, suficiente: c.insumos.every((x) => x.falta === 0) });
   });
 
   // PRO-10 / RN-22 / RN-23: presupuesto de N panes. Los panes a preparar se redondean
@@ -427,7 +427,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     });
     const costoInsumos = insumos.reduce((s, i) => s + i.costo, 0);
     const neto = num(r.precio_con_igv) / (1 + num(r.igv || '0.18'));
-    return {
+    return proyectarCostos(req.usuario!, {
       cantidad: p.data.cantidad, merma, panesAPreparar: panes, lotes: Math.round(lotes * 1000) / 1000,
       masaKg: Math.round(masa * 1000) / 1000, harinaKg: Math.round(lotes * num(r.harina ?? '0') * 1000) / 1000,
       costoInsumos: Math.round(costoInsumos * 100) / 100,
@@ -435,7 +435,7 @@ export async function rutasFlujo(app: FastifyInstance) {
       ventaNeta: Math.round(p.data.cantidad * neto * 100) / 100,
       margenEstimado: neto > 0 ? (neto - num(r.costo_unitario)) / neto : 0,
       insumos,
-    };
+    });
   });
 
   const NuevaOP = z.object({
@@ -476,8 +476,8 @@ export async function rutasFlujo(app: FastifyInstance) {
     avisar([{ permiso: 'requisiciones.atender' }], { tipo: 'requisicion', titulo: `Requisición de ${op}`, cuerpo: `Producción pide insumos para ${d.cantidad} unidades${req2.some((x) => x.falta > 0) ? ' · hay insumos que faltan' : ''}`, ruta: '/almacen/requisiciones' });
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'OP_CREADA', entidad: 'orden_produccion', entidadId: op, detalle: d, ip: req.ip });
     // La OP se crea igual aunque falten insumos: Producción decide; la alerta queda en la respuesta.
-    return reply.code(201).send({ codigo: op, estado: 'PENDIENTE', calculo: { lotes: calc.lotes, unidadesObtenidas: calc.unidadesObtenidas, masaKg: calc.masaKg, costoInsumos: calc.costoInsumos },
-      insumos: req2, insumosInsuficientes: req2.filter((x) => x.falta > 0) });
+    return reply.code(201).send(proyectarCostos(req.usuario!, { codigo: op, estado: 'PENDIENTE', calculo: { lotes: calc.lotes, unidadesObtenidas: calc.unidadesObtenidas, masaKg: calc.masaKg, costoInsumos: calc.costoInsumos },
+      insumos: req2, insumosInsuficientes: req2.filter((x) => x.falta > 0) }));
   });
 
   /* --------------------------------------------------------- requisiciones */

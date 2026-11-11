@@ -95,6 +95,18 @@ class Api {
     await _seguro.write(key: 'refresco', value: refresco);
   }
 
+  /// Salida voluntaria: revoca el refresco en el servidor (si hay red) y borra la sesión local.
+  Future<void> salir() async {
+    final refresco = _refresco;
+    if (_acceso != null && refresco != null) {
+      try {
+        await http.post(Uri.parse('$base/auth/logout'), headers: {..._cabeceras(conCuerpo: true), 'Content-Type': 'application/json'},
+            body: jsonEncode({'refreshToken': refresco})).timeout(const Duration(seconds: 5));
+      } catch (_) {/* sin red: igual se sale; el refresco caduca solo */}
+    }
+    await cerrarSesion();
+  }
+
   Future<void> cerrarSesion() async {
     _acceso = null;
     _refresco = null;
@@ -206,7 +218,10 @@ class Api {
   }) async {
     // La clave se genera al encolar: si se reintenta cinco veces, el servidor
     // reconoce la operación y no duplica el cobro.
-    final clave = claveIdempotencia ?? (idempotente ? _uuid() : null);
+    // Si la respuesta no llegó (timeout) y el usuario reintenta lo mismo, se reusa la clave:
+    // el servidor devuelve la venta, pedido o gasto ya creado en vez de duplicarlo.
+    final firma = idempotente && claveIdempotencia == null ? '$ruta|${jsonEncode(cuerpo)}' : null;
+    final clave = claveIdempotencia ?? (firma != null ? (_clavesSinRespuesta[firma] ??= _uuid()) : null);
 
     Map<String, String> cabeceras() => {
           ...(sinAuth ? const {} : _cabeceras(conCuerpo: true)),
@@ -224,8 +239,11 @@ class Api {
       // Sin red: la operación queda pendiente y se reintenta sola.
       throw SinConexion();
     }
+    if (firma != null) _clavesSinRespuesta.remove(firma);
     return _trasCambio(ruta, await _decodificar(r));
   }
+
+  final Map<String, String> _clavesSinRespuesta = {};
 
   /// UUID v4 suficiente para la clave de idempotencia (no requiere dependencias).
   String _uuid() {
@@ -375,8 +393,8 @@ class Api {
       ) as Map<String, dynamic>;
 
   /// Cambia el estado de un pedido. El servidor valida la transición.
-  Future<Map<String, dynamic>> cambiarEstadoPedido(String codigo, String estado, {String motivo = ''}) async =>
-      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': estado, 'motivo': motivo, 'observaciones': motivo}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> cambiarEstadoPedido(String codigo, String estado, {String motivo = '', String? claveIdempotencia}) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': estado, 'motivo': motivo, 'observaciones': motivo}, claveIdempotencia: claveIdempotencia) as Map<String, dynamic>;
 
   /// PED-07: el cliente cancela su pedido (solo antes de producción), con motivo.
   Future<void> cancelarPedido(String codigo, String motivo) async => await _post('/pedidos/$codigo/cancelar', {'motivo': motivo});
@@ -406,10 +424,11 @@ class Api {
       '${(await _post('/auth/registro', datos, sinAuth: true) as Map)['mensaje']}';
 
   /// PATCH/PUT/DELETE con renovación de token y tiempo límite, igual que _get/_post.
-  Future<dynamic> _enviar(String metodo, String ruta, Map<String, dynamic> cuerpo, {bool reintentar = true}) async {
+  Future<dynamic> _enviar(String metodo, String ruta, Map<String, dynamic> cuerpo, {bool reintentar = true, String? claveIdempotencia}) async {
     Future<http.Response> mandar() async {
       final req = http.Request(metodo, Uri.parse('$base$ruta'))
         ..headers.addAll(_cabeceras(conCuerpo: true))
+        ..headers.addAll({if (claveIdempotencia != null) 'Idempotency-Key': claveIdempotencia})
         ..body = jsonEncode(cuerpo);
       return http.Response.fromStream(await req.send().timeout(_limite));
     }
@@ -530,8 +549,8 @@ class Api {
   Future<void> observarPedido(String codigo, String mensaje) async => await _post('/pedidos/$codigo/observar', {'mensaje': mensaje});
 
   /// Entregar y cobrar en un paso: [pagos] vacío = queda todo como deuda.
-  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = '', String? voucher}) async =>
-      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos, 'voucher': voucher}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = '', String? voucher, String? claveIdempotencia}) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos, 'voucher': voucher}, claveIdempotencia: claveIdempotencia) as Map<String, dynamic>;
 
   /// Caja del vendedor: lo cobrado hoy por forma de pago, recibos, entregas y su rendición.
   Future<Map<String, dynamic>> miDia() async => await _get('/cobranza/mi-dia') as Map<String, dynamic>;
@@ -602,8 +621,9 @@ class ApiException implements Exception {
   final String mensaje;
 
   /// Errores de negocio: reintentar no sirve, hay que corregir el dato.
-  /// Los 408/429 sí son transitorios.
-  bool get esDefinitivo => status >= 400 && status < 500 && status != 408 && status != 429;
+  /// Los 408/429 sí son transitorios, y un 401 (sesión vencida) se resuelve volviendo a entrar:
+  /// una operación de dinero nunca se descarta porque caducó el token.
+  bool get esDefinitivo => status >= 400 && status < 500 && status != 401 && status != 408 && status != 429;
 
   @override
   String toString() => mensaje;

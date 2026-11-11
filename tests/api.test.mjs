@@ -199,7 +199,7 @@ describe('Validación de entrada', () => {
 describe('Idempotencia', () => {
   test('el mismo Idempotency-Key devuelve la misma venta y no duplica', async () => {
     const datos = await pedir('/datos', { token: tokens.cmedina });
-    const producto = datos.datos.productos.find((p) => p.stock >= 2);
+    const producto = datos.datos.productos.find((p) => p.stock - (p.reservado ?? 0) >= 2);
     assert.ok(producto, 'se necesita un producto con stock');
 
     const clave = crypto.randomUUID();

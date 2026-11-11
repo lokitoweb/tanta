@@ -89,6 +89,8 @@ async function hacerRefresco(): Promise<boolean> {
   }).catch(() => null);
   if (!res?.ok) {
     borrarAcceso();
+    // El servidor rechazó la sesión (no es falta de red): la app vuelve al login en vez de fallar pantalla por pantalla.
+    if (res && (res.status === 401 || res.status === 403)) window.dispatchEvent(new Event('tanta:sesion-expirada'));
     return false;
   }
   const datos = (await res.json()) as { accessToken: string };

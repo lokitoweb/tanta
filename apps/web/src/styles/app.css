@@ -747,6 +747,11 @@ input, select, textarea { font-family: inherit; }
   background: var(--tanta-surface-overlay); padding: 20px; animation: aparecer 120ms ease;
 }
 @keyframes aparecer { from { opacity: 0 } to { opacity: 1 } }
+/* Con un diálogo abierto, el error de la página quedaba detrás del fondo: se muestra flotando encima. */
+body:has(.dialogo__fondo) .aviso--danger:not(.dialogo *) {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 110;
+  width: min(560px, calc(100vw - 32px)); box-shadow: var(--tanta-shadow-lg);
+}
 .dialogo {
   width: min(500px, 100%); max-height: 88vh; overflow: auto;
   background: var(--tanta-surface-card); border-radius: var(--tanta-radius-lg);

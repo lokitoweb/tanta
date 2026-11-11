@@ -58,6 +58,9 @@ export async function rutasAdmin(app: FastifyInstance) {
       if (!Number.isFinite(n)) {
         return reply.code(422).send(error(422, 'VALOR_NO_NUMERICO', 'Este parámetro debe ser numérico.'));
       }
+      // Ningún parámetro numérico es negativo (un sueldo de -1500 daría mano de obra negativa) y los días se usan como enteros en SQL.
+      if (n < 0) return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'El valor no puede ser negativo.'));
+      if (/(^|_)dias(_|$)/.test(clave) && !Number.isInteger(n)) return reply.code(422).send(error(422, 'VALOR_INVALIDO', 'Usa un número entero de días.'));
       if (actual.tipo === 'porcentaje' && (n < 0 || n > 1)) {
         return reply.code(422).send(error(422, 'PORCENTAJE_FUERA_DE_RANGO', 'El porcentaje debe estar entre 0 y 1 (0.18 = 18 %).'));
       }

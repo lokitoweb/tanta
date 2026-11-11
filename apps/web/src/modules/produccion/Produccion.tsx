@@ -19,7 +19,7 @@ interface Req { insumo: string; unidad: string; necesario: number; stock: number
 interface Calculo { insumos: Req[]; suficiente: boolean; unidadesPorLote: number; lotesEquivalentes: number; lotes: number; unidadesObtenidas: number; masaKg: number; costoInsumos: number }
 interface Presupuesto { panesAPreparar: number; lotes: number; masaKg: number; harinaKg: number; costoInsumos: number; costoEstimado: number; ventaNeta: number; margenEstimado: number; insumos: Array<{ insumo: string; unidad: string; consumo: number; costo: number; falta: boolean; pctPanadero: number | null }> }
 const MOTIVOS = [['CORTE', 'Corte'], ['ROTURA', 'Rotura'], ['QUEMADO', 'Quemado'], ['DEFORME', 'Deforme'], ['OTRO', 'Otro']];
-const manana = () => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+const manana = () => new Date(Date.now() - 5 * 3_600_000 + 86_400_000).toISOString().slice(0, 10); // hora de Lima, como hoy()
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 /** Tablero de producción (PDF §3.2): pedidos consolidados → OP → Pendiente → En proceso → Terminada. */
@@ -82,7 +82,7 @@ export function Produccion() {
   const iniciar = (op: Op) => accion(async () => { await api(`/ordenes-produccion/${op.codigo}/iniciar`, { method: 'POST', body: {}, conIdempotencia: true }); return `${op.codigo} en proceso`; });
   const cerrarOp = () => accion(async () => {
     const c = cerrar!;
-    const r = await api<{ costoUnitario: number }>(`/ordenes-produccion/${c.op.codigo}/cerrar`, {
+    const r = await api<{ costoUnitario?: number }>(`/ordenes-produccion/${c.op.codigo}/cerrar`, {
       method: 'POST', conIdempotencia: true,
       body: {
         unidadesBuenas: Number(c.buenas), unidadesMerma: Number(c.merma || 0), motivoMermaTipo: Number(c.merma) > 0 ? c.motivoTipo : undefined, motivoMerma: c.motivo,
@@ -90,7 +90,7 @@ export function Produccion() {
       },
     });
     setCerrar(null);
-    return `${c.op.codigo} terminada: ${num(Number(c.buenas))} unidades al stock a S/ ${r.costoUnitario.toFixed(4)} c/u (costo real)`;
+    return `${c.op.codigo} terminada: ${num(Number(c.buenas))} unidades al stock${r.costoUnitario !== undefined ? ` a S/ ${r.costoUnitario.toFixed(4)} c/u (costo real)` : ''}`;
   });
   const anularOp = () => accion(async () => {
     await api(`/ordenes-produccion/${anular!.op.codigo}/anular`, { method: 'POST', body: { motivo: anular!.motivo } });
@@ -103,6 +103,8 @@ export function Produccion() {
   const productosConReceta = dataset.productos.filter((p) => p.estado === 'ACTIVO');
   const puedePlanificar = puede('produccion.planificar');
   const puedeEjecutar = puede('produccion.ejecutar');
+  // Sin costos.ver el API no envía soles: las columnas de costo no se muestran.
+  const verCosto = puede('costos.ver');
 
   return (
     <>
@@ -217,12 +219,12 @@ export function Produccion() {
                   <div><span>Lotes a preparar</span><b>{num2(req.lotes)}</b></div>
                   <div><span>Unidades que se obtendrán</span><b>{num2(req.unidadesObtenidas)}</b></div>
                   <div><span>Masa total</span><b>{num2(req.masaKg)} kg</b></div>
-                  <div><span>Costo de insumos</span><b>S/ {req.costoInsumos.toFixed(2)}</b></div>
+                  {verCosto && <div><span>Costo de insumos</span><b>S/ {req.costoInsumos.toFixed(2)}</b></div>}
                 </div>
                 <table className="table table--compacta">
-                  <thead><tr><th>Insumo</th><th className="t-right">Consumo</th><th className="t-right">Costo</th><th className="t-right">Stock</th><th className="t-right">Saldo</th><th className="t-right">Estado</th></tr></thead>
+                  <thead><tr><th>Insumo</th><th className="t-right">Consumo</th>{verCosto && <th className="t-right">Costo</th>}<th className="t-right">Stock</th><th className="t-right">Saldo</th><th className="t-right">Estado</th></tr></thead>
                   <tbody>{req.insumos.map((x) => (
-                  <tr key={x.insumo}><td>{x.insumo}</td><td className="t-right">{num2(x.necesario)} {x.unidad}</td><td className="t-right">S/ {(x.costo ?? 0).toFixed(2)}</td>
+                  <tr key={x.insumo}><td>{x.insumo}</td><td className="t-right">{num2(x.necesario)} {x.unidad}</td>{verCosto && <td className="t-right">S/ {(x.costo ?? 0).toFixed(2)}</td>}
                     <td className="t-right">{num2(x.stock)}</td><td className={`t-right ${(x.saldo ?? 0) < 0 ? 't-neg' : ''}`}>{num2(x.saldo ?? 0)}</td>
                     <td className="t-right">{x.falta > 0 ? <Insignia tono="danger">FALTA</Insignia> : <Insignia tono="ok">OK</Insignia>}</td></tr>))}</tbody></table>
                 <p className="dialogo__nota">Al crear la orden se envía la requisición a Almacén; el stock baja cuando Almacén entrega.</p>
@@ -286,14 +288,14 @@ export function Produccion() {
                   <div><span>Lotes</span><b>{num2(presu.res.lotes)}</b></div>
                   <div><span>Masa total</span><b>{num2(presu.res.masaKg)} kg</b></div>
                   <div><span>Harina total</span><b>{num2(presu.res.harinaKg)} kg</b></div>
-                  <div><span>Costo estimado</span><b>S/ {presu.res.costoEstimado.toFixed(2)}</b></div>
-                  <div><span>Margen estimado</span><b>{pct(presu.res.margenEstimado)}</b></div>
+                  {verCosto && <div><span>Costo estimado</span><b>S/ {presu.res.costoEstimado.toFixed(2)}</b></div>}
+                  {verCosto && <div><span>Margen estimado</span><b>{pct(presu.res.margenEstimado)}</b></div>}
                 </div>
                 <table className="table table--compacta">
-                  <thead><tr><th>Insumo</th><th className="t-right">% panadero</th><th className="t-right">Consumo</th><th className="t-right">Costo</th><th /></tr></thead>
+                  <thead><tr><th>Insumo</th><th className="t-right">% panadero</th><th className="t-right">Consumo</th>{verCosto && <th className="t-right">Costo</th>}<th /></tr></thead>
                   <tbody>{presu.res.insumos.map((x) => (
                     <tr key={x.insumo}><td>{x.insumo}</td><td className="t-right t-muted">{x.pctPanadero !== null ? pct(x.pctPanadero) : '—'}</td>
-                      <td className="t-right">{num2(x.consumo)} {x.unidad}</td><td className="t-right">S/ {x.costo.toFixed(2)}</td>
+                      <td className="t-right">{num2(x.consumo)} {x.unidad}</td>{verCosto && <td className="t-right">S/ {x.costo.toFixed(2)}</td>}
                       <td className="t-right">{x.falta && <Insignia tono="danger">Falta stock</Insignia>}</td></tr>))}</tbody></table>
               </div>
             )}

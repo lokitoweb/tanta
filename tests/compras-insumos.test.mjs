@@ -84,7 +84,9 @@ test('criterio 2 / F4: una receta de 200 ml de aceite descuenta 0.1834 kg y el s
   const lineaAceite = req.b.insumos[0];
   cerca(lineaAceite.necesario, 0.1834, 1e-9, 'F4 salida en kg');
   assert.equal(lineaAceite.unidad, 'KG', 'producción descuenta en unidad de inventario');
-  cerca(lineaAceite.costo, 1.89, 0.005, 'costo del aceite en la salida');
+  assert.equal(lineaAceite.costo, undefined, 'Producción no recibe costos (no tiene costos.ver)');
+  const conCosto = await api(await login('superadmin'), 'GET', `/produccion/requerimiento?productoId=${productoId}&cantidad=1&criterio=LOTES_COMPLETOS`);
+  cerca(conCosto.b.insumos[0].costo, 1.89, 0.005, 'costo del aceite en la salida');
   // Producción real: la orden genera la requisición y Almacén entrega lo pedido.
   const op = await api(pro, 'POST', '/ordenes-produccion', { productoId, cantidad: 1, entrega: hoyLima(), criterio: 'LOTES_COMPLETOS' });
   assert.equal(op.s, 201, JSON.stringify(op.b));

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q, uno, num } from '../db.js';
-import { autenticar, exigir, error } from '../seguridad.js';
+import { autenticar, exigir, error, proyectarCostos, esCampoCosto, type UsuarioActual } from '../seguridad.js';
 
 /**
  * Catálogo de reportes del PDF (Tabla 4) y dashboard gerencial, calculados en vivo
@@ -19,8 +19,9 @@ const Filtros = z.object({
 });
 type F = z.infer<typeof Filtros> & { desde: string; hasta: string };
 
-const hoy = () => new Date().toISOString().slice(0, 10);
-const haceDias = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+// Fechas por defecto en hora de Lima (UTC−5, sin horario de verano): tras las 19:00 ya no saltan a «mañana».
+const haceDias = (n: number) => new Date(Date.now() - 5 * 3_600_000 - n * 86_400_000).toISOString().slice(0, 10);
+const hoy = () => haceDias(0);
 
 /** Líneas de venta filtradas: base de G-01…G-07. $1..$6 = desde, hasta, categoría, producto, cliente, vendedor. */
 const LINEAS = `
@@ -41,7 +42,10 @@ const LINEAS = `
 const params = (f: F) => [f.desde, f.hasta, f.categoria ?? null, f.producto ?? null, f.cliente ?? null, f.vendedor ?? null];
 
 type Col = { key: string; label: string; tipo?: 'dinero' | 'pct' | 'num' | 'texto' | 'fecha' | 'semaforo' };
-interface Reporte { titulo: string; permiso: string; columnas: Col[]; calcular: (f: F) => Promise<{ filas: Record<string, unknown>[]; resumen?: Record<string, unknown> }> }
+const columnasDe = (r: Reporte, u: UsuarioActual) =>
+  r.costos && !u.permisos.has('costos.ver') ? r.columnas.filter((c) => !esCampoCosto(c.key)) : r.columnas;
+
+interface Reporte { titulo: string; permiso: string; /** Sus columnas en soles son costos: sin costos.ver no se envían. */ costos?: true; columnas: Col[]; calcular: (f: F) => Promise<{ filas: Record<string, unknown>[]; resumen?: Record<string, unknown> }> }
 
 const margenCols: Col[] = [
   { key: 'unidades', label: 'Unidades', tipo: 'num' }, { key: 'ventas', label: 'Ventas netas', tipo: 'dinero' },
@@ -343,7 +347,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'A-01': {
-    titulo: 'Kárdex valorizado', permiso: 'inventario.ver',
+    titulo: 'Kárdex valorizado', permiso: 'inventario.ver', costos: true,
     columnas: [{ key: 'fecha', label: 'Fecha', tipo: 'fecha' }, { key: 'item', label: 'Ítem' }, { key: 'tipo', label: 'Movimiento' }, { key: 'documento', label: 'Documento / motivo' }, { key: 'cantidad', label: 'Cantidad', tipo: 'num' }, { key: 'costo', label: 'Costo unit.', tipo: 'dinero' }, { key: 'valor', label: 'Valor', tipo: 'dinero' }, { key: 'saldo', label: 'Saldo', tipo: 'num' }, { key: 'saldoValor', label: 'Saldo valorizado', tipo: 'dinero' }],
     async calcular(f) {
       const filas = await q<Record<string, string>>(`
@@ -389,7 +393,7 @@ const REPORTES: Record<string, Reporte> = {
     },
   },
   'P-02': {
-    titulo: 'Control de varianza (teórico vs real)', permiso: 'produccion.ver',
+    titulo: 'Control de varianza (teórico vs real)', permiso: 'produccion.ver', costos: true,
     columnas: [{ key: 'op', label: 'OP' }, { key: 'producto', label: 'Producto' }, { key: 'insumo', label: 'Insumo' },
       { key: 'teorico', label: 'Teórico', tipo: 'num' }, { key: 'real', label: 'Real', tipo: 'num' }, { key: 'variacion', label: 'Variación', tipo: 'num' },
       { key: 'variacionPct', label: 'Variación %', tipo: 'pct' }, { key: 'impacto', label: 'Impacto', tipo: 'dinero' }, { key: 'estado', label: 'Estado' }],
@@ -451,7 +455,7 @@ export async function rutasReportes(app: FastifyInstance) {
 
   /** Catálogo visible para el rol (el menú de reportes sale de aquí, no de un JSON fijo). */
   app.get('/reportes', { preHandler: autenticar }, async (req) =>
-    Object.entries(REPORTES).filter(([, r]) => req.usuario!.permisos.has(r.permiso)).map(([codigo, r]) => ({ codigo, titulo: r.titulo, columnas: r.columnas })));
+    Object.entries(REPORTES).filter(([, r]) => req.usuario!.permisos.has(r.permiso)).map(([codigo, r]) => ({ codigo, titulo: r.titulo, columnas: columnasDe(r, req.usuario!) })));
 
   app.get('/reportes/:codigo', { preHandler: autenticar }, async (req, reply) => {
     const { codigo } = req.params as { codigo: string };
@@ -462,7 +466,8 @@ export async function rutasReportes(app: FastifyInstance) {
     if (!f || f.desde > f.hasta) return reply.code(422).send(error(422, 'FILTRO_INVALIDO', 'Revisa las fechas y filtros.'));
     try {
       const out = await r.calcular(f);
-      return { codigo, titulo: r.titulo, columnas: r.columnas, filtros: f, generadoEn: new Date().toISOString(), ...out };
+      const visible = r.costos ? proyectarCostos(req.usuario!, out) : out;
+      return { codigo, titulo: r.titulo, columnas: columnasDe(r, req.usuario!), filtros: f, generadoEn: new Date().toISOString(), ...visible };
     } catch (e) {
       const err = e as Error & { status?: number };
       if (!err.status) throw e;

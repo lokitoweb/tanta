@@ -66,7 +66,20 @@ class _CobranzaState extends State<Cobranza> {
     return m.values.toList()..sort((a, b) => b.maxDias != a.maxDias ? b.maxDias.compareTo(a.maxDias) : b.saldo.compareTo(a.saldo));
   }
 
+  /// Deudores con un cobro en curso: el botón queda bloqueado para no registrar dos recibos.
+  final Set<String> _cobrando = {};
+
   Future<void> _cobrar(_Deudor d, List<Map<String, dynamic>> docs) async {
+    if (_cobrando.contains(d.id)) return;
+    setState(() => _cobrando.add(d.id));
+    try {
+      await _cobrarAhora(d, docs);
+    } finally {
+      if (mounted) setState(() => _cobrando.remove(d.id));
+    }
+  }
+
+  Future<void> _cobrarAhora(_Deudor d, List<Map<String, dynamic>> docs) async {
     final debe = docs.fold<double>(0, (s, c) => s + _d(c['saldo']));
     final cobro = await mostrarHojaCobro(context, cliente: d.nombre, detalle: docs.length == 1 ? '${docs.first['documento'] ?? 'Compra'}' : '${docs.length} compras', debe: debe, otras: d.saldo - debe);
     if (cobro == null || cobro.pagos.isEmpty || !mounted) return;
@@ -88,6 +101,7 @@ class _CobranzaState extends State<Cobranza> {
       // En línea: se registra al instante y hay número de recibo real.
       final r = await Api.instancia.registrarRecibo(datos, claveIdempotencia: clave);
       await _cargar();
+      if (!mounted) return;
       setState(() { _version++; _marcadas.removeAll(datos['cxcIds'] as List<String>); });
       aviso.showSnackBar(SnackBar(
         content: Text('Pago de ${dinero(monto)} registrado$textoQueda'),
@@ -227,7 +241,7 @@ class _CobranzaState extends State<Cobranza> {
               padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: TantaColors.ink800, minimumSize: const Size.fromHeight(40)),
-                onPressed: () => _cobrar(d, marcadas.isEmpty ? d.docs : marcadas),
+                onPressed: _cobrando.contains(d.id) ? null : () => _cobrar(d, marcadas.isEmpty ? d.docs : marcadas),
                 icon: const Icon(Icons.payments_outlined, size: 18),
                 label: Text(marcadas.isNotEmpty ? 'Cobrar ${dinero(suma)} (${marcadas.length} de $n)' : n == 1 ? 'Cobrar' : 'Cobrar al cliente'),
               ),

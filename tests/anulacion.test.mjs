@@ -14,7 +14,7 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
   body: body ? JSON.stringify(body) : undefined,
 }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }));
 
-const productoConStock = () => sql("SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1");
+const productoConStock = () => sql("SELECT id FROM core.producto WHERE stock - reservado >= 5 ORDER BY nombre LIMIT 1");
 // Cliente propio con crédito sin límite: no depende de la deuda que traigan los datos de ejemplo.
 // (Dentro de un WITH: psql no agrega la línea "INSERT 0 1" a la salida.)
 const clientePrueba = () => sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago)

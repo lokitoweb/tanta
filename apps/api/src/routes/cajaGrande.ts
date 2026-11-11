@@ -132,6 +132,8 @@ export async function rutasCajaGrande(app: FastifyInstance) {
         const filas = (await c.query<{ codigo: string; cuenta: string; monto: string }>(`SELECT codigo, cuenta, monto FROM core.movimiento_caja
           WHERE estado = 'VIGENTE' AND (codigo = $1 OR ($2::uuid IS NOT NULL AND origen_id = $2)) ORDER BY cuenta FOR UPDATE`,
           [codigo, m.tipo.startsWith('DEPOSITO') ? m.origen_id : null])).rows;
+        // Bloquea las cuentas (como moverCaja) antes de mirar su saldo: sin esto, un pago simultáneo la deja en negativo.
+        await c.query('SELECT 1 FROM core.cuenta_caja WHERE codigo = ANY($1) ORDER BY codigo FOR UPDATE', [[...new Set(filas.map((f) => f.cuenta))]]);
         // Anular una entrada no puede dejar la cuenta en negativo (ese dinero ya se usó).
         for (const f of filas.filter((x) => num(x.monto) > 0)) {
           const saldo = num((await c.query<{ s: string }>('SELECT core.saldo_cuenta($1) s', [f.cuenta])).rows[0].s);

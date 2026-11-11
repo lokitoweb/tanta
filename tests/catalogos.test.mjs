@@ -55,7 +55,7 @@ test('medios de pago: el Administrador agrega uno y las ventas lo respetan (n.°
   assert.equal(r.s, 201, JSON.stringify(r.b));
   assert.equal((await api(admin, 'POST', '/catalogos/medios-pago', { codigo: nuevo.medio, nombre: 'Otra' })).s, 409, 'código único');
   assert.ok((await api(vendedor, 'GET', '/catalogos')).b.mediosPago.some((m) => m.codigo === nuevo.medio), 'aparece en los formularios');
-  const prod = sql('SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1');
+  const prod = sql('SELECT id FROM core.producto WHERE stock - reservado >= 5 ORDER BY nombre LIMIT 1');
   const venta = (extra) => api(vendedor, 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 1 }], formaPago: nuevo.medio, ...extra });
   assert.equal((await venta({})).s, 422, 'exige n.° de operación por su atributo');
   assert.equal((await venta({ referenciaPago: 'QA-123' })).s, 201);

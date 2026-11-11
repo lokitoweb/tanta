@@ -131,7 +131,7 @@ export function Perfil() {
             </label>
             <div className="perfil-par">
               <label className="field"><span className="field__label">Nueva contraseña</span>
-                <input className="field__input" type="password" required minLength={10} maxLength={128} autoComplete="new-password" value={clave.nueva} onChange={(e) => setClave({ ...clave, nueva: e.target.value })} />
+                <input className="field__input" type="password" required minLength={claveMin} maxLength={128} autoComplete="new-password" value={clave.nueva} onChange={(e) => setClave({ ...clave, nueva: e.target.value })} />
                 {fuerza && <span className={`field__aviso field__aviso--${fuerza}`}>Seguridad: {fuerza}</span>}
               </label>
               <label className="field"><span className="field__label">Repite la nueva</span>

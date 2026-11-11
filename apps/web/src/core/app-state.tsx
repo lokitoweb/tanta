@@ -80,6 +80,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { void cargar(); }, [cargar]);
+  useEffect(() => {
+    const expiro = () => setFase((f) => (f.tipo === 'listo' ? { tipo: 'sin-sesion' } : f));
+    window.addEventListener('tanta:sesion-expirada', expiro);
+    return () => window.removeEventListener('tanta:sesion-expirada', expiro);
+  }, []);
 
   const cerrarSesion = useCallback(async () => {
     await logoutApi();

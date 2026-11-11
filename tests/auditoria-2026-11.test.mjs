@@ -63,7 +63,7 @@ test('crédito: sin límite definido no hay venta a crédito (RN-35)', async () 
   const cli = sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago)
     VALUES ('T-${sufijo}', 'Cliente sin línea', 30, 0, 'CREDITO') RETURNING id) SELECT id FROM c`);
   limpiar.push(`DELETE FROM core.cliente WHERE id = '${cli}'`);
-  const prod = sql("SELECT id FROM core.producto WHERE stock >= 2 AND insumo_id IS NULL ORDER BY nombre LIMIT 1");
+  const prod = sql("SELECT id FROM core.producto WHERE stock - reservado >= 2 AND insumo_id IS NULL ORDER BY nombre LIMIT 1");
   const r = await api(await login('cmedina'), 'POST', '/ventas', { items: [{ productoId: prod, cantidad: 1 }], formaPago: 'CREDITO', clienteId: cli });
   assert.equal(r.s, 409);
 });

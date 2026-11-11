@@ -288,13 +288,14 @@ export async function rutasSistema(app: FastifyInstance) {
   // Lo que la pantalla de login y la app necesitan antes de autenticarse. Nada secreto.
   app.get('/config/publica', async (req, reply) => {
     await sincronizarRelease();
-    await seguirDominio(req.hostname);
+    // Host real, no X-Forwarded-Host: esa cabecera la pone cualquiera y movería las apps a otro servidor.
+    await seguirDominio(req.headers.host);
     const [marca, movil, legal, fb, negocio] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase'), leerNegocio()]);
     const f = fb as Record<string, unknown>;
     // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
     reply.header('Cache-Control', 'no-cache');
     // El dominio por el que se entró manda; el guardado solo sirve si se entra desde localhost.
-    const dominio = dominioPublico(req.hostname) ?? String((movil as { urlApi?: string }).urlApi ?? '');
+    const dominio = dominioPublico(req.headers.host) ?? String((movil as { urlApi?: string }).urlApi ?? '');
     const { textoPrivacidad: _p, textoTerminos: _t, ...legalPublico } = legal as Record<string, unknown>;
     // Sin enlaces propios, las páginas legales son las del mismo sistema (/privacidad, /terminos, con el texto base
     // o el redactado en Configuración): una instalación nueva ya las trae activas, sin configurar nada.
@@ -508,6 +509,12 @@ export async function rutasSistema(app: FastifyInstance) {
     const sistema = ['config.gestionar', 'roles.gestionar'];
     if (req.usuario!.rol !== 'SUPERADMIN' && p.data.permisos.some((x) => sistema.includes(x))) {
       return reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo el Superadministrador asigna permisos de sistema.'));
+    }
+    // Nadie reparte lo que no tiene ni toca su propio rol: así un rol con roles.gestionar no se autoeleva.
+    if (req.usuario!.rol !== 'SUPERADMIN') {
+      if (id === req.usuario!.rol) return reply.code(403).send(error(403, 'SIN_PERMISO', 'No puedes cambiar los permisos de tu propio rol.'));
+      const ajenos = p.data.permisos.filter((x) => !req.usuario!.permisos.has(x));
+      if (ajenos.length) return reply.code(403).send(error(403, 'SIN_PERMISO', `No puedes asignar permisos que no tienes: ${ajenos.join(', ')}.`));
     }
     const antes = await q<{ permiso_id: string }>('SELECT permiso_id FROM core.rol_permiso WHERE rol_id = $1', [id]);
     await tx(async (c) => {

@@ -142,7 +142,12 @@ export async function tipoDocumento(c: PoolClient, cod: string) {
 
 export async function rutasCatalogos(app: FastifyInstance) {
   // Listas activas para los formularios (cualquier usuario con sesión).
-  app.get('/catalogos', { preHandler: autenticar }, async () => leerCatalogos());
+  app.get('/catalogos', { preHandler: autenticar }, async (req) => {
+    const cat = await leerCatalogos();
+    // El número de cuenta bancaria de la empresa no es para cualquier sesión (los clientes también leen esto).
+    if (req.usuario!.permisos.has('caja.grande.ver')) return cat;
+    return { ...cat, cuentasCaja: cat.cuentasCaja.map(({ numero: _n, banco: _b, ...k }) => k) };
+  });
 
   // Administración: todas las filas, también las inactivas.
   app.get('/catalogos/administrar', { preHandler: autenticar }, async (req, reply) => {

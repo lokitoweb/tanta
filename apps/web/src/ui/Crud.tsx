@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { InputNumero } from './InputNumero';
-import { Boton, Buscador, Encabezado, Tarjeta, TablaEsqueleto, Vacio } from './primitives';
+import { Boton, Buscador, Encabezado, Esqueleto, Tarjeta, TablaEsqueleto, Vacio } from './primitives';
 import { Dialogo } from './Dialogo';
 import { TablaReporte, type AccionFila, type ColRep } from './TablaReporte';
 import { exportarExcel } from '@/core/exportar';
@@ -52,6 +52,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
   const [form, setForm] = useState<Reg | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
   // Campo que nombra al registro en los títulos: "nombre" si existe; si no, el primer campo editable.
   const claveTitulo = (campos.find((c) => c.key === 'nombre') ?? campos.find((c) => !['imagen', 'seccion', 'calculado'].includes(c.tipo ?? '')) ?? campos[0]).key;
@@ -123,7 +124,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
       {extra}
       <Tarjeta padding="none">
         <div className="card__head card__head--padded">
-          <div><h3 className="card__title">{filas === null ? "Cargando…" : `${visibles.length} registros`}</h3><p className="card__sub">Clic en una fila para editarla. Cada cambio queda auditado.</p></div>
+          <div><h3 className="card__title">{filas === null ? <Esqueleto variante="titulo" ancho={120} /> : `${visibles.length} registros`}</h3><p className="card__sub">Clic en una fila para editarla. Cada cambio queda auditado.</p></div>
           <Buscador valor={q} onChange={setQ} placeholder="Buscar…" />
         </div>
         {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setFilas(null); void refrescar(); }} />
@@ -143,8 +144,9 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
       </Dialogo>
       <Dialogo abierto={form !== null} titulo={form?.id ? `Editar · ${String(form?.[claveTitulo] ?? '')}` : `Nuevo · ${titulo.toLowerCase()}`}
         onCerrar={() => setForm(null)}
-        acciones={<><Boton onClick={() => setForm(null)}>Cancelar</Boton><Boton variant="primary" onClick={() => void guardar()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</Boton></>}>
-        <form className="form form--2col form--dialogo" onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
+        acciones={<><Boton onClick={() => setForm(null)}>Cancelar</Boton><Boton variant="primary" onClick={() => formRef.current?.requestSubmit()} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar'}</Boton></>}>
+        {/* El botón del pie envía este form: así rigen los «required» y Enter no duplica mientras guarda. */}
+        <form ref={formRef} className="form form--2col form--dialogo" onSubmit={(e) => { e.preventDefault(); if (!guardando) void guardar(); }}>
           {campos.map((c) => c.tipo === 'seccion' ? (
             <div key={c.key} className="form__seccion field--ancho"><b>{c.label}</b>{c.ayuda && <span>{c.ayuda}</span>}</div>
           ) : c.tipo === 'calculado' ? (

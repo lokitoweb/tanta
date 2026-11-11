@@ -5,6 +5,7 @@ import 'core/arranque.dart';
 import 'core/tema.dart';
 import 'core/tokens.dart';
 import 'pantallas/activacion.dart';
+import 'pantallas/catalogo.dart' show carrito, promociones;
 import 'pantallas/actualizar.dart';
 import 'pantallas/inicio.dart';
 import 'pantallas/login.dart';
@@ -155,7 +156,10 @@ class _RaizState extends State<Raiz> {
       datos: _datos!,
       version: _version,
       onSalir: () async {
-        await Api.instancia.cerrarSesion();
+        await Api.instancia.salir();
+        // El siguiente usuario de este equipo no hereda el carrito ni las promociones del anterior.
+        carrito.value = {};
+        promociones.value = const [];
         if (mounted) setState(() => _datos = null);
       },
     );

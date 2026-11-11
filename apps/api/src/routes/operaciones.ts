@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { q, tx, uno, num, type Cliente } from '../db.js';
-import { autenticar, exigir, error } from '../seguridad.js';
+import { autenticar, exigir, error, proyectarCostos } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { invalidar } from '../cache.js';
 import { emitirEvento, guardarImagen } from './sistema.js';
@@ -20,7 +20,7 @@ async function conIdempotencia<T>(
 ): Promise<T> {
   if (!clave) return fn();
   const previa = await uno<{ respuesta: unknown }>(
-    'SELECT respuesta FROM core.idempotencia WHERE clave = $1', [clave],
+    'SELECT respuesta FROM core.idempotencia WHERE clave = $1 AND usuario_id = $2 AND ruta = $3', [clave, usuarioId, ruta],
   );
   if (previa) return previa.respuesta as T;
 
@@ -53,7 +53,7 @@ export async function presentacionesDe(c: import('pg').PoolClient, items: Array<
 }
 
 export interface DatosCierre { codigo: string; cantidadProducida: number; unidadesMerma: number; mermaReal: number; motivoMerma: string; usuarioId: string;
-  consumoReal?: Array<{ insumoId: string; cantidad: number }>; motivoMermaTipo?: string; horasHombreReal?: number; horasHornoReal?: number }
+  consumoReal?: Array<{ insumoId: string; cantidad: number }>; motivoMermaTipo?: string; horasHombreReal?: number; horasHornoReal?: number; sinRecalcular?: boolean }
 
 /** Cierra una OP dentro de la transacción `c`: ingreso del pan, costo real y, sin requisición, descarga de insumos. */
 export async function cierreOP(c: Cliente, e: DatosCierre) {
@@ -83,7 +83,7 @@ export async function cierreOP(c: Cliente, e: DatosCierre) {
       throw Object.assign(new Error(`Buenas + merma (${cantidadProducida + unidadesMerma}) superan lo preparado (${Math.round(lotes * Number(receta?.unidades_teoricas ?? 0))} unidades).`), { status: 422 });
     }
     const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
-      `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / r.rendimiento * core.factor_inventario(d.insumo_id) AS cantidad
+      `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / coalesce(nullif(r.unidades_teoricas, 0), r.rendimiento) * core.factor_inventario(d.insumo_id) AS cantidad
        FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
       [op.receta_id],
     );
@@ -97,7 +97,8 @@ export async function cierreOP(c: Cliente, e: DatosCierre) {
       }
     }
     for (const l of requisicion ? [] : lineas.rows) {
-      const cantidadUsada = Number(l.cantidad) * cantidadProducida * (1 + mermaReal);
+      // Se consume lo que se horneó (buenas + merma) con la misma base por lote que la hoja y el motor.
+      const cantidadUsada = Number(l.cantidad) * (cantidadProducida + unidadesMerma);
       const ins = await c.query<{ cpp: string; saldo: string }>(
         `SELECT i.cpp, coalesce((SELECT m.saldo_cantidad FROM core.movimiento_inventario m
                                  WHERE m.insumo_id = i.id ORDER BY m.id DESC LIMIT 1), i.stock) AS saldo
@@ -116,7 +117,7 @@ export async function cierreOP(c: Cliente, e: DatosCierre) {
         );
       }
       const valor = -Number((cantidadUsada * cpp).toFixed(4));
-      const valorSaldo = Number((-valor + Number((saldoActual * cpp).toFixed(4))).toFixed(4));
+      const valorSaldo = Number((nuevoSaldo * cpp).toFixed(4)); // saldo DESPUÉS del consumo
 
       await c.query(
         `INSERT INTO core.movimiento_inventario
@@ -191,7 +192,8 @@ export async function cierreOP(c: Cliente, e: DatosCierre) {
       [op.id, mermaReal.toFixed(6), cantidadProducida.toFixed(6), motivoMerma, unidadesMerma.toFixed(4), d.motivoMermaTipo ?? null,
         horasHombre.toFixed(3), horasHorno.toFixed(3), costoTotal.toFixed(4), costoProd.toFixed(6), receta?.vida_util_dias ?? null],
     );
-    await c.query('SELECT core.recalcular_costos()');
+    // Una hoja cierra muchas OP: recalcula una sola vez al final (el recálculo bloquea todos los productos).
+    if (!e.sinRecalcular) await c.query('SELECT core.recalcular_costos()');
 
     return { codigo, estado: 'TERMINADA', producto: op.producto, cantidadProducida, unidadesMerma, consumidos,
       costoTotal: Number(costoTotal.toFixed(2)), costoUnitario: Number(costoProd.toFixed(4)),
@@ -251,10 +253,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (op.estado !== 'PENDIENTE') {
       return reply.code(409).send(error(409, 'OP_ESTADO_INVALIDO', `No se puede iniciar una orden en estado ${op.estado}.`));
     }
-    await q(
+    const iniciada = await uno(
       `UPDATE core.orden_produccion SET estado = 'EN_PROCESO', iniciada_en = now(), avance = greatest(avance, 0.05)
-       WHERE id = $1`, [op.id],
+       WHERE id = $1 AND estado = 'PENDIENTE' RETURNING id`, [op.id],
     );
+    if (!iniciada) return reply.code(409).send(error(409, 'OP_ESTADO_INVALIDO', 'La orden ya fue iniciada.'));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'OP_INICIADA', entidad: 'orden_produccion', entidadId: codigo, ip: req.ip });
     return reply.send({ codigo, estado: 'EN_PROCESO' });
   });
@@ -331,7 +334,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
         accion: 'OP_CERRADA', entidad: 'orden_produccion', entidadId: codigo,
         detalle: { cantidadProducida, unidadesMerma, motivoMerma }, ip: req.ip,
       });
-      return reply.send(resultado);
+      return reply.send(proyectarCostos(req.usuario!, resultado));
     } catch (e) {
       const err = e as Error & { status?: number };
       // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
@@ -664,7 +667,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
       });
       void emitirEvento('venta.creada', venta);
       avisar([{ permiso: 'alertas.ventas' }], { tipo: 'venta', titulo: `Venta ${venta.comprobante.numero}`, cuerpo: `${req.usuario!.nombre} · S/ ${venta.comprobante.total.toFixed(2)} · ${formaPago.toLowerCase()}`, ruta: '/gerencia/reportes' });
-      return reply.code(201).send(venta);
+      return reply.code(201).send(proyectarCostos(req.usuario!, venta));
     } catch (e) {
       const err = e as Error & { status?: number };
       // Sin status = error no previsto: el manejador global lo traduce o lo enmascara.
@@ -685,8 +688,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const { motivo } = parseo.data;
     try {
       const r = await tx(async (c) => {
-        const v = (await c.query<{ id: string; estado: string; cerrado: boolean }>(
-          `SELECT v.id, v.estado, EXISTS (SELECT 1 FROM core.periodo_costos p WHERE p.estado = 'CERRADO'
+        const v = (await c.query<{ id: string; estado: string; cerrado: boolean; pedido_id: string | null }>(
+          `SELECT v.id, v.estado, v.pedido_id, EXISTS (SELECT 1 FROM core.periodo_costos p WHERE p.estado = 'CERRADO'
                     AND make_date(p.anio, p.mes, 1) = date_trunc('month', v.creado_en AT TIME ZONE 'America/Lima')::date) AS cerrado
            FROM core.venta v WHERE v.codigo = $1 FOR UPDATE OF v`, [codigo])).rows[0];
         if (!v) throw Object.assign(new Error('La venta no existe.'), { status: 404 });
@@ -730,6 +733,15 @@ export async function rutasOperaciones(app: FastifyInstance) {
           await c.query(`UPDATE core.insumo SET stock = $2, actualizado_en = now(), estado = CASE WHEN $2::numeric < minimo THEN 'BAJO_MINIMO' ELSE 'OK' END WHERE id = $1`, [e.insumo_id, saldo.toFixed(6)]);
         }
         await c.query(`UPDATE core.cuenta_por_cobrar SET estado = 'ANULADA', saldo = 0 WHERE venta_id = $1`, [v.id]);
+        // Un pedido despachado vuelve a «Listo» con su stock reservado: así se puede volver a despachar.
+        if (v.pedido_id) {
+          const ped = (await c.query<{ estado: string }>('SELECT estado FROM core.pedido WHERE id = $1 FOR UPDATE', [v.pedido_id])).rows[0];
+          if (ped?.estado === 'DESPACHADO') {
+            await c.query('UPDATE core.pedido_detalle SET cantidad_despachada = 0 WHERE pedido_id = $1', [v.pedido_id]);
+            const reservado = await reservarListo(c, v.pedido_id);
+            await c.query('UPDATE core.pedido SET estado = $2 WHERE id = $1', [v.pedido_id, reservado ? 'LISTO' : 'EN_PRODUCCION']);
+          }
+        }
         await c.query(`UPDATE core.venta SET estado = 'ANULADA', anulada_en = now(), anulada_por = $2, motivo_anulacion = $3 WHERE id = $1`,
           [v.id, req.usuario!.id, motivo]);
         return { codigo, ventaId: v.id, productos: lineas.length };
@@ -901,6 +913,19 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (pagos.length && destino !== 'ENTREGADO') return reply.code(422).send(error(422, 'PAGO_FUERA_DE_ENTREGA', 'Los pagos se registran al entregar el pedido.'));
     if (pagos.length && !req.usuario!.permisos.has('cobranza.registrar')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso cobranza.registrar para cobrar al entregar.'));
 
+    // Reintento de la cola móvil (la respuesta anterior se perdió): devuelve lo ya aplicado en vez de un 409 engañoso.
+    const clave = req.headers['idempotency-key'] as string | undefined;
+    const rutaIdem = `pedido-estado:${codigo}`;
+    if (clave) {
+      const previa = await uno<{ respuesta: unknown }>('SELECT respuesta FROM core.idempotencia WHERE clave = $1 AND usuario_id = $2 AND ruta = $3', [clave, req.usuario!.id, rutaIdem]);
+      if (previa) return reply.send(previa.respuesta);
+    }
+    const enviar = async (cuerpo: Record<string, unknown>) => {
+      if (clave) await q(`INSERT INTO core.idempotencia (clave, usuario_id, ruta, respuesta, expira_en) VALUES ($1,$2,$3,$4, now() + interval '72 hours') ON CONFLICT (clave) DO NOTHING`,
+        [clave, req.usuario!.id, rutaIdem, JSON.stringify(cuerpo)]);
+      return reply.send(cuerpo);
+    };
+
     const pedido = await uno<{ id: string; estado: string; cliente: string }>(
       'SELECT id, estado, cliente FROM core.pedido WHERE codigo = $1', [codigo],
     );
@@ -951,7 +976,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     });
     void emitirEvento('pedido.estado', { codigo, de: pedido.estado, a: destino });
     // Los avisos al cliente y a cada área salen del historial del pedido (notificaciones.ts).
-    if (destino !== 'ENTREGADO') return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino });
+    if (destino !== 'ENTREGADO') return enviar({ codigo, estadoAnterior: pedido.estado, estado: destino });
     const saldo = await uno<{ saldo: string }>(`SELECT coalesce(sum(x.saldo), 0) saldo FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id
       WHERE v.pedido_id = $1 AND v.estado = 'CONFIRMADA'`, [pedido.id]);
     if (recibo) {
@@ -959,9 +984,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
       await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'RECIBO_EMITIDO', entidad: 'recibo', entidadId: recibo,
         detalle: { pedido: codigo, pagos: pagos.map((x) => ({ medio: x.medio, monto: x.monto })) }, ip: req.ip });
       void emitirEvento('cobro.registrado', r);
-      return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino, recibo: r, quedaPorCobrar: num(saldo?.saldo) });
+      return enviar({ codigo, estadoAnterior: pedido.estado, estado: destino, recibo: r, quedaPorCobrar: num(saldo?.saldo) });
     }
-    return reply.send({ codigo, estadoAnterior: pedido.estado, estado: destino, recibo: null, quedaPorCobrar: num(saldo?.saldo) });
+    return enviar({ codigo, estadoAnterior: pedido.estado, estado: destino, recibo: null, quedaPorCobrar: num(saldo?.saldo) });
   });
 
   /* ------------------------------------------------ inventario: productos */

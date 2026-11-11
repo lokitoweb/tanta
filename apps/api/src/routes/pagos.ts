@@ -298,7 +298,7 @@ export async function rutasPagosCostos(app: FastifyInstance) {
     if (soloGastos && (!d.tipoGasto || d.autorizadoPor.length < 2)) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el tipo de gasto y quién lo autorizó.'));
     const clave = (req.headers['idempotency-key'] as string | undefined) ?? null;
     if (clave) {
-      const previo = await uno<{ codigo: string }>('SELECT codigo FROM core.pago_costo WHERE idempotency_key = $1', [clave]);
+      const previo = await uno<{ codigo: string }>('SELECT codigo FROM core.pago_costo WHERE idempotency_key = $1 AND usuario_id = $2', [clave, req.usuario!.id]);
       if (previo) return reply.code(201).send({ codigo: previo.codigo, repetido: true });
     }
     return responder(reply, 'PAGO_INVALIDO', async () => {

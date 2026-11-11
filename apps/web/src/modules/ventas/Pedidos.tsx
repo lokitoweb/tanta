@@ -14,7 +14,7 @@ import { LineasPago, useMediosCobro, type LineaPago } from './LineasPago';
 
 const aNumero = (x: string): number | '' => (x === '' ? '' : Number(x));
 
-interface Item { productoId: string; producto: string; cantidad: number; precio: number; presentacion?: string | null; cantidadPresentacion?: number | null }
+interface Item { productoId: string; producto: string; cantidad: number; precio: number; presentacion?: string | null; cantidadPresentacion?: number | null; promocionId?: string | null }
 /** «2 Paquete x 6 (12 unid)» o «5 unid». */
 const cantidadTxt = (i: Item) => (i.presentacion && i.cantidadPresentacion ? `${i.cantidadPresentacion} × ${i.presentacion.toLowerCase()} (${i.cantidad} unid)` : String(i.cantidad));
 interface Pedido { id: string; codigo: string; clienteId: string; cliente: string; vendedor: string; estado: string; total: number; fecha_entrega: string; hora_entrega: string; observaciones: string; venta: string | null; items: Item[];
@@ -50,7 +50,7 @@ export function Pedidos() {
   // Entregar y cobrar: lo que paga al recibir (una o varias formas); «no pagó» = todo queda como deuda.
   const [entrega, setEntrega] = useState<{ lineas: LineaPago[]; nota: string; voucher: string | null } | null>(null);
   // El vendedor corrige lo pedido antes de producción (el total lo recalcula el servidor).
-  const [corregir, setCorregir] = useState<Array<{ productoId: string; producto: string; cantidad: string }> | null>(null);
+  const [corregir, setCorregir] = useState<Array<{ productoId: string; producto: string; cantidad: string; presentacion?: string | null; promocionId?: string | null }> | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [motivo, setMotivo] = useState<{ destino: 'RECHAZADO' | 'CANCELADO' | 'OBSERVAR'; texto: string } | null>(null);
@@ -112,7 +112,7 @@ export function Pedidos() {
   });
 
   const guardarCorreccion = (p: Pedido) => accion(async () => {
-    const r = await api<{ total: number }>(`/pedidos/${p.codigo}/items`, { method: 'PUT', body: { items: corregir!.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad) })) } });
+    const r = await api<{ total: number }>(`/pedidos/${p.codigo}/items`, { method: 'PUT', body: { items: corregir!.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad), ...(i.presentacion ? { presentacion: i.presentacion } : {}), ...(i.promocionId ? { promocionId: i.promocionId } : {}) })) } });
     setCorregir(null);
     return `${p.codigo} corregido · nuevo total ${money(r.total)} · el cliente recibió el aviso`;
   });
@@ -197,7 +197,8 @@ export function Pedidos() {
       <Dialogo abierto={sel !== null} titulo={`Pedido ${sel?.codigo ?? ''}`} descripcion={sel ? `${sel.cliente} · entrega ${sel.fecha_entrega}${sel.hora_entrega ? ' ' + sel.hora_entrega : ''} · ${ESTADOS[sel.estado]?.label}` : ''}
         onCerrar={() => { setSel(null); setCorregir(null); }}
         acciones={sel && gestiona ? <>
-          {['REGISTRADO', 'CONFIRMADO'].includes(sel.estado) && !corregir && <Boton onClick={() => setCorregir(sel.items.map((i) => ({ productoId: i.productoId, producto: i.producto, cantidad: String(i.cantidad) })))} disabled={ocupado}>Corregir</Boton>}
+          {['REGISTRADO', 'CONFIRMADO'].includes(sel.estado) && !corregir && <Boton onClick={() => setCorregir(sel.items.map((i) => ({ productoId: i.productoId, cantidad: String(i.presentacion && i.cantidadPresentacion ? i.cantidadPresentacion : i.cantidad), presentacion: i.presentacion, promocionId: i.promocionId,
+            producto: i.presentacion ? `${i.producto} · ${i.presentacion.toLowerCase()}` : i.promocionId ? `${i.producto} · promoción` : i.producto })))} disabled={ocupado}>Corregir</Boton>}
           {corregir && <Boton variant="primary" onClick={() => void guardarCorreccion(sel)} disabled={ocupado || !corregir.length || corregir.some((i) => !(Number(i.cantidad) > 0))}>Guardar corrección</Boton>}
           {['REGISTRADO', 'CONFIRMADO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'OBSERVAR', texto: '' })} disabled={ocupado}>Observar</Boton>}
           {sel.estado === 'REGISTRADO' && <Boton onClick={() => setMotivo({ destino: 'RECHAZADO', texto: '' })} disabled={ocupado}>Rechazar</Boton>}
@@ -217,7 +218,7 @@ export function Pedidos() {
               <tr><td><strong>Total</strong></td><td /><td className="t-right"><strong>{money(sel.total)}</strong></td></tr>
             </tbody></table>
             {corregir && <div className="form form--2col form--dialogo">
-              {corregir.map((i, k) => <div key={i.productoId} className="pago-linea field--ancho">
+              {corregir.map((i, k) => <div key={`${i.productoId}|${i.presentacion ?? ''}|${i.promocionId ?? ''}`} className="pago-linea field--ancho">
                 <label className="field"><span className="field__label">{i.producto}</span><InputNumero className="field__input" valor={aNumero(i.cantidad)} onValor={(n) => { const v = String(n); setCorregir(corregir.map((x, j) => (j === k ? { ...x, cantidad: v } : x))); }} /></label>
                 {corregir.length > 1 && <button type="button" className="pago-linea__quitar" aria-label={`Quitar ${i.producto}`} onClick={() => setCorregir(corregir.filter((_, j) => j !== k))}>×</button>}
               </div>)}

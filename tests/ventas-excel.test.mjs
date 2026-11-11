@@ -13,7 +13,7 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
   body: body ? JSON.stringify(body) : undefined,
 }).then(async (r) => ({ s: r.status, b: await r.json().catch(() => null) }));
 
-const prod = () => sql('SELECT id FROM core.producto WHERE stock >= 5 ORDER BY nombre LIMIT 1');
+const prod = () => sql('SELECT id FROM core.producto WHERE stock - reservado >= 5 ORDER BY nombre LIMIT 1');
 // Cliente propio por prueba: no depende de la deuda de los datos de ejemplo.
 const cliente = (cond = 'CREDITO', limite = 100000) => sql(`WITH c AS (INSERT INTO core.cliente (codigo, nombre, dias_credito, limite_credito, condicion_pago)
   VALUES ('T-${randomUUID().slice(0, 8)}', 'Cliente prueba ventas', 30, ${limite}, '${cond}') RETURNING id) SELECT id FROM c`);

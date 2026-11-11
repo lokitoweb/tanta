@@ -147,7 +147,7 @@ export async function rutasCobranza(app: FastifyInstance) {
     const d = p.data;
     const clave = req.headers['idempotency-key'] as string | undefined;
     if (clave) {
-      const previo = await uno<{ numero: string }>('SELECT numero FROM core.recibo WHERE idempotency_key = $1', [clave]);
+      const previo = await uno<{ numero: string }>('SELECT numero FROM core.recibo WHERE idempotency_key = $1 AND registrado_por = $2', [clave, req.usuario!.id]);
       if (previo) return reply.code(201).send(await detalleRecibo(previo.numero));
     }
     try {
@@ -293,7 +293,7 @@ export async function rutasCobranza(app: FastifyInstance) {
       FROM core.pago_costo g LEFT JOIN core.tipo_gasto t ON t.codigo = g.tipo_gasto WHERE g.estado = 'VIGENTE' AND g.fecha_operacion = $1::date
       UNION ALL
       SELECT 'COMPRA', x.codigo, 'Pago de ' || k.codigo, 'Pago a proveedor', x.medio_pago, x.monto
-      FROM core.pago_compra x JOIN core.compra k ON k.id = x.compra_id WHERE x.estado = 'VIGENTE' AND x.fecha_pago = $1::date ORDER BY 1, 2`, [fecha]);
+      FROM core.pago_compra x JOIN core.compra k ON k.id = x.compra_id WHERE x.estado = 'VIGENTE' AND (x.fecha_pago AT TIME ZONE 'America/Lima')::date = $1::date ORDER BY 1, 2`, [fecha]);
     const gastos = salidas.map((g) => ({ origen: g.origen, codigo: g.codigo, concepto: g.concepto, tipo: g.tipo, medio: g.medio, monto: num(g.monto) }));
     const totalIngresos = lineas.reduce((s, l) => s + l.monto, 0), totalGastos = gastos.reduce((s, g) => s + g.monto, 0);
     const gastosPorMedio = Object.entries(gastos.reduce<Record<string, number>>((a, g) => ({ ...a, [g.medio]: (a[g.medio] ?? 0) + g.monto }), {})).map(([medio, monto]) => ({ medio, monto }));
@@ -364,8 +364,8 @@ export async function rutasCobranza(app: FastifyInstance) {
     const p = z.object({ aprobar: z.boolean() }).safeParse(req.body);
     if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Solicitud inválida.'));
     const r = await uno<{ solicitado_por: string; porcentaje: string }>(`UPDATE core.descuento_aprobacion SET estado = $2, resuelto_por = $3, resuelto_en = now(), expira_en = now() + interval '24 hours'
-      WHERE id = $1 AND estado = 'PENDIENTE' RETURNING solicitado_por, porcentaje`, [id, p.data.aprobar ? 'APROBADA' : 'RECHAZADA', req.usuario!.id]);
-    if (!r) return reply.code(409).send(error(409, 'YA_RESUELTA', 'La solicitud ya fue resuelta.'));
+      WHERE id = $1 AND estado = 'PENDIENTE' AND solicitado_por IS DISTINCT FROM $3 RETURNING solicitado_por, porcentaje`, [id, p.data.aprobar ? 'APROBADA' : 'RECHAZADA', req.usuario!.id]);
+    if (!r) return reply.code(409).send(error(409, 'YA_RESUELTA', 'La solicitud ya fue resuelta o es tuya (otra persona debe aprobarla).'));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: p.data.aprobar ? 'DESCUENTO_APROBADO' : 'DESCUENTO_RECHAZADO', entidad: 'descuento_aprobacion', entidadId: id, detalle: { porcentaje: num(r.porcentaje) }, ip: req.ip });
     avisar([{ usuarioId: r.solicitado_por }], { tipo: 'descuento', titulo: 'Descuento', cuerpo: `Tu descuento de ${Math.round(num(r.porcentaje) * 100)} % fue ${p.data.aprobar ? 'aprobado (24 h)' : 'rechazado'}`, ruta: '/ventas/pedidos' });
     return { id, estado: p.data.aprobar ? 'APROBADA' : 'RECHAZADA' };
