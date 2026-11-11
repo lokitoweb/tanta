@@ -523,8 +523,8 @@ class Api {
   Future<List<dynamic>> hojasProduccion() async => await _get('/produccion/hojas') as List<dynamic>;
   Future<Map<String, dynamic>> detalleHoja(String codigo) async => await _get('/produccion/hojas/${Uri.encodeComponent(codigo)}') as Map<String, dynamic>;
   Future<Map<String, dynamic>> cerrarPedidosHoja(String fecha) async => await _post('/produccion/hoja/cerrar-pedidos', {'fecha': fecha}) as Map<String, dynamic>;
-  Future<Map<String, dynamic>> cerrarProduccionHoja(String codigo, List<Map<String, dynamic>> lineas) async =>
-      await _post('/produccion/hojas/${Uri.encodeComponent(codigo)}/cerrar', {'lineas': lineas}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> cerrarProduccionHoja(String codigo, List<Map<String, dynamic>> lineas, {bool confirmar = false}) async =>
+      await _post('/produccion/hojas/${Uri.encodeComponent(codigo)}/cerrar', {'lineas': lineas, 'confirmar': confirmar}) as Map<String, dynamic>;
 
   /// El vendedor avisa al cliente que su pedido parece mal hecho (el pedido no se mueve).
   Future<void> observarPedido(String codigo, String mensaje) async => await _post('/pedidos/$codigo/observar', {'mensaje': mensaje});

@@ -25,6 +25,8 @@ const api = (t, m, ruta, body) => fetch(B + ruta, {
 
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
 const lima = (dias = 0) => new Date(Date.now() - 5 * 3_600_000 + dias * 86_400_000).toISOString().slice(0, 10);
+// Word 04: la fecha con producción ya empezada (con hoja) no recibe más pedidos de clientes.
+const libre = (dias = 0) => sql(`SELECT core.entrega_libre('${lima(dias)}')`);
 const param = (clave, valor) => sql(`UPDATE core.parametro SET valor = '${valor}' WHERE clave = '${clave}'`);
 
 // Producto con receta vigente y sus insumos con stock de sobra: esta prueba es del flujo, no de la falta de stock.
@@ -45,11 +47,11 @@ test('Entrega: la calcula el servidor con la hora de corte, aunque el cliente en
   param('hora_corte_mismo_dia', '23:59');
   const hoy = await api(cli, 'POST', '/pedidos', { items: [{ productoId: prodA, cantidad: 1 }], fechaEntrega: lima(20) });
   assert.equal(hoy.s, 201, JSON.stringify(hoy.b));
-  assert.equal(hoy.b.fechaEntrega, lima(), 'antes del corte: el mismo día');
+  assert.equal(hoy.b.fechaEntrega, libre(), 'antes del corte: el mismo día');
   param('hora_corte_mismo_dia', '00:00');
   const man = await api(cli, 'POST', '/pedidos', { items: [{ productoId: prodA, cantidad: 1 }] });
-  assert.equal(man.b.fechaEntrega, lima(1), 'después del corte: al día siguiente');
-  assert.equal((await api(cli, 'GET', '/pedidos/entrega-estimada')).b.fecha, lima(1));
+  assert.equal(man.b.fechaEntrega, libre(1), 'después del corte: al día siguiente');
+  assert.equal((await api(cli, 'GET', '/pedidos/entrega-estimada')).b.fecha, libre(1));
   const adm = await login('lbermudez');
   assert.equal((await api(adm, 'PATCH', '/parametros/hora_corte_mismo_dia', { valor: '25:00' })).s, 422, 'una hora inválida no se guarda');
   for (const p of [hoy, man]) await api(cli, 'POST', `/pedidos/${p.b.codigo}/cancelar`, { motivo: 'Prueba de fechas' });
@@ -70,9 +72,12 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   empezarEnCero();
   const cli = await login('mfernandez'), ven = await login('cmedina'), pro = await login('rquispe'), adm = await login('lbermudez');
   param('hora_corte_mismo_dia', '00:00');
-  const fecha = lima(1);
   const p = await api(cli, 'POST', '/pedidos', { items: [{ productoId: prodA, cantidad: 10 }] });
   assert.equal(p.s, 201, JSON.stringify(p.b));
+  const fecha = p.b.fechaEntrega;
+  // Otro pedido del cliente, aún sin confirmar cuando empiece la producción.
+  const tarde = await api(cli, 'POST', '/pedidos', { items: [{ productoId: prodA, cantidad: 1 }] });
+  assert.equal(tarde.b.fechaEntrega, fecha);
   assert.equal((await api(ven, 'PATCH', `/pedidos/${p.b.codigo}/estado`, { estado: 'CONFIRMADO' })).s, 200);
 
   // La hoja se llena sola con lo confirmado, con su kárdex de insumos.
@@ -83,6 +88,11 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   assert.ok(Object.values(fila.porCliente).includes(10), 'columna por cliente');
   assert.ok(h.b.insumos.length > 0 && h.b.insumos.every((i) => ['NORMAL', 'ALERTA', 'FALTA'].includes(i.estado)));
   const pedido = fila.pedido;
+  // Word 04: consumo, stock actual y saldo; costo unitario y total solo para quien ve costos.
+  const kardex = (await api(adm, 'GET', `/produccion/hoja?fecha=${fecha}`)).b.insumos;
+  assert.ok(kardex.every((i) => Math.abs(i.stock - i.cantidad - i.restante) < 0.001), 'saldo = stock actual − consumo');
+  assert.ok(kardex.every((i) => Math.abs(i.costoUnitario * i.cantidad - i.costoTotal) < 0.02) && kardex.some((i) => i.costoTotal > 0), 'costo total = consumo × costo unitario');
+  assert.ok(!('costoTotal' in h.b.insumos[0]) || sql("SELECT count(*) FROM core.rol_permiso WHERE rol_id = 'PRODUCCION' AND permiso_id = 'costos.ver'") !== '0');
 
   // Cerrar pedidos: pasan a producción.
   assert.equal((await api(cli, 'POST', '/produccion/hoja/cerrar-pedidos', { fecha })).s, 403, 'un cliente no cierra');
@@ -92,12 +102,24 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   const cod = encodeURIComponent(cierre.b.codigo);
   assert.equal(sql(`SELECT estado FROM core.pedido WHERE codigo = '${p.b.codigo}'`), 'EN_PRODUCCION');
   assert.equal((await api(ven, 'POST', `/pedidos/${p.b.codigo}/cancelar`, { motivo: 'Tarde' })).s, 409);
+  // Word 04: empezada la producción de esa fecha, los pedidos del cliente ya no entran en ella.
+  const nuevo = await api(cli, 'POST', '/pedidos', { items: [{ productoId: prodA, cantidad: 1 }] });
+  assert.ok(nuevo.b.fechaEntrega > fecha, 'el pedido nuevo va a la siguiente fecha');
+  assert.equal((await api(ven, 'PATCH', `/pedidos/${tarde.b.codigo}/estado`, { estado: 'CONFIRMADO' })).s, 200);
+  assert.ok(sql(`SELECT fecha_entrega::text FROM core.pedido WHERE codigo = '${tarde.b.codigo}'`) > fecha, 'el que se confirma tarde también');
+  for (const x of [nuevo, tarde]) await api(ven, 'POST', `/pedidos/${x.b.codigo}/cancelar`, { motivo: 'Fin de prueba' });
 
   // Cerrar producción: entra lo real (más que lo pedido), se descargan insumos, el pedido queda listo.
   const insumoAntes = Number(sql(`SELECT sum(i.stock) FROM core.insumo i WHERE i.id IN (SELECT d.insumo_id FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE r.producto_id = '${prodA}')`));
   const stockAntes = stock();
   const lineas = (await api(pro, 'GET', `/produccion/hojas/${cod}`)).b.resumen.map((r) => ({ productoId: r.productoId, real: r.pedido + 5 }));
-  const cerrada = await api(pro, 'POST', `/produccion/hojas/${cod}/cerrar`, { lineas });
+  // Word 04 (200 pedidos, 2,080 producidos): una diferencia mayor a la tolerancia pide confirmación.
+  param('tolerancia_produccion', '0.10');
+  const dudosa = await api(pro, 'POST', `/produccion/hojas/${cod}/cerrar`, { lineas });
+  assert.equal(dudosa.s, 409, JSON.stringify(dudosa.b));
+  assert.match(dudosa.b.detail, /se aleja de lo solicitado/);
+  assert.equal(stock(), stockAntes, 'sin confirmar no se mueve el almacén');
+  const cerrada = await api(pro, 'POST', `/produccion/hojas/${cod}/cerrar`, { lineas, confirmar: true });
   assert.equal(cerrada.s, 200, JSON.stringify(cerrada.b));
   assert.equal(cerrada.b.sinStock.length, 0);
   assert.equal(stock(), stockAntes + pedido + 5, 'los panes reales entran al almacén');

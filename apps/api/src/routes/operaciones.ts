@@ -922,6 +922,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
         const cambio = await c.query(`UPDATE core.pedido SET estado = $1,
             motivo = CASE WHEN $1 IN ('RECHAZADO','CANCELADO') THEN $4 ELSE motivo END,
             confirmado_en = CASE WHEN $1 = 'CONFIRMADO' THEN now() ELSE confirmado_en END,
+            -- Word 04: si la producción de su fecha ya empezó, el pedido del cliente pasa a la siguiente.
+            fecha_entrega = CASE WHEN $1 = 'CONFIRMADO' THEN core.entrega_libre(fecha_entrega) ELSE fecha_entrega END,
             entregado_en = CASE WHEN $1 = 'ENTREGADO' THEN now() ELSE entregado_en END,
             entrega_obs = CASE WHEN $1 = 'ENTREGADO' THEN $5 ELSE entrega_obs END,
             entregado_por = CASE WHEN $1 = 'ENTREGADO' THEN $6::uuid ELSE entregado_por END

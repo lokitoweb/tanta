@@ -34,23 +34,24 @@ async function matriz(filtro: string, params: unknown[]) {
   return { clientes: [...clientes].map(([id, nombre]) => ({ id, nombre })), filas: [...filas.values()] };
 }
 
-/** Kárdex de la hoja: lo que consumirán los panes pedidos y cómo queda cada insumo frente a su mínimo. */
-async function insumosDe(filas: Fila[]) {
-  const acumulado = new Map<string, { insumoId: string; insumo: string; unidad: string; cantidad: number; stock: number }>();
+/** Kárdex de la hoja: lo que consumirán los panes pedidos, su costo (solo con costos.ver) y cómo queda cada insumo frente a su mínimo. */
+async function insumosDe(filas: Fila[], verCostos: boolean) {
+  const acumulado = new Map<string, { insumoId: string; insumo: string; unidad: string; cantidad: number; stock: number; costoTotal: number }>();
   const sinReceta: string[] = [];
   for (const f of filas) {
     const calc = await calcularOrden(f.productoId, f.pedido, 'PROPORCIONAL');
     if (!calc) { sinReceta.push(f.producto); continue; }
     for (const i of calc.insumos) {
-      const a = acumulado.get(i.insumoId) ?? { insumoId: i.insumoId, insumo: i.insumo, unidad: i.unidad, cantidad: 0, stock: i.stock };
+      const a = acumulado.get(i.insumoId) ?? { insumoId: i.insumoId, insumo: i.insumo, unidad: i.unidad, cantidad: 0, stock: i.stock, costoTotal: 0 };
       a.cantidad += i.necesario;
+      a.costoTotal += i.costo;
       acumulado.set(i.insumoId, a);
     }
   }
   const minimos = new Map((await q<{ id: string; minimo: string }>('SELECT id, minimo FROM core.insumo WHERE id = ANY($1::uuid[])', [[...acumulado.keys()]])).map((m) => [m.id, num(m.minimo)]));
-  const insumos = [...acumulado.values()].map((a) => {
+  const insumos = [...acumulado.values()].map(({ costoTotal, ...a }) => {
     const restante = a.stock - a.cantidad, minimo = minimos.get(a.insumoId) ?? 0;
-    return { ...a, cantidad: Number(a.cantidad.toFixed(4)), restante: Number(restante.toFixed(4)), minimo, estado: restante < 0 ? 'FALTA' : restante < minimo ? 'ALERTA' : 'NORMAL' };
+    return { ...a, ...(verCostos ? { costoUnitario: a.cantidad > 0 ? Number((costoTotal / a.cantidad).toFixed(4)) : 0, costoTotal: Number(costoTotal.toFixed(2)) } : {}), cantidad: Number(a.cantidad.toFixed(4)), restante: Number(restante.toFixed(4)), minimo, estado: restante < 0 ? 'FALTA' : restante < minimo ? 'ALERTA' : 'NORMAL' };
   });
   return { insumos, sinReceta };
 }
@@ -78,6 +79,7 @@ async function detalleHoja(codigo: string, verCostos: boolean) {
     WHERE activo AND maneja_stock AND stock < minimo ORDER BY (minimo - stock) DESC LIMIT 100`);
   const n = (x: string) => num(x);
   return {
+    tolerancia: num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'tolerancia_produccion'"))?.valor ?? '0.10'),
     codigo: h.codigo, fecha: h.fecha, estado: h.estado, creadoEn: h.creado_en, cerradaEn: h.cerrada_en, cerradaPor: h.cerrada_por, clientes, filas, resumen,
     insumosUsados: usados.map((u) => ({ insumo: u.insumo, unidad: u.unidad, cantidad: n(u.cantidad), ...(verCostos ? { costo: n(u.costo) } : {}) })),
     insumosPorComprar: porComprar.map((p) => ({ insumo: p.insumo, unidad: p.unidad, stock: n(p.stock), minimo: n(p.minimo), falta: n(p.falta) })),
@@ -97,7 +99,7 @@ export async function rutasHojas(app: FastifyInstance) {
       WHERE p.estado = 'CONFIRMADO' AND d.promocion_id IS NULL ORDER BY 1 LIMIT 30`)).map((f) => f.fecha);
     const fecha = p.data.fecha ?? fechas[0] ?? await fechaEntregaSugerida();
     const { clientes, filas } = await matriz("p.estado = 'CONFIRMADO' AND p.fecha_entrega = $1::date", [fecha]);
-    return { fecha, fechas, clientes, filas, ...(await insumosDe(filas)) };
+    return { fecha, fechas, clientes, filas, ...(await insumosDe(filas, req.usuario!.permisos.has('costos.ver'))) };
   });
 
   // Historial: toda hoja, en curso o cerrada.
@@ -155,7 +157,7 @@ export async function rutasHojas(app: FastifyInstance) {
     }
   });
 
-  const Cierre = z.object({ lineas: z.array(z.object({ productoId: z.string().uuid(), real: z.number().min(0).max(100_000), merma: z.number().min(0).max(100_000).default(0) })).min(1).max(100) });
+  const Cierre = z.object({ lineas: z.array(z.object({ productoId: z.string().uuid(), real: z.number().min(0).max(100_000), merma: z.number().min(0).max(100_000).default(0) })).min(1).max(100), confirmar: z.boolean().default(false) });
 
   // Cerrar producción: cada pan entra al almacén con lo real, se descargan los insumos y los pedidos quedan listos.
   app.post('/produccion/hojas/:codigo/cerrar', { preHandler: autenticar }, async (req, reply) => {
@@ -168,9 +170,13 @@ export async function rutasHojas(app: FastifyInstance) {
         const h = (await c.query<{ id: string; estado: string }>('SELECT id, estado FROM core.hoja_produccion WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
         if (!h) throw fallo(404, 'La hoja no existe.');
         if (h.estado !== 'EN_PRODUCCION') throw fallo(409, 'La producción de esta hoja ya se cerró.');
-        const ops = (await c.query<{ codigo: string; producto_id: string; producto: string }>(`SELECT codigo, producto_id, producto FROM core.orden_produccion
+        const ops = (await c.query<{ codigo: string; producto_id: string; producto: string; cantidad: string }>(`SELECT codigo, producto_id, producto, cantidad FROM core.orden_produccion
           WHERE hoja_id = $1 AND estado = 'EN_PROCESO' ORDER BY producto_id`, [h.id])).rows;
         const reales = new Map(p.data.lineas.map((l) => [l.productoId, l]));
+        // Word 04 (200 pedidos, 2,080 producidos): una diferencia grande se confirma antes de mover el almacén.
+        const tol = num((await c.query<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'tolerancia_produccion'")).rows[0]?.valor ?? '0');
+        const fuera = ops.filter((o) => { const l = reales.get(o.producto_id), ped = num(o.cantidad); return tol > 0 && l && ped > 0 && Math.abs(l.real - ped) / ped > tol; });
+        if (fuera.length && !p.data.confirmar) throw fallo(409, `Lo producido de ${fuera.map((o) => o.producto).join(', ')} se aleja de lo solicitado: revísalo y confirma para grabar.`);
         for (const op of ops) {
           const l = reales.get(op.producto_id);
           if (!l) throw fallo(422, `Falta la producción real de ${op.producto}.`);

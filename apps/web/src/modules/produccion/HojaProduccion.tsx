@@ -11,11 +11,11 @@ const aNumero = (x: string): number | '' => (x === '' ? '' : Number(x));
 
 interface Cliente { id: string; nombre: string }
 interface Fila { productoId: string; producto: string; porCliente: Record<string, number>; pedido: number }
-interface InsumoHoja { insumoId: string; insumo: string; unidad: string; cantidad: number; restante: number; minimo: number; estado: 'NORMAL' | 'ALERTA' | 'FALTA' }
+interface InsumoHoja { insumoId: string; insumo: string; unidad: string; cantidad: number; stock: number; restante: number; minimo: number; costoUnitario?: number; costoTotal?: number; estado: 'NORMAL' | 'ALERTA' | 'FALTA' }
 interface Abierta { fecha: string; fechas: string[]; clientes: Cliente[]; filas: Fila[]; insumos: InsumoHoja[]; sinReceta: string[] }
 interface Hoja { codigo: string; fecha: string; estado: 'EN_PRODUCCION' | 'CERRADA'; cerradaEn: string | null; productos: number; unidades: number }
 interface Resumen { op: string; productoId: string; producto: string; pedido: number; real: number | null; costo?: number | null; venta?: number | null; rentabilidad?: number | null; pctRentabilidad?: number | null }
-interface Detalle extends Omit<Hoja, 'productos' | 'unidades'> { clientes: Cliente[]; filas: Fila[]; resumen: Resumen[];
+interface Detalle extends Omit<Hoja, 'productos' | 'unidades'> { tolerancia: number; clientes: Cliente[]; filas: Fila[]; resumen: Resumen[];
   insumosUsados: Array<{ insumo: string; unidad: string; cantidad: number; costo?: number }>;
   insumosPorComprar: Array<{ insumo: string; unidad: string; stock: number; minimo: number; falta: number }> }
 
@@ -52,6 +52,8 @@ export function HojaProduccion() {
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  // Diferencia grande entre lo solicitado y lo producido: se graba solo tras confirmarla.
+  const [confirmado, setConfirmado] = useState(false);
 
   const cargar = () => Promise.all([
     api<Abierta>(`/produccion/hoja${fecha ? `?fecha=${fecha}` : ''}`).then(setHoja),
@@ -62,7 +64,7 @@ export function HojaProduccion() {
 
   const abrir = async (codigo: string) => {
     const d = await api<Detalle>(`/produccion/hojas/${encodeURIComponent(codigo)}`);
-    setDet(d);
+    setDet(d); setConfirmado(false);
     setReales(Object.fromEntries(d.resumen.map((r) => [r.productoId, { real: String(r.real ?? r.pedido), merma: '0' }])));
   };
   const accion = async (fn: () => Promise<string>) => {
@@ -77,14 +79,18 @@ export function HojaProduccion() {
   });
   const cerrarProduccion = () => accion(async () => {
     const r = await api<{ listos: number; sinStock: string[] }>(`/produccion/hojas/${encodeURIComponent(det!.codigo)}/cerrar`, { method: 'POST',
-      body: { lineas: det!.resumen.map((x) => ({ productoId: x.productoId, real: Number(reales[x.productoId]?.real) || 0, merma: Number(reales[x.productoId]?.merma) || 0 })) } });
+      body: { lineas: det!.resumen.map((x) => ({ productoId: x.productoId, real: Number(reales[x.productoId]?.real) || 0, merma: Number(reales[x.productoId]?.merma) || 0 })), confirmar: confirmado } });
     const c = det!.codigo;
     await abrir(c);
-    return `${c} cerrada: ${r.listos} pedido(s) listo(s) para despacho${r.sinStock.length ? ` · sin stock: ${r.sinStock.join(', ')}` : ''}.`;
+    return `${c} grabada: los panes entraron al almacén y se descargaron los insumos · ${r.listos} pedido(s) listo(s) para despacho${r.sinStock.length ? ` · sin stock: ${r.sinStock.join(', ')}` : ''}.`;
   });
 
   const enCurso = hojas.filter((h) => h.estado === 'EN_PRODUCCION');
   const faltaInsumo = hoja?.insumos.some((i) => i.estado === 'FALTA');
+  const conCosto = hoja?.insumos.some((i) => i.costoTotal !== undefined) ?? false;
+  const producido = (id: string) => Number(reales[id]?.real) || 0;
+  const fuera = det?.estado === 'EN_PRODUCCION' && det.tolerancia > 0 ? det.resumen.filter((r) => r.pedido > 0 && Math.abs(producido(r.productoId) - r.pedido) / r.pedido > det.tolerancia) : [];
+  const fijar = (id: string, campo: 'real' | 'merma', v: string) => { setConfirmado(false); setReales({ ...reales, [id]: { real: reales[id]?.real ?? '', merma: reales[id]?.merma ?? '0', [campo]: v } }); };
 
   return (
     <>
@@ -116,9 +122,12 @@ export function HojaProduccion() {
           <Tarjeta padding="none">
             <div className="card__head card__head--padded"><TarjetaTitulo titulo="Kárdex de insumos" subtitulo={faltaInsumo ? 'Hay insumos que no alcanzan: al cerrar la producción se exige el stock' : 'Acumulado de lo pedido; se descarga al cerrar la producción'} /></div>
             <div className="table-wrap"><table className="table table--compacta">
-              <thead><tr><th>Insumo</th><th className="t-right">Cantidad</th><th className="t-right">Stock restante</th><th className="t-right">Estado</th></tr></thead>
-              <tbody>{hoja.insumos.map((i) => <tr key={i.insumoId}><td>{i.insumo}</td><td className="t-right">{cant(i.cantidad)} {i.unidad.toLowerCase()}</td><td className="t-right">{cant(i.restante)} {i.unidad.toLowerCase()}</td>
+              <thead><tr><th>Insumo</th><th className="t-right">Consumo</th>{conCosto && <th className="t-right">Costo unitario</th>}{conCosto && <th className="t-right">Costo total</th>}<th className="t-right">Stock actual</th><th className="t-right">Saldo después de producir</th><th className="t-right">Estado</th></tr></thead>
+              <tbody>{hoja.insumos.map((i) => <tr key={i.insumoId}><td>{i.insumo}</td><td className="t-right">{cant(i.cantidad)} {i.unidad.toLowerCase()}</td>
+                {conCosto && <td className="t-right t-muted">{money(i.costoUnitario ?? 0)}</td>}{conCosto && <td className="t-right">{money(i.costoTotal ?? 0)}</td>}
+                <td className="t-right">{cant(i.stock)} {i.unidad.toLowerCase()}</td><td className={`t-right ${i.restante < 0 ? 't-neg' : ''}`}>{cant(i.restante)} {i.unidad.toLowerCase()}</td>
                 <td className="t-right"><Insignia tono={TONO[i.estado]} punto>{i.estado === 'NORMAL' ? 'Normal' : i.estado === 'ALERTA' ? 'Alerta' : 'Falta'}</Insignia></td></tr>)}</tbody>
+              {conCosto && <tfoot><tr><td><strong>Total</strong></td><td /><td /><td className="t-right"><strong>{money(hoja.insumos.reduce((a, i) => a + (i.costoTotal ?? 0), 0))}</strong></td><td /><td /><td /></tr></tfoot>}
             </table></div>
           </Tarjeta>
         )}
@@ -140,19 +149,26 @@ export function HojaProduccion() {
       <Dialogo abierto={det !== null} titulo={`Hoja ${det?.codigo ?? ''} - Tanta`} descripcion={det ? `Entrega ${dma(det.fecha)} · ${det.estado === 'CERRADA' ? 'cerrada' : 'en producción'}` : ''} onCerrar={() => setDet(null)}
         acciones={<>
           <Boton icono="download" onClick={() => det && aExcel(`hoja-${det.codigo.replace(' ', '-')}`, det.clientes, det.filas)}>Excel</Boton>
-          {det?.estado === 'EN_PRODUCCION' && puede('produccion.ejecutar') && <Boton variant="primary" disabled={ocupado} onClick={() => void cerrarProduccion()}>{ocupado ? 'Cerrando…' : 'Cerrar producción'}</Boton>}
+          {det?.estado === 'EN_PRODUCCION' && puede('produccion.ejecutar') && <Boton variant="primary" disabled={ocupado} onClick={() => (fuera.length && !confirmado ? setConfirmado(true) : void cerrarProduccion())}>{ocupado ? 'Grabando…' : fuera.length && confirmado ? 'Sí, grabar así' : 'Grabar producción'}</Boton>}
         </>}>
         {det && <>
           <Matriz clientes={det.clientes} filas={det.filas} reales={Object.fromEntries(det.resumen.map((r) => [r.productoId, r.real]))} />
           {det.estado === 'EN_PRODUCCION' && (
-            <div className="form form--2col form--dialogo">
-              {det.resumen.map((r) => <div key={r.productoId} className="pago-linea field--ancho">
-                <label className="field"><span className="field__label">{r.producto}: producción real</span>
-                  <InputNumero className="field__input" valor={aNumero(reales[r.productoId]?.real ?? '')} onValor={(n) => { const v = String(n); setReales({ ...reales, [r.productoId]: { real: v, merma: reales[r.productoId]?.merma ?? '0' } }); }} /></label>
-                <label className="field"><span className="field__label">Merma</span>
-                  <InputNumero className="field__input" valor={aNumero(reales[r.productoId]?.merma ?? '')} onValor={(n) => { const v = String(n); setReales({ ...reales, [r.productoId]: { real: reales[r.productoId]?.real ?? '', merma: v } }); }} /></label>
-              </div>)}
-            </div>
+            <>
+              <h4 className="hoja__titulo">Resumen de lo producido</h4>
+              <div className="table-wrap"><table className="table table--compacta">
+                <thead><tr><th>Pan</th><th className="t-right">Solicitado</th><th className="t-right">Producido</th><th className="t-right">Merma</th><th className="t-right">Diferencia</th></tr></thead>
+                <tbody>{det.resumen.map((r) => { const dif = producido(r.productoId) - r.pedido; return (
+                  <tr key={r.productoId}><td><strong>{r.producto}</strong></td><td className="t-right">{num(r.pedido)}</td>
+                    <td className="t-right"><InputNumero className="field__input hoja__celda" aria-label={`${r.producto}: producido`} valor={aNumero(reales[r.productoId]?.real ?? '')} onValor={(n) => fijar(r.productoId, 'real', String(n))} /></td>
+                    <td className="t-right"><InputNumero className="field__input hoja__celda" aria-label={`${r.producto}: merma`} valor={aNumero(reales[r.productoId]?.merma ?? '')} onValor={(n) => fijar(r.productoId, 'merma', String(n))} /></td>
+                    <td className={`t-right ${fuera.includes(r) ? 't-neg' : 't-muted'}`}>{dif > 0 ? '+' : ''}{num(dif)}</td></tr>); })}</tbody>
+                <tfoot><tr><td><strong>Total</strong></td><td className="t-right"><strong>{num(det.resumen.reduce((a, r) => a + r.pedido, 0))}</strong></td><td className="t-right"><strong>{num(det.resumen.reduce((a, r) => a + producido(r.productoId), 0))}</strong></td><td /><td /></tr></tfoot>
+              </table></div>
+              {fuera.length > 0 && <div className="aviso aviso--danger" role="alert"><span className="aviso__icono">!</span><div><p>
+                {fuera.map((r) => `${r.producto}: solicitado ${num(r.pedido)}, producido ${num(producido(r.productoId))}`).join(' · ')}. {confirmado ? 'Si la cantidad es correcta, pulsa «Sí, grabar así».' : 'Revisa la cantidad antes de grabar.'}</p></div></div>}
+              <p className="dialogo__nota">Al grabar, los panes entran al almacén de productos y se descargan los insumos del kárdex.</p>
+            </>
           )}
           {det.estado === 'CERRADA' && puede('costos.ver') && (<>
             <h4 className="hoja__titulo">Resumen de la producción</h4>

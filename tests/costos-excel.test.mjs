@@ -13,7 +13,9 @@ test('pan francés del modelo: masa, costo del lote, unidades, % panadero, mano 
     -- Escenario aislado: sin otros costos indirectos ni horas de horno de otros panes.
     UPDATE core.costo_indirecto SET activo = false;
     UPDATE core.producto SET horas_horno_lote = 0;
-    INSERT INTO core.parametro (clave, valor, tipo) VALUES ('sueldo_base','1500','numero'), ('factor_beneficios','0','porcentaje'), ('horas_mes','192','numero')
+    INSERT INTO core.parametro (clave, valor, tipo) VALUES ('sueldo_base','1500','numero'), ('factor_beneficios','0','porcentaje'), ('horas_mes','192','numero'),
+      -- Sin capacidad de horno declarada: la tarifa sale de la producción real (RN-13).
+      ('horas_horno_dia','0','numero'), ('dias_trabajados_mes','0','numero')
       ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor;
     INSERT INTO core.insumo (codigo, nombre, unidad, cpp, tipo, equiv_kg) VALUES
       ('T-HAR', 'Harina prueba', 'KG', 2.80, 'HARINA', 1),
@@ -40,8 +42,19 @@ test('pan francés del modelo: masa, costo del lote, unidades, % panadero, mano 
       'pctAgua', (SELECT d.pct_panadero FROM core.receta_detalle d JOIN core.insumo i ON i.id = d.insumo_id WHERE d.receta_id = r.id AND i.codigo = 'T-AGU'),
       'costoTotal', p.costo_unitario)
     FROM core.receta r JOIN core.producto p ON p.id = r.producto_id WHERE p.codigo = 'T-PAN';
+    -- Word 04 / Excel del cliente: con horas diarias de horno y días trabajados, tarifa = CIF del mes ÷ (11 × 26);
+    -- y un tipo de insumo que «no suma al peso» (la bolsa) sale de la masa del lote.
+    UPDATE core.parametro SET valor = '11' WHERE clave = 'horas_horno_dia';
+    UPDATE core.parametro SET valor = '26' WHERE clave = 'dias_trabajados_mes';
+    UPDATE core.tipo_insumo SET suma_peso = false WHERE codigo = 'OTRO';
+    SELECT core.recalcular_costos();
+    SELECT json_build_object('masa', r.masa_lote_kg, 'esperadas', r.unidades_esperadas, 'cif', r.cif_unitario, 'costoLote', r.costo_lote)
+    FROM core.receta r JOIN core.producto p ON p.id = r.producto_id WHERE p.codigo = 'T-PAN';
     ROLLBACK;`);
-  const r = JSON.parse(salida.split('\n').filter((l) => l.startsWith('{')).at(-1));
+  const [r, w] = salida.split('\n').filter((l) => l.startsWith('{')).slice(-2).map((l) => JSON.parse(l));
+  cerca(w.masa, 15.8, 0.0005, 'Word 04: el insumo que no suma al peso sale de la masa');
+  cerca(w.costoLote, 32.59, 0.005, 'Word 04: pero su costo sigue en el lote');
+  cerca(w.cif, 4600 / (11 * 26) / w.esperadas, 0.0005, 'Excel: CIF por pan con tarifa = CIF del mes ÷ horas de horno del mes');
   cerca(r.masa, 16.384, 0.0005, 'RN-05 masa del lote (kg)');                 // CP-07
   cerca(r.costoLote, 32.59, 0.005, 'RN-09 costo de insumos del lote (S/)');  // CP-07
   cerca(r.teoricas, 297.89, 0.01, 'RN-06 unidades teóricas');

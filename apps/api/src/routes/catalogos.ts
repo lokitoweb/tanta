@@ -42,8 +42,8 @@ const ESQUEMAS = {
   },
   'tipos-insumo': {
     tabla: 'core.tipo_insumo',
-    campos: z.object({ ...base, esHarina: z.boolean().default(false), esEmpaque: z.boolean().default(false) }),
-    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', esHarina: 'es_harina', esEmpaque: 'es_empaque' },
+    campos: z.object({ ...base, esHarina: z.boolean().default(false), esEmpaque: z.boolean().default(false), sumaPeso: z.boolean().default(true) }),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', esHarina: 'es_harina', esEmpaque: 'es_empaque', sumaPeso: 'suma_peso' },
     enUso: 'SELECT 1 FROM core.insumo WHERE tipo = $1 LIMIT 1',
   },
   unidades: {

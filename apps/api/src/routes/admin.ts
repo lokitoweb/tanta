@@ -85,7 +85,7 @@ export async function rutasAdmin(app: FastifyInstance) {
 
     const cerrado = clave === 'cif_base_prorrateo' || Boolean(OPCIONES[clave]);
     // Parámetros que entran en la ficha de costo: se recostea en la misma transacción y el catálogo lo ve al instante.
-    const recostea = ['cif_base_prorrateo', 'formula_merma', 'sueldo_base', 'factor_beneficios', 'horas_mes', 'costo_insumo_formulas'].includes(clave);
+    const recostea = ['cif_base_prorrateo', 'formula_merma', 'sueldo_base', 'factor_beneficios', 'horas_mes', 'costo_insumo_formulas', 'horas_horno_dia', 'dias_trabajados_mes'].includes(clave);
     await tx(async (c) => {
       await c.query('UPDATE core.parametro SET valor = $1 WHERE clave = $2', [cerrado ? nuevo.toUpperCase() : nuevo, clave]);
       // Pasar a AUTOMATICO: las fórmulas vuelven a seguir al kárdex (se descartan los costos fijados a mano).

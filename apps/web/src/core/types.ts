@@ -56,6 +56,7 @@ export interface Movimiento {
 
 export interface RecetaLinea {
   insumoId: string; insumo: string; unidad: string; cantidad: number;
+  pesoKg?: number; pctPanadero?: number | null; sumaPeso?: boolean;   // sumaPeso false: bolsas y empaques, no entran al peso de la masa
   cpp?: number; costo?: number;   // ausentes si el rol no puede ver costos
 }
 export interface Receta {

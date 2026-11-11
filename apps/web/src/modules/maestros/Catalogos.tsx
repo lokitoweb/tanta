@@ -36,9 +36,10 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
   },
   'tipos-insumo': {
     descripcion: 'Clasificación de los insumos. Los marcados como harina suman el 100 % del porcentaje panadero.',
-    nuevo: { codigo: '', nombre: '', esHarina: false, esEmpaque: false, orden: 10, activo: true },
-    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'esHarina', label: 'Es harina' }, { key: 'esEmpaque', label: 'Es empaque' }, { key: 'activo', label: 'Activo' }],
-    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('esHarina', 'Cuenta como harina en el % panadero'), si('esEmpaque', 'Material de empaque', 'Despacho puede usarlo (bolsas, etiquetas…)'), ...comunes],
+    nuevo: { codigo: '', nombre: '', esHarina: false, esEmpaque: false, sumaPeso: true, orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'esHarina', label: 'Es harina' }, { key: 'esEmpaque', label: 'Es empaque' }, { key: 'sumaPeso', label: 'Suma al peso' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, si('esHarina', 'Cuenta como harina en el % panadero'), si('esEmpaque', 'Material de empaque', 'Despacho puede usarlo (bolsas, etiquetas…)'),
+      si('sumaPeso', 'Suma al peso de la masa', 'Desmárcalo en bolsas y empaques: no cuentan en el peso (kg) de la receta'), ...comunes],
   },
   unidades: {
     descripcion: 'Única tabla de conversión: dentro de una familia, factor respecto a la unidad patrón (kg, L, unidad). Una unidad en uso no cambia de familia ni de factor.',

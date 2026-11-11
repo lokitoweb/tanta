@@ -1513,6 +1513,7 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .liquidacion { margin-top: 14px; font-size: 0.8125rem; }
 .liquidacion > b { display: block; margin-bottom: 6px; }
 .hoja__titulo { margin: 16px 0 6px; font-size: 0.875rem; }
+.hoja__celda { width: 7rem; min-width: 5rem; text-align: right; padding: 6px 8px; }
 .promos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .promo { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--tanta-border-subtle); border-radius: 12px; background: var(--tanta-state-ok-bg, var(--tanta-neutral-50)); }
 .promo h3 { margin: 6px 0 2px; font-size: 0.9375rem; }

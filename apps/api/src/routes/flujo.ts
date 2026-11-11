@@ -64,7 +64,8 @@ export async function fechaEntregaSugerida(horasMinimas = 0): Promise<string> {
   const base = ahora.slice(11, 16) < corte ? ahora.slice(0, 10) : hoyMasDias(86_400_000).slice(0, 10);
   // Un producto con anticipación propia corre la entrega en lugar de rechazar el pedido.
   const minima = hoyMasDias(horasMinimas * 3_600_000).slice(0, 10);
-  return base > minima ? base : minima;
+  // Word 04: iniciada la producción de una fecha (ya tiene hoja), los pedidos nuevos pasan a la siguiente.
+  return (await uno<{ f: string }>('SELECT core.entrega_libre($1::date)::text f', [base > minima ? base : minima]))!.f;
 }
 
 type ItemPedido = { productoId: string; cantidad: number; presentacion?: string; promocionId?: string };

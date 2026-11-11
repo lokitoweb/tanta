@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '@/core/app-state';
-import { cantidad, money, num2, partesQueSuman, pct, semaforo } from '@/core/format';
+import { cant, cantidad, money, num2, partesQueSuman, pct, semaforo } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 import type { Receta } from '@/core/types';
@@ -117,6 +117,7 @@ export function Recetas() {
                   <tr>
                     <th>Insumo</th>
                     <th className="t-right">Cantidad por lote</th>
+                    <th className="t-right">Peso (kg)</th>
                     <th className="t-right">% panadero</th>
                     {verCosto && <th className="t-right">CPP</th>}
                     {verCosto && <th className="t-right">Costo</th>}
@@ -127,12 +128,23 @@ export function Recetas() {
                     <tr key={l.insumoId}>
                       <td><strong>{l.insumo}</strong></td>
                       <td className="t-right">{cantidad(l.cantidad, l.unidad)}</td>
-                      <td className="t-right t-muted">{(l as typeof l & { pctPanadero?: number | null }).pctPanadero != null ? pct((l as typeof l & { pctPanadero: number }).pctPanadero) : '—'}</td>
+                      <td className="t-right">{l.sumaPeso === false ? <span className="t-muted" title="Su tipo de insumo no suma al peso de la masa">no suma</span> : cant(l.pesoKg ?? 0)}</td>
+                      <td className="t-right t-muted">{l.pctPanadero != null ? pct(l.pctPanadero) : '—'}</td>
                       {verCosto && <td className="t-right t-muted">{money(l.cpp ?? 0)}</td>}
                       {verCosto && <td className="t-right">{money(l.costo ?? 0)}</td>}
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td><strong>Totales</strong></td>
+                    <td />
+                    <td className="t-right"><strong>{cant(receta.lineas.reduce((a, l) => a + (l.pesoKg ?? 0), 0))}</strong></td>
+                    <td className="t-right"><strong>{pct(receta.lineas.reduce((a, l) => a + (l.pctPanadero ?? 0), 0))}</strong></td>
+                    {verCosto && <td />}
+                    {verCosto && <td className="t-right"><strong>{money(receta.lineas.reduce((a, l) => a + (l.costo ?? 0), 0))}</strong></td>}
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </Tarjeta>
@@ -153,7 +165,7 @@ export function Recetas() {
                   <b>{money(mo)}</b>
                 </li>
                 <li>
-                  <span>+ Costos indirectos <em>(horas de horno, kg de masa y unidades)</em></span>
+                  <span>+ Costos indirectos <em>(costos del mes ÷ horas de horno del mes × horas de horno del lote ÷ unidades)</em></span>
                   <b>{money(cif)}</b>
                 </li>
                 <li className="cascada__total">

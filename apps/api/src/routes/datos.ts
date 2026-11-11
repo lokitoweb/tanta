@@ -185,7 +185,8 @@ export async function rutasDatos(app: FastifyInstance) {
                  'insumoId', d.insumo_id, 'insumo', d.insumo, 'unidad', d.unidad,
                  'cantidad', d.cantidad, 'cpp', d.cpp, 'costo', d.costo,
                  'unidadReceta', d.unidad_receta, 'cantidadOriginal', d.cantidad_original,
-                 'pesoKg', d.peso_kg, 'pctPanadero', d.pct_panadero
+                 'pesoKg', d.peso_kg, 'pctPanadero', d.pct_panadero,
+                 'sumaPeso', (SELECT coalesce(t.suma_peso, true) FROM core.insumo i LEFT JOIN core.tipo_insumo t ON t.codigo = i.tipo WHERE i.id = d.insumo_id)
                ) ORDER BY d.orden) FILTER (WHERE d.insumo_id IS NOT NULL), '[]') AS lineas
         FROM core.receta r
         LEFT JOIN core.receta_detalle d ON d.receta_id = r.id
@@ -355,7 +356,7 @@ export async function rutasDatos(app: FastifyInstance) {
           lineas: typeof r.lineas === 'string' ? JSON.parse(r.lineas) : r.lineas,
         };
         if (!verCosto) {
-          return { ...base, lineas: base.lineas.map((l: Record<string, unknown>) => ({ insumoId: l.insumoId, insumo: l.insumo, unidad: l.unidad, cantidad: Number(l.cantidad) })) };
+          return { ...base, lineas: base.lineas.map((l: Record<string, unknown>) => ({ insumoId: l.insumoId, insumo: l.insumo, unidad: l.unidad, cantidad: Number(l.cantidad), pesoKg: Number(l.pesoKg), pctPanadero: l.pctPanadero, sumaPeso: l.sumaPeso })) };
         }
         const costoUnitario = num(r.costo_unitario);
         const neto = (precioDe(r.producto_id, productos) ) / (1 + igv);

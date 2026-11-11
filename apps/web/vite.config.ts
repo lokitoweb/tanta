@@ -15,7 +15,8 @@ export default defineConfig({
     strictPort: true,
     // Web y API por el mismo origen: así un túnel (Cloudflare) expone una sola URL https
     // y no hay CORS ni cookies entre dominios. En producción lo hace Caddy igual.
-    proxy: { '/api': { target: 'http://127.0.0.1:3001', xfwd: true } },
+    // API_PROXY apunta la web a otra API (la de pruebas, 3002) sin tocar la base de uso diario.
+    proxy: { '/api': { target: process.env.API_PROXY ?? 'http://127.0.0.1:3001', xfwd: true } },
     allowedHosts: ['.trycloudflare.com', '.cfargotunnel.com'],
     // OneDrive crea carpetas *.tmpdir al sincronizar; si Vite las vigila, el proceso cae con EBUSY.
     watch: {

@@ -37,6 +37,17 @@
       "url": "http://127.0.0.1:5180"
     },
     {
+      "name": "web-pruebas",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "-e",
+        "process.env.API_PROXY='http://127.0.0.1:3002';process.argv.splice(1,0,'vite','--port','5182','--host','127.0.0.1');import('../../node_modules/vite/bin/vite.js')"
+      ],
+      "cwd": "apps/web",
+      "port": 5182,
+      "url": "http://127.0.0.1:5182"
+    },
+    {
       "name": "movil-web",
       "runtimeExecutable": "node",
       "runtimeArgs": [
