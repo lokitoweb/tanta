@@ -203,6 +203,7 @@ test('pagos de costos: caja grande con n.° de operación; caja chica descuenta 
   const adm = await login('lbermudez');
   const cif = sql("SELECT id FROM core.costo_indirecto WHERE activo ORDER BY codigo LIMIT 1");
   const ahora = new Date(Date.now() - 5 * 3_600_000);
+  fondearCajaGrande(); // en una base recién sembrada (CI) las cuentas de caja grande no tienen saldo
   const base = { costoIndirectoId: cif, fechaOperacion: hoyLima(), periodoMes: ahora.getUTCMonth() + 1, periodoAnio: ahora.getUTCFullYear(), monto: 50 };
   assert.equal((await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'GRANDE', medio: 'TRANSFERENCIA' })).s, 422, 'transferencia sin n.° de operación');
   const g = await api(adm, 'POST', '/pagos-costos', { ...base, caja: 'GRANDE', medio: 'TRANSFERENCIA', nroOperacion: 'OP-' + sufijo });
