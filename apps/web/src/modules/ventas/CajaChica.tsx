@@ -31,7 +31,7 @@ export function CajaChica() {
 
   return (
     <>
-      <Encabezado titulo="Caja chica" descripcion="Tu caja del día · el fondo sale del efectivo de caja grande · al cerrarla, lo contado vuelve a caja grande" />
+      <Encabezado titulo="Caja chica" descripcion="Fondo para gastos del día: sale del efectivo de caja grande y, al cerrarla, lo contado vuelve. Lo que cobras a clientes no va aquí: se rinde en Cobranza." />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
       {datos === null && !cargaError && <Tarjeta><PilaEsqueleto lineas={3} /></Tarjeta>}
       {a ? (<>

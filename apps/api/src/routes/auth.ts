@@ -23,7 +23,6 @@ const Ticket = z.object({ ticket: z.string().min(10) });
 const VerificarMfa = z.object({ ticket: z.string().min(10), codigo: z.string().min(6).max(20) });
 
 /** Perfiles que pueden mover dinero, precios o usuarios: exigen segundo factor. */
-const ROLES_CON_MFA = new Set(['SUPERADMIN', 'GERENTE', 'ADMINISTRADOR']);
 
 const COOKIE = 'tanta_refresh';
 const ES_PROD = process.env.NODE_ENV === 'production';
@@ -133,7 +132,8 @@ export async function rutasAuth(app: FastifyInstance) {
     const rol = await rolDeUsuario(fila.id);
     if (!rol) return reply.code(403).send(error(403, 'SIN_ROL', 'El usuario no tiene un rol asignado.'));
 
-    const exigeMfa = ROLES_CON_MFA.has(rol);
+    // Qué roles exigen segundo factor se administra en Usuarios y roles (rol.exige_mfa).
+    const exigeMfa = (await uno<{ exige: boolean }>('SELECT exige_mfa exige FROM core.rol WHERE id = $1', [rol]))?.exige === true;
 
     // Segundo factor: si ya está activo se pide; si es obligatorio y falta, se enrola.
     if (fila.mfa_activo) {

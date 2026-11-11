@@ -1495,6 +1495,7 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   html.imprime-dialogo .dialogo { box-shadow: none; max-height: none; overflow: visible; max-width: none; }
   html.imprime-dialogo .dialogo__cuerpo { overflow: visible; }
   html.imprime-dialogo .edc, html.imprime-dialogo .edc * { visibility: visible; }
+  html.imprime-dialogo .edc .edc__acciones { display: none; }
   html.imprime-dialogo .edc { position: absolute; left: 0; top: 0; width: 100%; }
   html.imprime-dialogo .edc__cifra--total { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

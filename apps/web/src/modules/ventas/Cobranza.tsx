@@ -13,7 +13,8 @@ import { ComprobanteInput } from '@/modules/almacen/Deudas';
 
 interface Rendicion { id: string; estado: 'PENDIENTE' | 'RECIBIDA'; total: number; efectivoEsperado: number; efectivoEntregado: number; efectivoRecibido: number | null;
   nota: string | null; notaCaja: string | null; recibidoPor: string | null; diferencia: number; desactualizada: boolean }
-interface CajaVendedor { vendedorId: string; vendedor: string; porMedio: Record<string, number>; pagos: number; total: number; efectivo: number; rendicion: Rendicion | null }
+interface CajaVendedor { vendedorId: string; vendedor: string; porMedio: Record<string, number>; pagos: number; total: number; efectivo: number; rendicion: Rendicion | null;
+  /** Lo que aún no entró a caja (sin rendir o en la rendición pendiente). */ porRendir: { porMedio: Record<string, number>; total: number; efectivo: number } }
 interface Cierre { fecha: string; total: number; porMedio: Array<{ medio: string; monto: number }>; lineas: Array<{ medio: string; vendedor: string; pagos: number; monto: number }>;
   liquidacion: { ingresos: Array<{ medio: string; monto: number }>; gastos: Array<{ medio: string; monto: number }>; totalIngresos: number; totalGastos: number; neto: number;
     detalleGastos: Array<{ codigo: string; concepto: string; tipo: string; medio: string; monto: number }> };
@@ -38,6 +39,7 @@ export function Cobranza() {
   const [cierre, setCierre] = useState<Cierre | null>(null);
   const [fecha, setFecha] = useState(hoy());
   const [estado, setEstado] = useState<EstadoCuenta | null>(null);
+  const [estadoCliente, setEstadoCliente] = useState<string | null>(null);
   const [cierreError, setCierreError] = useState<string | null>(null);
   const cargarCierre = () => { setCierre(null); setCierreError(null); api<Cierre>(`/cobranza/cierre?fecha=${fecha}`).then(setCierre).catch((e) => setCierreError(e.message)); };
   useEffect(cargarCierre, [fecha, dataset]);
@@ -124,7 +126,7 @@ export function Cobranza() {
       key: 'id', header: '', align: 'right',
       render: (c) => <div className="fila-acciones">
         {puede('cobranza.registrar') && <Boton onClick={() => abrirPago(c)}>Cobrar</Boton>}
-        <Boton onClick={() => void api<EstadoCuenta>(`/estado-cuenta?clienteId=${c.id}`).then(setEstado).catch((e) => setAviso({ tono: 'danger', texto: e.message }))}>Estado de cuenta</Boton>
+        <Boton onClick={() => void api<EstadoCuenta>(`/estado-cuenta?clienteId=${c.id}`).then((e) => { setEstadoCliente(c.id); setEstado(e); }).catch((e) => setAviso({ tono: 'danger', texto: e.message }))}>Estado de cuenta</Boton>
       </div>,
     },
   ];
@@ -166,21 +168,26 @@ export function Cobranza() {
         ) : <p className="t-muted">No hay cuentas por cobrar pendientes.</p>)}
       </Dialogo>
 
-      <DialogoEstadoCuenta estado={estado} onCerrar={() => setEstado(null)} />
+      <DialogoEstadoCuenta estado={estado} onCerrar={() => setEstado(null)} onAnular={puede('cobranza.anular') ? async (p, motivo) => {
+        const r = await api<{ referencia: string; monto: number; salioDeCajaGrande: boolean }>(p.recibo !== '—' ? `/cobranza/recibos/${p.recibo}/anular` : `/cobranza/cobros/${p.id}/anular`, { method: 'POST', body: { motivo } });
+        if (estadoCliente) setEstado(await api<EstadoCuenta>(`/estado-cuenta?clienteId=${estadoCliente}`));
+        await refrescarDatos(); cargarCierre();
+        setAviso({ tono: 'ok', texto: `Pago anulado (${money(r.monto)}): la deuda volvió al cliente${r.salioDeCajaGrande ? ' y el dinero salió de caja grande' : ''}.` });
+      } : undefined} />
 
       <Dialogo abierto={rendir !== null && !!mio} titulo={`Rendir mi día · ${fecha.split('-').reverse().join('/')}`}
-        descripcion="Lo que cobraste según el sistema. Entrega el efectivo a la persona encargada de caja; ella confirma lo que recibe."
+        descripcion="Lo que cobraste y aún no entregaste, según el sistema. Entrega el efectivo a la persona encargada de caja; ella confirma lo que recibe. Lo cobrado no se mezcla con tu caja chica (esa es solo para gastos)."
         onCerrar={() => setRendir(null)}
         acciones={<><Boton onClick={() => setRendir(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || !(Number(rendir?.efectivo) >= 0) || rendir?.efectivo === ''} onClick={() => void enviarRendicion()}>{guardando ? 'Enviando…' : 'Enviar rendición'}</Boton></>}>
         {rendir && mio && (
           <div className="form form--2col form--dialogo">
             <table className="table table--compacta field--ancho"><tbody>
-              {Object.entries(mio.porMedio).map(([m, x]) => <tr key={m}><td>{nombreMedio(m)}</td><td className="t-right">{money(x)}</td></tr>)}
-              <tr><td><strong>Total cobrado</strong></td><td className="t-right"><strong>{money(mio.total)}</strong></td></tr>
+              {Object.entries(mio.porRendir.porMedio).map(([m, x]) => <tr key={m}><td>{nombreMedio(m)}</td><td className="t-right">{money(x)}</td></tr>)}
+              <tr><td><strong>Por rendir</strong></td><td className="t-right"><strong>{money(mio.porRendir.total)}</strong></td></tr>
             </tbody></table>
             <label className="field"><span className="field__label">Efectivo que entregas (S/)</span>
               <input className="field__input" type="number" min="0" step="0.01" value={rendir.efectivo} onChange={(e) => setRendir({ ...rendir, efectivo: e.target.value })} />
-              <span className="field__ayuda">Esperado en efectivo: {money(mio.efectivo)}{Math.abs(Number(rendir.efectivo) - mio.efectivo) > 0.009 ? ` · ${Number(rendir.efectivo) < mio.efectivo ? 'faltan' : 'sobran'} ${money(Math.abs(Number(rendir.efectivo) - mio.efectivo))}` : ''}</span></label>
+              <span className="field__ayuda">Esperado en efectivo: {money(mio.porRendir.efectivo)}{Math.abs(Number(rendir.efectivo) - mio.porRendir.efectivo) > 0.009 ? ` · ${Number(rendir.efectivo) < mio.porRendir.efectivo ? 'faltan' : 'sobran'} ${money(Math.abs(Number(rendir.efectivo) - mio.porRendir.efectivo))}` : ''}</span></label>
             <label className="field"><span className="field__label">Nota (opcional)</span>
               <input className="field__input" maxLength={300} value={rendir.nota} onChange={(e) => setRendir({ ...rendir, nota: e.target.value })} /></label>
           </div>
@@ -188,7 +195,7 @@ export function Cobranza() {
       </Dialogo>
 
       <Dialogo abierto={recibir !== null} titulo={`Recibir rendición · ${recibir?.v.vendedor ?? ''}`}
-        descripcion={recibir ? `Cobró ${money(recibir.v.total)} (${Object.entries(recibir.v.porMedio).map(([m, x]) => `${nombreMedio(m).toLowerCase()} ${money(x)}`).join(' · ')}). Declara ${money(recibir.v.rendicion!.efectivoEntregado)} en efectivo.` : ''}
+        descripcion={recibir ? `Rinde ${money(recibir.v.rendicion!.total)} (${Object.entries(recibir.v.porRendir.porMedio).map(([m, x]) => `${nombreMedio(m).toLowerCase()} ${money(x)}`).join(' · ')}). Declara ${money(recibir.v.rendicion!.efectivoEntregado)} en efectivo.` : ''}
         onCerrar={() => setRecibir(null)}
         acciones={<><Boton onClick={() => setRecibir(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || recibir?.efectivo === '' || !(Number(recibir?.efectivo) >= 0)} onClick={() => void confirmarRecepcion()}>{guardando ? 'Guardando…' : 'Confirmar recepción'}</Boton></>}>
         {recibir && (
@@ -241,8 +248,9 @@ export function Cobranza() {
         <Tarjeta className="col-12">
           <TarjetaTitulo titulo="Cierre del día y caja" subtitulo={`COB-09 · cobrado ${money(cierre?.total ?? 0)} · cada vendedor rinde su día y caja lo recibe`}
             accion={<div className="fila-acciones">
-              {mio && mio.total > 0 && mio.rendicion?.estado !== 'RECIBIDA' && puede('cobranza.registrar') &&
-                <Boton variant="primary" icono="wallet" onClick={() => setRendir({ efectivo: (mio.rendicion?.efectivoEntregado ?? mio.efectivo).toFixed(2), nota: mio.rendicion?.nota ?? '' })}>{mio.rendicion ? 'Actualizar mi rendición' : 'Rendir mi día'}</Boton>}
+              {mio && mio.porRendir.total > 0 && puede('cobranza.registrar') &&
+                <Boton variant="primary" icono="wallet" onClick={() => setRendir({ efectivo: (mio.rendicion?.estado === 'PENDIENTE' ? mio.rendicion.efectivoEntregado : mio.porRendir.efectivo).toFixed(2), nota: mio.rendicion?.estado === 'PENDIENTE' ? mio.rendicion.nota ?? '' : '' })}>
+                  {mio.rendicion?.estado === 'PENDIENTE' ? 'Actualizar mi rendición' : mio.rendicion ? `Rendir lo cobrado después (${money(mio.porRendir.total)})` : 'Rendir mi día'}</Boton>}
               <input className="field__input" type="date" value={fecha} max={hoy()} onChange={(e) => setFecha(e.target.value)} />
             </div>} />
           {cierreError ? <Vacio titulo="No se pudo cargar" detalle={cierreError} onReintentar={cargarCierre} />

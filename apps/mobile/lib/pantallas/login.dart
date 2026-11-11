@@ -3,6 +3,7 @@ import '../core/api.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
+import 'dos_pasos.dart';
 import 'legal.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -46,7 +47,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     FocusScope.of(context).unfocus();
     setState(() { _cargando = true; _error = null; _ok = null; });
     try {
-      await Api.instancia.login(_usuario.text.trim(), _clave.text);
+      final paso = await Api.instancia.login(_usuario.text.trim(), _clave.text);
+      if (paso != null) {
+        // El rol exige verificación en dos pasos: código de la app autenticadora (o activarla la primera vez).
+        if (!mounted) return;
+        final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => DosPasos(paso: paso)));
+        if (ok != true) return;
+      }
       final datos = await Api.instancia.datos();
       if (!mounted) return;
       widget.onEntrar(datos);

@@ -95,7 +95,9 @@ test('entregar sin cobro: todo queda como deuda («te pago mañana»)', async ()
 });
 
 test('mi día, rendición del vendedor y recepción en caja', async () => {
-  sql(`DELETE FROM core.rendicion_cobranza WHERE vendedor_id = (SELECT id FROM core.usuario WHERE usuario = 'cmedina') AND fecha = (now() AT TIME ZONE 'America/Lima')::date`);
+  // Cada cobro queda ligado a su rendición: se sueltan antes de borrar las de hoy.
+  sql(`UPDATE core.cobranza SET rendicion_id = NULL WHERE rendicion_id IN (SELECT id FROM core.rendicion_cobranza WHERE vendedor_id = (SELECT id FROM core.usuario WHERE usuario = 'cmedina') AND fecha = (now() AT TIME ZONE 'America/Lima')::date)`);
+  sql(`DELETE FROM core.rendicion_cobranza WHERE id IN (SELECT id FROM core.rendicion_cobranza WHERE vendedor_id = (SELECT id FROM core.usuario WHERE usuario = 'cmedina') AND fecha = (now() AT TIME ZONE 'America/Lima')::date)`);
   const dia = await api(ven, 'GET', '/cobranza/mi-dia');
   assert.equal(dia.s, 200, JSON.stringify(dia.b));
   assert.ok(dia.b.porMedio.EFECTIVO >= 10 && dia.b.porMedio.YAPE >= 5, 'lo cobrado hoy por forma de pago');
@@ -117,5 +119,5 @@ test('mi día, rendición del vendedor y recepción en caja', async () => {
   assert.equal(rec.s, 200, JSON.stringify(rec.b));
   assert.equal(rec.b.diferencia, -1);
   assert.equal((await api(ger, 'POST', `/cobranza/rendiciones/${r.b.id}/recibir`, { efectivoRecibido: 1 })).s, 409, 'no se recibe dos veces');
-  assert.equal((await api(ven, 'POST', '/cobranza/rendiciones', { efectivoEntregado: 1 })).s, 409, 'ya recibida: no se cambia');
+  assert.equal((await api(ven, 'POST', '/cobranza/rendiciones', { efectivoEntregado: 1 })).s, 422, 'ya recibida y sin cobros nuevos: no hay nada que rendir');
 });

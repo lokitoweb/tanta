@@ -258,21 +258,37 @@ class Api {
   }
 
   /// Inicia sesión y carga el perfil (rol, permisos y menú calculados por el servidor).
-  Future<void> login(String usuario, String clave) async {
+  /// Si el rol exige verificación en dos pasos devuelve el paso pendiente (código o enrolamiento);
+  /// la sesión se abre con [completarMfa].
+  Future<PasoMfa?> login(String usuario, String clave) async {
     final datos = await _post('/auth/login', {'usuario': usuario, 'clave': clave}, sinAuth: true)
         as Map<String, dynamic>;
 
     if (datos['accessToken'] == null) {
-      // El servidor pidió segundo factor: en el móvil se resuelve desde la web
-      // para no duplicar el enrolamiento en dos dispositivos.
-      throw ApiException(
-        401,
-        datos['mfaRequerido'] == true || datos['mfaEnrolamiento'] == true
-            ? 'Este perfil usa verificación en dos pasos. Ingresa desde el sistema web.'
-            : 'No se pudo iniciar sesión.',
-      );
+      if (datos['ticket'] is String && (datos['mfaRequerido'] == true || datos['mfaEnrolamiento'] == true)) {
+        return PasoMfa(datos['ticket'] as String, enrolar: datos['mfaEnrolamiento'] == true);
+      }
+      throw ApiException(401, 'No se pudo iniciar sesión.');
     }
+    await _abrirSesion(datos);
+    return null;
+  }
 
+  /// Primer ingreso de un rol con dos pasos: el servidor genera la clave para la app autenticadora.
+  Future<Map<String, dynamic>> enrolarMfa(String ticket) async =>
+      await _post('/auth/mfa/enrolar', {'ticket': ticket}, sinAuth: true) as Map<String, dynamic>;
+
+  /// Envía el código de 6 dígitos (o uno de recuperación) y abre la sesión.
+  /// Al activar por primera vez devuelve los códigos de recuperación, que se muestran una sola vez.
+  Future<List<String>> completarMfa(String ticket, String codigo, {required bool activar}) async {
+    final datos = await _post(activar ? '/auth/mfa/activar' : '/auth/mfa/verificar', {'ticket': ticket, 'codigo': codigo.trim()}, sinAuth: true)
+        as Map<String, dynamic>;
+    if (datos['accessToken'] == null) throw ApiException(401, 'No se pudo iniciar sesión.');
+    await _abrirSesion(datos);
+    return ((datos['codigosRecuperacion'] as List?) ?? const []).cast<String>();
+  }
+
+  Future<void> _abrirSesion(Map<String, dynamic> datos) async {
     // En la app nativa el refresco llega en el cuerpo; en un navegador viaja en
     // una cookie HttpOnly y aquí llega vacío (la sesión no se refresca, es lo correcto).
     await _guardar(
@@ -613,6 +629,13 @@ class Api {
   static const _modulos = {'pedidos': 'pedidos', 'ventas': 'ventas', 'cobranza': 'cobranza', 'produccion': 'produccion', 'inventario': 'almacen', 'requisiciones': 'almacen', 'catalogo': 'catalogo'};
 
   bool moduloActivo(String modulo) => modulo.isEmpty || ((config['movil'] as Map?)?['modulos'] as Map?)?[modulo] != false;
+}
+
+/// Paso pendiente del ingreso: código de la app autenticadora, o activarla por primera vez.
+class PasoMfa {
+  PasoMfa(this.ticket, {required this.enrolar});
+  final String ticket;
+  final bool enrolar;
 }
 
 class ApiException implements Exception {

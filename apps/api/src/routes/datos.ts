@@ -46,7 +46,7 @@ export async function rutasDatos(app: FastifyInstance) {
                  coalesce(sum(CASE WHEN vence_en < current_date THEN saldo ELSE 0 END),0) AS vencido,
                  -- Días promedio de cobro real (emisión → pago) de los últimos 90 días.
                  coalesce((SELECT avg(cb.creado_en::date - x.creado_en::date) FROM core.cobranza cb JOIN core.cuenta_por_cobrar x ON x.id = cb.cxc_id
-                           WHERE cb.creado_en >= now() - interval '90 days'), 0) AS dias_cobro
+                           WHERE cb.estado = 'VIGENTE' AND cb.creado_en >= now() - interval '90 days'), 0) AS dias_cobro
           FROM core.cuenta_por_cobrar WHERE estado IN ('PENDIENTE','PARCIAL')
         ), merma AS (
           SELECT coalesce(sum(abs(valor)),0) AS valor

@@ -456,7 +456,7 @@ export async function rutasSistema(app: FastifyInstance) {
   app.get('/sistema/roles', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'roles.gestionar')) return;
     const [roles, permisos, asignados] = await Promise.all([
-      q('SELECT id, nombre, descripcion, perfil FROM core.rol ORDER BY orden'),
+      q('SELECT id, nombre, descripcion, perfil, exige_mfa "exigeMfa" FROM core.rol ORDER BY orden'),
       q('SELECT id, grupo, descripcion FROM core.permiso ORDER BY grupo, id'),
       q<{ rol_id: string; permiso_id: string }>('SELECT rol_id, permiso_id FROM core.rol_permiso'),
     ]);
@@ -467,6 +467,7 @@ export async function rutasSistema(app: FastifyInstance) {
   const NuevoRol = z.object({
     nombre: z.string().trim().min(3).max(40), descripcion: z.string().trim().max(120).default(''),
     perfil: z.enum(['web', 'app', 'tablet']).default('web'),
+    exigeMfa: z.boolean().default(false),
   });
   const ROLES_BASE = new Set(['SUPERADMIN', 'GERENTE', 'ADMINISTRADOR', 'PRODUCCION', 'ALMACEN', 'VENDEDOR', 'CLIENTE', 'SOPORTE']);
 
@@ -478,12 +479,27 @@ export async function rutasSistema(app: FastifyInstance) {
     if (!id || await uno('SELECT 1 FROM core.rol WHERE id = $1 OR lower(nombre) = lower($2)', [id, p.data.nombre])) {
       return reply.code(409).send(error(409, 'DUPLICADO', 'Ya existe un rol con ese nombre.'));
     }
-    await q(`INSERT INTO core.rol (id, nombre, corto, descripcion, perfil, icono, orden)
-             VALUES ($1,$2,$2,$3,$4,'user',(SELECT coalesce(max(orden),0)+1 FROM core.rol))`, [id, p.data.nombre, p.data.descripcion, p.data.perfil]);
+    await q(`INSERT INTO core.rol (id, nombre, corto, descripcion, perfil, icono, orden, exige_mfa)
+             VALUES ($1,$2,$2,$3,$4,'user',(SELECT coalesce(max(orden),0)+1 FROM core.rol),$5)`, [id, p.data.nombre, p.data.descripcion, p.data.perfil, p.data.exigeMfa]);
     // Todo rol ve al menos su panel: sin eso no tendría pantalla de inicio.
     await q("INSERT INTO core.rol_permiso (rol_id, permiso_id) VALUES ($1, 'panel.ver') ON CONFLICT DO NOTHING", [id]);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'ROL_CREADO', entidad: 'rol', entidadId: id, detalle: p.data, ip: req.ip });
     return reply.code(201).send({ id, ...p.data });
+  });
+
+  // Verificación en dos pasos por rol. Exigirla lo puede cualquiera que gestione roles; quitarla, solo el
+  // Superadministrador (baja la seguridad), y el rol Superadministrador siempre la exige.
+  app.patch('/sistema/roles/:id/seguridad', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'roles.gestionar')) return;
+    const { id } = req.params as { id: string };
+    const p = z.object({ exigeMfa: z.boolean() }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica si el rol exige verificación en dos pasos.'));
+    if (!p.data.exigeMfa && id === 'SUPERADMIN') return reply.code(409).send(error(409, 'ROL_PROTEGIDO', 'El Superadministrador siempre exige verificación en dos pasos.'));
+    if (!p.data.exigeMfa && req.usuario!.rol !== 'SUPERADMIN') return reply.code(403).send(error(403, 'SIN_PERMISO', 'Solo el Superadministrador quita la verificación en dos pasos de un rol.'));
+    const r = await q('UPDATE core.rol SET exige_mfa = $2 WHERE id = $1 RETURNING id', [id, p.data.exigeMfa]);
+    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El rol no existe.'));
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'ROL_MFA_CAMBIADO', entidad: 'rol', entidadId: id, detalle: p.data, ip: req.ip });
+    return { id, exigeMfa: p.data.exigeMfa };
   });
 
   app.delete('/sistema/roles/:id', { preHandler: autenticar }, async (req, reply) => {

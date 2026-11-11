@@ -4,7 +4,7 @@ import { q, tx, uno, num } from '../db.js';
 import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { calcularOrden, fechaEntregaSugerida, reservarListo } from './flujo.js';
-import { cierreOP } from './operaciones.js';
+import { cierreOP, congelarReceta } from './operaciones.js';
 import { avisar } from './notificaciones.js';
 
 /**
@@ -141,9 +141,10 @@ export async function rutasHojas(app: FastifyInstance) {
           }
           const op = (await c.query<{ n: string }>(`SELECT 'OP-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.op_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
           // lotes NULL: el maestro puede producir más que lo pedido (460 de 450); el costo se calcula con lo real.
-          await c.query(`INSERT INTO core.orden_produccion (codigo, producto_id, producto, receta_id, cantidad, estado, entrega, responsable, merma_esperada, criterio,
-              unidades_esperadas, masa_kg, hoja_id, iniciada_en, avance) VALUES ($1,$2,$3,$4,$5,'EN_PROCESO',$6,$7,$8,'PROPORCIONAL',$9,$10,$11,now(),0.05)`,
-            [op, l.producto_id, rec.producto, rec.id, l.cantidad, p.data.fecha, req.usuario!.nombre, rec.merma_estandar, calc.unidadesObtenidas, calc.masaKg, hojaId]);
+          const opId = (await c.query<{ id: string }>(`INSERT INTO core.orden_produccion (codigo, producto_id, producto, receta_id, cantidad, estado, entrega, responsable, merma_esperada, criterio,
+              unidades_esperadas, masa_kg, hoja_id, iniciada_en, avance) VALUES ($1,$2,$3,$4,$5,'EN_PROCESO',$6,$7,$8,'PROPORCIONAL',$9,$10,$11,now(),0.05) RETURNING id`,
+            [op, l.producto_id, rec.producto, rec.id, l.cantidad, p.data.fecha, req.usuario!.nombre, rec.merma_estandar, calc.unidadesObtenidas, calc.masaKg, hojaId])).rows[0].id;
+          await congelarReceta(c, opId, rec.id);
         }
         await c.query(`UPDATE core.pedido SET estado = 'EN_PRODUCCION', hoja_id = $2 WHERE id = ANY($1::uuid[])`, [pedidos, hojaId]);
         return cod;

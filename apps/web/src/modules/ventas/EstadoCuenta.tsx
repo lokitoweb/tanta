@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { VerComprobante } from '@/ui/VerComprobante';
 import { useApp } from '@/core/app-state';
 import { fechaLarga, money } from '@/core/format';
@@ -8,8 +9,10 @@ export interface EstadoCuenta {
   cliente: { nombre: string; documento: string; condicion: string; limiteCredito: number; diasCredito: number };
   saldo: number; vencido: number;
   documentos: Array<{ documento: string; fecha: string; vence: string; monto: number; pagado: number; saldo: number; estado: string; diasVencido: number }>;
-  pagos: Array<{ recibo: string; fecha: string; medio: string; referencia: string | null; monto: number; comprobanteUrl?: string | null }>;
+  pagos: Array<PagoEstado>;
 }
+
+export interface PagoEstado { id: string; estado: 'VIGENTE' | 'ANULADO'; motivoAnulacion?: string | null; recibo: string; fecha: string; medio: string; referencia: string | null; monto: number; comprobanteUrl?: string | null }
 
 /** 2026-11-05 → 05/11/2026 (las fechas llegan como texto de Postgres, sin hora: no pasan por Date para no correr el día). */
 const dma = (iso: string) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
@@ -23,11 +26,21 @@ function imprimir() {
   window.print();
 }
 
-export function DialogoEstadoCuenta({ estado, onCerrar }: { estado: EstadoCuenta | null; onCerrar: () => void }) {
+/** onAnular: solo para quien tiene cobranza.anular; anula el recibo completo (o el cobro suelto) con motivo. */
+export function DialogoEstadoCuenta({ estado, onCerrar, onAnular }: { estado: EstadoCuenta | null; onCerrar: () => void; onAnular?: (p: PagoEstado, motivo: string) => Promise<void> }) {
   const { dataset } = useApp();
+  const [anular, setAnular] = useState<{ p: PagoEstado; motivo: string; error?: string; enviando?: boolean } | null>(null);
   const n = dataset.negocio;
   if (!estado) return null;
-  const { cliente: c, documentos: docs, pagos } = estado;
+  const { cliente: c, documentos: docs } = estado;
+  const pagos = estado.pagos.filter((p) => p.estado !== 'ANULADO');
+  const anulados = estado.pagos.filter((p) => p.estado === 'ANULADO');
+  const confirmar = async () => {
+    if (!anular || !onAnular) return;
+    setAnular({ ...anular, enviando: true, error: undefined });
+    try { await onAnular(anular.p, anular.motivo.trim()); setAnular(null); }
+    catch (e) { setAnular({ ...anular, enviando: false, error: e instanceof Error ? e.message : 'No se pudo anular.' }); }
+  };
   const pendientes = docs.filter((d) => d.saldo > 0);
   const porVencer = estado.saldo - estado.vencido;
   const disponible = c.limiteCredito - estado.saldo;
@@ -85,14 +98,28 @@ export function DialogoEstadoCuenta({ estado, onCerrar }: { estado: EstadoCuenta
         <h4 className="edc__seccion">Pagos recibidos</h4>
         {pagos.length ? (
           <div className="table-wrap"><table className="table table--compacta edc__tabla">
-            <thead><tr><th>Recibo</th><th>Fecha</th><th>Medio</th><th>N.° de operación</th><th className="t-right">Monto</th></tr></thead>
+            <thead><tr><th>Recibo</th><th>Fecha</th><th>Medio</th><th>N.° de operación</th><th className="t-right">Monto</th>{onAnular && <th className="edc__acciones" />}</tr></thead>
             <tbody>{pagos.map((p, i) => (
               <tr key={i}><td className="t-mono">{p.recibo}{p.comprobanteUrl && <> · <VerComprobante url={p.comprobanteUrl} texto="voucher" titulo={`Voucher ${p.recibo}`} /></>}</td><td>{dma(p.fecha)}</td><td className="edc__medio">{p.medio.toLowerCase()}</td>
-                <td className="t-muted">{p.referencia || '—'}</td><td className="t-right">{money(p.monto)}</td></tr>
+                <td className="t-muted">{p.referencia || '—'}</td><td className="t-right">{money(p.monto)}</td>
+                {onAnular && <td className="t-right edc__acciones"><Boton size="sm" variant="ghost" onClick={() => setAnular({ p, motivo: '' })}>Anular</Boton></td>}</tr>
             ))}</tbody>
-            <tfoot><tr><td colSpan={4}>Total pagado</td><td className="t-right">{money(suma(pagos, (p) => p.monto))}</td></tr></tfoot>
+            <tfoot><tr><td colSpan={4}>Total pagado</td><td className="t-right">{money(suma(pagos, (p) => p.monto))}</td>{onAnular && <td className="edc__acciones" />}</tr></tfoot>
           </table></div>
         ) : <p className="edc__vacio">Aún no hay pagos registrados.</p>}
+
+        {anular && (
+          <div className="form form--dialogo edc__acciones" role="group" aria-label="Anular pago">
+            <p className="field--ancho"><strong>Anular {anular.p.recibo !== '—' ? `el recibo ${anular.p.recibo} completo` : 'este cobro'}</strong> · la deuda vuelve al cliente; si caja ya recibió el dinero, sale de caja grande. Queda auditado.</p>
+            <label className="field field--ancho"><span className="field__label">Motivo</span>
+              <input className="field__input" maxLength={300} autoFocus value={anular.motivo} placeholder="Monto mal digitado, pago duplicado…" onChange={(e) => setAnular({ ...anular, motivo: e.target.value })} /></label>
+            {anular.error && <p className="form__error field--ancho" role="alert">{anular.error}</p>}
+            <div className="fila-acciones field--ancho"><Boton onClick={() => setAnular(null)}>Cancelar</Boton>
+              <Boton variant="danger" disabled={anular.enviando || anular.motivo.trim().length < 5} onClick={() => void confirmar()}>{anular.enviando ? 'Anulando…' : 'Anular pago'}</Boton></div>
+          </div>
+        )}
+
+        {anulados.length > 0 && <p className="edc__nota">Pagos anulados (no suman): {anulados.map((p) => `${p.recibo !== '—' ? p.recibo : dma(p.fecha)} ${money(p.monto)}${p.motivoAnulacion ? ` — ${p.motivoAnulacion}` : ''}`).join(' · ')}</p>}
 
         <p className="edc__nota">Montos en soles, IGV incluido. Los pagos se aplican a los documentos más antiguos primero.
           {estado.vencido > 0 && ` Le agradeceremos regularizar el saldo vencido de ${money(estado.vencido)}.`}</p>

@@ -46,6 +46,7 @@ const PERMISOS: Array<[string, string, string]> = [
   ['ventas.registrar', 'Ventas', 'Registrar venta a terceros'],
   ['cobranza.ver', 'Cobranza', 'Ver cartera y deudas'],
   ['cobranza.registrar', 'Cobranza', 'Registrar pagos totales o parciales'],
+  ['cobranza.anular', 'Cobranza', 'Anular cobros y recibos con motivo: la deuda vuelve y, si ya se rindió, sale de caja grande'],
   ['clientes.ver', 'Ventas', 'Ver ficha de clientes'],
   ['reportes.ver', 'Gerencia', 'Ver y exportar reportes'],
   ['usuarios.gestionar', 'Seguridad', 'Alta, baja y bloqueo de usuarios'],
@@ -89,9 +90,9 @@ const ROLES: Array<[string, string, string, string, string, string, number, stri
   ['SUPERADMIN', 'Superadministrador', 'Sistema', 'Configuración total del sistema', 'web', 'shield', 0,
     PERMISOS.map(([id]) => id)],
   ['GERENTE', 'Gerente', 'Gerencia', 'Costos, rentabilidad y márgenes', 'web', 'chart', 1,
-    ['caja.grande.ver', 'caja.rendiciones', 'clientes.avisar', 'promociones.gestionar', 'despacho.ver', 'despacho.gestionar', 'gastos.registrar', 'panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'descuentos.aprobar', 'conteo.aprobar', 'usuarios.ver', 'clientes.ver', 'alertas.stock', 'alertas.ventas', 'compras.ver', 'deudas.ver']],
+    ['caja.grande.ver', 'caja.rendiciones', 'clientes.avisar', 'promociones.gestionar', 'despacho.ver', 'despacho.gestionar', 'gastos.registrar', 'panel.ver', 'dashboard.ver', 'costos.ver', 'reportes.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'cobranza.ver', 'periodos.cerrar', 'auditoria.ver', 'catalogo.ver', 'recetas.ver', 'produccion.ver', 'ventas.anular', 'cobranza.anular', 'descuentos.aprobar', 'conteo.aprobar', 'usuarios.ver', 'clientes.ver', 'alertas.stock', 'alertas.ventas', 'compras.ver', 'deudas.ver']],
   ['ADMINISTRADOR', 'Administrador', 'Maestros', 'Productos, recetas, costos y usuarios', 'web', 'settings', 2,
-    ['caja.grande.ver', 'caja.grande.gestionar', 'caja.rendiciones', 'clientes.avisar', 'promociones.gestionar', 'despacho.ver', 'despacho.gestionar', 'gastos.registrar', 'panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular', 'proveedores.gestionar', 'usuarios.ver', 'compras.registrar', 'compras.ver', 'compras.autorizar', 'compras.anular', 'insumos.gestionar', 'compras.pagar', 'deudas.ver', 'compras.verificar', 'pedidos.gestionar']],
+    ['caja.grande.ver', 'caja.grande.gestionar', 'caja.rendiciones', 'clientes.avisar', 'promociones.gestionar', 'despacho.ver', 'despacho.gestionar', 'gastos.registrar', 'panel.ver', 'maestros.ver', 'maestros.editar', 'recetas.ver', 'recetas.editar', 'costos.ver', 'inventario.ver', 'usuarios.gestionar', 'reportes.ver', 'parametros.gestionar', 'clientes.gestionar', 'auditoria.ver', 'pedidos.ver', 'produccion.ver', 'cobranza.ver', 'dashboard.ver', 'catalogo.ver', 'ventas.anular', 'cobranza.anular', 'proveedores.gestionar', 'usuarios.ver', 'compras.registrar', 'compras.ver', 'compras.autorizar', 'compras.anular', 'insumos.gestionar', 'compras.pagar', 'deudas.ver', 'compras.verificar', 'pedidos.gestionar']],
   ['PRODUCCION', 'Producción', 'Producción', 'Órdenes de producción y merma', 'tablet', 'oven', 3,
     ['panel.ver', 'produccion.ver', 'produccion.ejecutar', 'produccion.planificar', 'recetas.ver', 'maestros.ver', 'inventario.ver', 'pedidos.ver', 'catalogo.ver']],
   ['ALMACEN', 'Almacén', 'Almacén', 'Stock, bajas y kárdex', 'app', 'box', 4,
@@ -246,6 +247,8 @@ async function main() {
         await c.query('INSERT INTO core.rol_permiso (rol_id, permiso_id) VALUES ($1,$2)', [id, p]);
       }
     }
+    // Verificación en dos pasos: por defecto en los roles que ven dinero y configuración (administrable en Roles).
+    await c.query("UPDATE core.rol SET exige_mfa = true WHERE id IN ('SUPERADMIN','GERENTE','ADMINISTRADOR')");
 
     // -------------------------------------------------------- navegación
     for (const [id, grupo, etiqueta, ruta, icono, permiso, orden, grupoOrden] of NAV) {

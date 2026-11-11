@@ -6,7 +6,7 @@ import { auditar } from '../auditoria.js';
 import { emitirEvento } from './sistema.js';
 import { avisar } from './notificaciones.js';
 
-import { presentacionesDe } from './operaciones.js';
+import { presentacionesDe, congelarReceta } from './operaciones.js';
 
 /**
  * Flujo operativo del PDF (Fig. 2): el cliente registra su pedido → Producción consolida y
@@ -462,6 +462,7 @@ export async function rutasFlujo(app: FastifyInstance) {
                      VALUES ($1,$2,$3,$4,$5,'PENDIENTE',$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
         [cod, d.productoId, rec.producto, rec.id, d.cantidad, d.entrega, req.usuario!.nombre, rec.merma_estandar, d.pedidoId ?? null,
           d.criterio, calc.lotes, calc.unidadesObtenidas, calc.masaKg])).rows[0].id;
+      await congelarReceta(c, opId, rec.id);
       // PRO-05: la OP genera su requisición; Almacén descuenta el stock al entregar (RN-27).
       const reqId = (await c.query<{ id: string }>(`INSERT INTO core.requisicion (codigo, op_id)
         VALUES ('REQ-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.requisicion_correlativo_seq')::text, 6, '0'), $1) RETURNING id`, [opId])).rows[0].id;

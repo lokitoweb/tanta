@@ -15,7 +15,7 @@ import { actor, fallo, responder } from './almacen.js';
  */
 
 export type TipoMovimiento = 'SALDO_INICIAL' | 'AJUSTE' | 'RENDICION' | 'CIERRE_CAJA_CHICA' | 'FONDO_CAJA_CHICA'
-  | 'PAGO_COMPRA' | 'PAGO_COSTO' | 'DEPOSITO_SALIDA' | 'DEPOSITO_ENTRADA';
+  | 'PAGO_COMPRA' | 'PAGO_COSTO' | 'DEPOSITO_SALIDA' | 'DEPOSITO_ENTRADA' | 'ANULACION_COBRO';
 
 const dos = (n: number) => Math.round(n * 100) / 100;
 

@@ -528,10 +528,12 @@ class _MiDiaState extends State<MiDia> {
 
   Future<void> _rendir() async {
     final d = _dia!;
-    final esperado = _d(d['efectivo']);
+    // Se rinde lo que aún no entró a caja: lo nuevo y lo de una rendición pendiente (servidores anteriores: todo el día).
+    final pr = (d['porRendir'] as Map?)?.cast<String, dynamic>() ?? d;
+    final esperado = _d(pr['efectivo']);
     final entregado = TextEditingController(text: esperado.toStringAsFixed(2));
     final nota = TextEditingController();
-    final porMedio = (d['porMedio'] as Map? ?? const {}).cast<String, dynamic>();
+    final porMedio = (pr['porMedio'] as Map? ?? const {}).cast<String, dynamic>();
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -545,7 +547,7 @@ class _MiDiaState extends State<MiDia> {
               const Expanded(child: Text('Rendir mi día', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
               IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close), tooltip: 'Cerrar'),
             ]),
-            const Text('Lo que cobraste hoy, según el sistema. Entrega el efectivo a la persona encargada de caja.',
+            const Text('Lo que cobraste y aún no entregaste, según el sistema. Entrega el efectivo a la persona encargada de caja. Lo cobrado no va a tu caja chica.',
                 style: TextStyle(fontSize: 12.5, color: TantaColors.textMuted)),
             const SizedBox(height: 12),
             for (final e in porMedio.entries)
@@ -555,8 +557,8 @@ class _MiDiaState extends State<MiDia> {
               ])),
             const Divider(height: 18),
             Row(children: [
-              const Expanded(child: Text('Total cobrado', style: TextStyle(fontWeight: FontWeight.w700))),
-              Text(dinero(_d(d['total'])), style: const TextStyle(fontWeight: FontWeight.w700)),
+              const Expanded(child: Text('Por rendir', style: TextStyle(fontWeight: FontWeight.w700))),
+              Text(dinero(_d(pr['total'])), style: const TextStyle(fontWeight: FontWeight.w700)),
             ]),
             const SizedBox(height: 14),
             TextField(controller: entregado, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => set(() {}),
@@ -592,6 +594,7 @@ class _MiDiaState extends State<MiDia> {
     final porMedio = (d['porMedio'] as Map? ?? const {}).cast<String, dynamic>();
     final r = (d['rendicion'] as Map?)?.cast<String, dynamic>();
     final total = _d(d['total']);
+    final porRendir = _d(((d['porRendir'] as Map?)?.cast<String, dynamic>() ?? (r?['estado'] == 'RECIBIDA' ? const <String, dynamic>{} : d))['total']);
     final entregas = (d['entregas'] as List? ?? const []).cast<Map<String, dynamic>>();
     final quedo = entregas.fold<double>(0, (s, e) => s + _d(e['quedaPorCobrar']));
     final (estado, tono) = r == null
@@ -615,11 +618,11 @@ class _MiDiaState extends State<MiDia> {
           Text('${entregas.length} ${entregas.length == 1 ? 'entrega' : 'entregas'} hoy${quedo > 0.009 ? ' · quedó por cobrar ${dinero(quedo)}' : ''}',
               style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
         if (r != null && r['desactualizada'] == true)
-          const Text('Cobraste después de rendir: vuelve a rendir.', style: TextStyle(fontSize: 12, color: TantaColors.stateWarn)),
-        if (total > 0 && r?['estado'] != 'RECIBIDA') ...[
+          Text('Cobraste después de rendir: ${dinero(porRendir)} por entregar.', style: const TextStyle(fontSize: 12, color: TantaColors.stateWarn)),
+        if (porRendir > 0.009) ...[
           const SizedBox(height: 10),
           OutlinedButton.icon(onPressed: _rendir, icon: const Icon(Icons.point_of_sale_outlined, size: 18),
-              label: Text(r == null ? 'Rendir mi día' : 'Actualizar rendición')),
+              label: Text(r == null ? 'Rendir mi día' : r['estado'] == 'PENDIENTE' ? 'Actualizar rendición' : 'Rendir lo cobrado después')),
         ],
       ]),
     );

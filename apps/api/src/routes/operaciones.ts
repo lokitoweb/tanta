@@ -55,6 +55,16 @@ export async function presentacionesDe(c: import('pg').PoolClient, items: Array<
 export interface DatosCierre { codigo: string; cantidadProducida: number; unidadesMerma: number; mermaReal: number; motivoMerma: string; usuarioId: string;
   consumoReal?: Array<{ insumoId: string; cantidad: number }>; motivoMermaTipo?: string; horasHombreReal?: number; horasHornoReal?: number; sinRecalcular?: boolean }
 
+/**
+ * Congela la receta en la orden al crearla: cantidad de cada insumo por unidad horneada, en unidad de inventario.
+ * Editar la receta después no cambia lo que descuenta una orden que ya está en curso.
+ */
+export async function congelarReceta(c: Cliente, opId: string, recetaId: string) {
+  await c.query(`INSERT INTO core.orden_produccion_insumo (op_id, insumo_id, insumo, unidad, por_unidad, orden)
+    SELECT $1, d.insumo_id, d.insumo, d.unidad, d.cantidad / coalesce(nullif(r.unidades_teoricas, 0), r.rendimiento) * core.factor_inventario(d.insumo_id), d.orden
+    FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $2`, [opId, recetaId]);
+}
+
 /** Cierra una OP dentro de la transacción `c`: ingreso del pan, costo real y, sin requisición, descarga de insumos. */
 export async function cierreOP(c: Cliente, e: DatosCierre) {
   const { codigo, cantidadProducida, unidadesMerma, mermaReal, motivoMerma } = e;
@@ -82,7 +92,10 @@ export async function cierreOP(c: Cliente, e: DatosCierre) {
     if (op.lotes !== null && cantidadProducida + unidadesMerma > lotes * Number(receta?.unidades_teoricas ?? 0) * 1.05 + 1) {
       throw Object.assign(new Error(`Buenas + merma (${cantidadProducida + unidadesMerma}) superan lo preparado (${Math.round(lotes * Number(receta?.unidades_teoricas ?? 0))} unidades).`), { status: 422 });
     }
-    const lineas = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
+    // La receta congelada al crear la orden; las órdenes anteriores a ese cambio usan la receta vigente.
+    const congelada = await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
+      'SELECT insumo_id, insumo, unidad, por_unidad AS cantidad FROM core.orden_produccion_insumo WHERE op_id = $1 ORDER BY orden, id', [op.id]);
+    const lineas = congelada.rowCount ? congelada : await c.query<{ insumo_id: string; insumo: string; unidad: string; cantidad: string }>(
       `SELECT d.insumo_id, d.insumo, d.unidad, d.cantidad / coalesce(nullif(r.unidades_teoricas, 0), r.rendimiento) * core.factor_inventario(d.insumo_id) AS cantidad
        FROM core.receta_detalle d JOIN core.receta r ON r.id = d.receta_id WHERE d.receta_id = $1 ORDER BY d.orden`,
       [op.receta_id],
@@ -697,8 +710,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
         // Un período cerrado tiene reportes definitivos: la corrección va en el mes en curso (nota de crédito), no se reescribe el pasado.
         if (v.cerrado) throw Object.assign(new Error('La venta es de un período ya cerrado: no se puede anular.'), { status: 409 });
         const cobrado = (await c.query<{ n: string }>(
-          'SELECT count(*) n FROM core.cobranza b JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id WHERE x.venta_id = $1', [v.id])).rows[0].n;
-        if (Number(cobrado) > 0) throw Object.assign(new Error('La venta tiene cobros registrados: no se puede anular.'), { status: 409 });
+          "SELECT count(*) n FROM core.cobranza b JOIN core.cuenta_por_cobrar x ON x.id = b.cxc_id WHERE x.venta_id = $1 AND b.estado = 'VIGENTE'", [v.id])).rows[0].n;
+        if (Number(cobrado) > 0) throw Object.assign(new Error('La venta tiene cobros registrados: anula primero sus recibos en Cobranza.'), { status: 409 });
 
         // Mismo orden de bloqueo que POST /ventas (por id de producto): sin deadlocks.
         const lineas = (await c.query<{ producto_id: string; cantidad: string; costo_unitario: string; stock: string; cpp: string }>(

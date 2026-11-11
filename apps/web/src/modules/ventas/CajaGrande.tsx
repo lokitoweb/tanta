@@ -12,7 +12,7 @@ interface Datos { cuentas: Cuenta[]; total: number; movimientos: Movimiento[] }
 type Form = { tipo: 'DEPOSITO' | 'SALDO_INICIAL' | 'AJUSTE'; cuenta: string; cuentaDestino: string; monto: string; signo: 1 | -1; concepto: string; nroOperacion: string };
 
 const TIPO: Record<string, string> = {
-  SALDO_INICIAL: 'Saldo inicial', AJUSTE: 'Ajuste', RENDICION: 'Rendición de vendedor', CIERRE_CAJA_CHICA: 'Cierre de caja chica', FONDO_CAJA_CHICA: 'Fondo de caja chica',
+  SALDO_INICIAL: 'Saldo inicial', AJUSTE: 'Ajuste', RENDICION: 'Rendición de vendedor', ANULACION_COBRO: 'Cobro anulado', CIERRE_CAJA_CHICA: 'Cierre de caja chica', FONDO_CAJA_CHICA: 'Fondo de caja chica',
   PAGO_COMPRA: 'Pago a proveedor', PAGO_COSTO: 'Pago de costo', DEPOSITO_SALIDA: 'Depósito (sale)', DEPOSITO_ENTRADA: 'Depósito (entra)',
 };
 const MANUALES = new Set(['SALDO_INICIAL', 'AJUSTE', 'DEPOSITO_SALIDA', 'DEPOSITO_ENTRADA']);
