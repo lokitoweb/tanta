@@ -114,12 +114,13 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   const stockAntes = stock();
   const lineas = (await api(pro, 'GET', `/produccion/hojas/${cod}`)).b.resumen.map((r) => ({ productoId: r.productoId, real: r.pedido + 5 }));
   // Word 04 (200 pedidos, 2,080 producidos): una diferencia mayor a la tolerancia pide confirmación.
-  param('tolerancia_produccion', '0.10');
+  param('tolerancia_produccion', '0.001'); // mínima: la hoja puede traer pedidos de otras pruebas y +5 no llegar al 10 %
   const dudosa = await api(pro, 'POST', `/produccion/hojas/${cod}/cerrar`, { lineas });
   assert.equal(dudosa.s, 409, JSON.stringify(dudosa.b));
   assert.match(dudosa.b.detail, /se aleja de lo solicitado/);
   assert.equal(stock(), stockAntes, 'sin confirmar no se mueve el almacén');
   const cerrada = await api(pro, 'POST', `/produccion/hojas/${cod}/cerrar`, { lineas, confirmar: true });
+  param('tolerancia_produccion', '0.10');
   assert.equal(cerrada.s, 200, JSON.stringify(cerrada.b));
   assert.equal(cerrada.b.sinStock.length, 0);
   assert.equal(stock(), stockAntes + pedido + 5, 'los panes reales entran al almacén');
