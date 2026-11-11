@@ -43,36 +43,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
-  Future<void> _cambiarServidor() async {
-    final campo = TextEditingController(text: Api.base.replaceAll(RegExp(r'/api/v1$'), ''));
-    final url = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Servidor'),
-        content: TextField(
-          controller: campo,
-          autofocus: true,
-          keyboardType: TextInputType.url,
-          decoration: const InputDecoration(labelText: 'Dirección del sistema', hintText: 'https://tu-dominio.com'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, campo.text), child: const Text('Conectar')),
-        ],
-      ),
-    );
-    if (url == null || url.trim().isEmpty || !mounted) return;
-    setState(() { _cargando = true; _error = null; _ok = null; });
-    try {
-      await Api.instancia.cambiarServidor(url, forzar: true);
-      if (mounted) setState(() => _ok = 'Conectado a ${Uri.tryParse(Api.base)?.host ?? url}. Ya puedes ingresar.');
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _cargando = false);
-    }
-  }
-
   Future<void> _entrar() async {
     FocusScope.of(context).unfocus();
     setState(() { _cargando = true; _error = null; _ok = null; });
@@ -199,12 +169,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             if (msg != null && mounted) setState(() { _ok = msg; _error = null; });
                           },
                           child: const Text('¿Eres cliente nuevo? Crear cuenta'),
-                        ),
-                        // El servidor al que se conecta y cómo cambiarlo (p. ej. un túnel con dirección nueva).
-                        TextButton(
-                          onPressed: _cargando ? null : _cambiarServidor,
-                          child: Text('Servidor: ${Uri.tryParse(Api.base)?.host ?? '—'} · Cambiar',
-                              style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
                         ),
                         if (_esDemo) ...[
                           const SizedBox(height: 24),

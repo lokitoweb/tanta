@@ -20,7 +20,7 @@ type Config = Record<string, unknown>;
 const SECCIONES = ['marca', 'movil', 'legal', 'firebase', 'webhook', 'correo'] as const;
 type Seccion = (typeof SECCIONES)[number];
 // Campos que nunca salen del servidor: se devuelven como "••••" si tienen valor.
-const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'], correo: ['clave'] };
+const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'], correo: ['clave'], movil: ['tokenGithub'] };
 const MASCARA = '••••••••';
 
 /**
@@ -76,7 +76,10 @@ const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
     // Secciones de la app que el superadmin activa o apaga para todos (además del permiso del rol).
     modulos: z.record(z.string().regex(/^[a-z]+$/), z.boolean()).optional().default({}),
     // Repositorio que compila la APK (dueño/nombre): de su último release salen versión y enlace.
-    repoGithub: z.union([z.literal(''), z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'Formato dueño/repositorio')]).optional().default('') }),
+    repoGithub: z.union([z.literal(''), z.string().regex(/^[\w.-]+\/[\w.-]+$/, 'Formato dueño/repositorio')]).optional().default(''),
+    // Token de GitHub (solo «Contents: read and write» de ese repositorio): con él el sistema publica su dominio
+    // y las apps instaladas lo encuentran solas aunque el anterior ya no exista. Cifrado; nunca sale del servidor.
+    tokenGithub: z.string().trim().max(300).optional().default('') }),
   legal: z.object({ urlPrivacidad: urlHttps, urlTerminos: urlHttps, correoSoporte: z.union([z.literal(''), z.string().email()]),
     textoPrivacidad: z.string().max(60_000).optional().default(''), textoTerminos: z.string().max(60_000).optional().default('') }),
   firebase: z.object({ habilitado: z.boolean(), projectId: z.string().max(100), apiKey: z.string().max(100),
@@ -124,11 +127,48 @@ export async function seguirDominio(hostCrudo: string | undefined): Promise<void
   const movil = await leerConfig('movil') as { urlApi?: string };
   const guardado = String(movil.urlApi ?? '').replace(/\/api\/v1$/, '').replace(/\/+$/, '');
   ultimoDominio = nuevo;
+  // Directorio público: las apps cuyo servidor anterior ya no existe encuentran aquí el nuevo.
+  void publicarDominio(nuevo);
   if (guardado === nuevo) return;
   await q(`UPDATE core.configuracion SET valor = valor || jsonb_build_object('urlApi', $1::text), actualizado_en = now() WHERE clave = 'movil'`, [nuevo]);
   invalidar('cfg:movil');
   await auditar({ actorId: null, actor: 'Sistema', rol: 'SISTEMA', accion: 'DOMINIO_ACTUALIZADO', entidad: 'configuracion', entidadId: 'movil',
     detalle: { antes: guardado, despues: nuevo, motivo: 'el sistema se abrió desde otro dominio' } }).catch(() => {});
+}
+
+/** Identificador de esta instalación (se crea una vez): las apps solo se mudan a un servidor con el mismo. */
+export async function idInstalacion(): Promise<string> {
+  return recordar('cfg:instalacion', 3_600_000, async () => {
+    await q(`INSERT INTO core.configuracion (clave, valor) VALUES ('instalacion', jsonb_build_object('id', gen_random_uuid()::text)) ON CONFLICT (clave) DO NOTHING`);
+    return String((await uno<{ id: string }>(`SELECT valor->>'id' id FROM core.configuracion WHERE clave = 'instalacion'`))?.id ?? '');
+  });
+}
+
+/**
+ * Publica el dominio vigente en el repositorio (rama «servidor», archivo servidor.json): es la dirección fija que
+ * la APK trae grabada. Si su servidor ya no responde (túnel nuevo, cambio de dominio), la app la lee y se muda sola.
+ * Requiere Configuración → App móvil: repositorio y token. Sin ellos no hace nada; un fallo de GitHub no afecta al sistema.
+ */
+export async function publicarDominio(dominio: string): Promise<'publicado' | 'sin-cambios' | 'sin-configurar' | 'error'> {
+  const m = await leerConfig('movil') as { repoGithub?: string; tokenGithub?: string };
+  if (!m.repoGithub || !m.tokenGithub || !dominio.startsWith('https://')) return 'sin-configurar';
+  const urlApi = `${dominio.replace(/\/+$/, '').replace(/\/api\/v1$/, '')}/api/v1`;
+  const api = `https://api.github.com/repos/${m.repoGithub}/contents/servidor.json`;
+  const cab = { Authorization: `Bearer ${m.tokenGithub}`, Accept: 'application/vnd.github+json', 'User-Agent': 'tanta-api', 'X-GitHub-Api-Version': '2022-11-28' };
+  try {
+    const actual = await fetch(`${api}?ref=servidor`, { headers: cab, signal: AbortSignal.timeout(8000) });
+    const previo = actual.ok ? await actual.json() as { sha: string; content: string } : null;
+    if (previo && JSON.parse(Buffer.from(previo.content, 'base64').toString('utf8')).urlApi === urlApi) return 'sin-cambios';
+    const contenido = JSON.stringify({ urlApi, instalacion: await idInstalacion(), actualizado: new Date().toISOString() }, null, 2) + '\n';
+    const r = await fetch(api, { method: 'PUT', headers: { ...cab, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(8000),
+      body: JSON.stringify({ message: `Servidor: ${urlApi}`, branch: 'servidor', content: Buffer.from(contenido).toString('base64'), ...(previo ? { sha: previo.sha } : {}) }) });
+    if (!r.ok) throw new Error(`GitHub respondió ${r.status}`);
+    await auditar({ actorId: null, actor: 'Sistema', rol: 'SISTEMA', accion: 'DOMINIO_PUBLICADO', entidad: 'configuracion', entidadId: 'movil', detalle: { urlApi } }).catch(() => {});
+    return 'publicado';
+  } catch (e) {
+    console.error('No se pudo publicar el dominio en GitHub:', (e as Error).message);
+    return 'error';
+  }
 }
 
 let ultimaRevision = 0;
@@ -291,6 +331,8 @@ export async function rutasSistema(app: FastifyInstance) {
     // Host real, no X-Forwarded-Host: esa cabecera la pone cualquiera y movería las apps a otro servidor.
     await seguirDominio(req.headers.host);
     const [marca, movil, legal, fb, negocio] = await Promise.all([leerConfig('marca'), leerConfig('movil'), leerConfig('legal'), leerConfig('firebase'), leerNegocio()]);
+    // El token de GitHub es un secreto: jamás en la configuración pública.
+    const { tokenGithub: _token, ...movilPublico } = movil as Record<string, unknown>;
     const f = fb as Record<string, unknown>;
     // no-cache: el navegador revalida siempre; el servidor ya lo tiene en memoria e invalida al guardar.
     reply.header('Cache-Control', 'no-cache');
@@ -307,7 +349,9 @@ export async function rutasSistema(app: FastifyInstance) {
     const claveMin = Math.max(5, Number(p.clave_longitud_minima) || 5);
     return {
       marca, legal: legalPublico, negocio, seguridad: { claveMinima: claveMin }, comprobantes: { leyenda: p.comprobante_leyenda ?? '' },
-      movil: { ...movil, urlApi: dominio && !dominio.endsWith('/api/v1') ? `${dominio}/api/v1` : dominio },
+      movil: { ...movilPublico, urlApi: dominio && !dominio.endsWith('/api/v1') ? `${dominio}/api/v1` : dominio },
+      // Identifica esta instalación: la app solo se muda sola a un servidor que sea el mismo sistema (y conserva la sesión).
+      instalacion: await idInstalacion(),
       // Datos públicos del cliente Firebase (van en toda app); la cuenta de servicio jamás.
       firebase: f.projectId && f.apiKey ? { projectId: f.projectId, apiKey: f.apiKey, appIdAndroid: f.appIdAndroid, appIdIos: f.appIdIos, senderId: f.senderId } : null,
     };
@@ -387,6 +431,8 @@ export async function rutasSistema(app: FastifyInstance) {
     for (const k of SECRETOS[seccion] ?? []) guardar[k] = cifrar(String(guardar[k] ?? ''));
     await q('UPDATE core.configuracion SET valor = $1, actualizado_en = now(), actualizado_por = $2 WHERE clave = $3', [guardar, req.usuario!.id, seccion]);
     invalidar(`cfg:${seccion}`);
+    // Dominio cambiado a mano (o token recién cargado): se publica para que las apps lo encuentren solas.
+    if (seccion === 'movil' && p.data.urlApi) void publicarDominio(p.data.urlApi);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CONFIG_CAMBIADA',
       entidad: 'configuracion', entidadId: seccion, detalle: enmascarar(seccion, p.data), ip: req.ip });
     return enmascarar(seccion, p.data);

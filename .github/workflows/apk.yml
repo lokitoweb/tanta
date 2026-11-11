@@ -83,8 +83,12 @@ jobs:
           echo "$KEYSTORE" | base64 -d > android/app/tanta.jks
           printf 'storeFile=tanta.jks\nstorePassword=%s\nkeyAlias=tanta\nkeyPassword=%s\n' "$CLAVE" "$CLAVE" > android/key.properties
 
+      # DIRECTORIO: dirección fija (rama «servidor» de este repositorio) donde el sistema publica su dominio vigente.
+      # Si el servidor de la app deja de existir (túnel nuevo, cambio de dominio), la app lo lee ahí y se muda sola.
       - name: Compilar
-        run: flutter build apk --release --build-name="$VERSION" --build-number="$BUILD" --dart-define=API_URL="$API"
+        env:
+          DIRECTORIO: https://raw.githubusercontent.com/${{ github.repository }}/servidor/servidor.json
+        run: flutter build apk --release --build-name="$VERSION" --build-number="$BUILD" --dart-define=API_URL="$API" --dart-define=DIRECTORIO="$DIRECTORIO"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- Arranque (Android 11 y anteriores): fondo tinta con la marca, igual que la precarga de la app. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <item android:drawable="@color/tanta_tinta" />
+    <item android:width="220dp" android:height="55dp" android:gravity="center">
+        <bitmap android:gravity="fill" android:src="@drawable/splash_marca" />
+    </item>
 </layer-list>

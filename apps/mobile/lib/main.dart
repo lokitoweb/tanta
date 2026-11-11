@@ -98,12 +98,14 @@ class _RaizState extends State<Raiz> {
   @override
   Widget build(BuildContext context) {
     if (_cargando) {
+      // Precarga: mismo fondo tinta y marca crema que la pantalla de arranque del sistema (sin salto de color).
       return const Scaffold(
+        backgroundColor: TantaColors.ink900,
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Marca(escala: 1.1),
+              Marca(escala: 1.1, invertida: true),
               SizedBox(height: 22),
               SizedBox(
                 width: 26,

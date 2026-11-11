@@ -182,6 +182,10 @@ export function Configuracion() {
               <Campo etiqueta="Repositorio que compila la APK (GitHub)" ancho>
                 <input className="field__input mono" placeholder="dueño/repositorio" value={movil.repoGithub ?? ''} onChange={(e) => campo('movil', 'repoGithub', e.target.value.trim())} />
               </Campo>
+              <Campo etiqueta={`Token de GitHub · secreto · ${movil.tokenGithub === '••••••••' ? 'guardado y cifrado ✓' : movil.tokenGithub ? 'sin guardar' : 'falta'}`} ancho>
+                <input className="field__input mono" type="password" autoComplete="off" placeholder="github_pat_…" value={movil.tokenGithub ?? ''} onChange={(e) => campo('movil', 'tokenGithub', e.target.value.trim())} />
+              </Campo>
+              <p className="dialogo__nota field--ancho">Con el token, cada vez que cambia el dominio (túnel nuevo o cambio aquí) el sistema lo publica en el repositorio y las apps instaladas se mudan solas al abrir, sin que nadie haga nada. Créalo en GitHub → Settings → Developer settings → Fine-grained tokens, solo para este repositorio y con permiso «Contents: Read and write».</p>
               <p className="dialogo__nota field--ancho">Con el repositorio indicado, cada APK que compila GitHub se detecta sola: la versión y el enlace de Android se actualizan aquí y los teléfonos reciben el aviso de actualización. La versión mínima la decides tú (obliga a actualizar).</p>
               <Campo etiqueta="Enlace Android (Google Play o APK)"><input className="field__input" type="url" placeholder="https://play.google.com/store/apps/details?id=…" value={movil.urlAndroid ?? ''} onChange={(e) => campo('movil', 'urlAndroid', e.target.value.trim())} /></Campo>
               <Campo etiqueta="Enlace App Store"><input className="field__input" type="url" placeholder="https://apps.apple.com/app/id…" value={movil.urlIos ?? ''} onChange={(e) => campo('movil', 'urlIos', e.target.value.trim())} /></Campo>

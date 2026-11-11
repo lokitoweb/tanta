@@ -166,7 +166,10 @@ class Api {
     return true;
   }
 
-  Future<dynamic> _get(String ruta, {bool reintentar = true}) async {
+  /// 530: Cloudflare ya no encuentra el túnel (cambió de dirección). Igual que no resolver el dominio.
+  static bool _servidorPerdido(http.Response r) => r.statusCode == 530;
+
+  Future<dynamic> _get(String ruta, {bool reintentar = true, bool mudanza = true}) async {
     late http.Response r;
     try {
       r = await http.get(Uri.parse('$base$ruta'), headers: _cabeceras()).timeout(_limite);
@@ -176,8 +179,11 @@ class Api {
     } on ApiException {
       rethrow;
     } catch (_) {
+      // El servidor pudo cambiar de dominio: se busca en el directorio y se reintenta una vez.
+      if (mudanza && await buscarEnDirectorio()) return _get(ruta, reintentar: reintentar, mudanza: false);
       throw SinConexion();
     }
+    if (mudanza && _servidorPerdido(r) && await buscarEnDirectorio()) return _get(ruta, reintentar: reintentar, mudanza: false);
     return _decodificar(r);
   }
 
@@ -215,6 +221,7 @@ class Api {
     bool reintentar = true,
     bool idempotente = false,
     String? claveIdempotencia,
+    bool mudanza = true,
   }) async {
     // La clave se genera al encolar: si se reintenta cinco veces, el servidor
     // reconoce la operación y no duplica el cobro.
@@ -236,8 +243,15 @@ class Api {
         r = await http.post(Uri.parse('$base$ruta'), headers: cabeceras(), body: jsonEncode(cuerpo)).timeout(_limite);
       }
     } catch (_) {
-      // Sin red: la operación queda pendiente y se reintenta sola.
+      // El servidor pudo cambiar de dominio: se busca en el directorio y se reintenta una vez con la misma clave
+      // de idempotencia (no duplica). Si no, sin red: la operación queda pendiente y se reintenta sola.
+      if (mudanza && await buscarEnDirectorio()) {
+        return _post(ruta, cuerpo, sinAuth: sinAuth, reintentar: reintentar, idempotente: idempotente, claveIdempotencia: claveIdempotencia, mudanza: false);
+      }
       throw SinConexion();
+    }
+    if (mudanza && _servidorPerdido(r) && await buscarEnDirectorio()) {
+      return _post(ruta, cuerpo, sinAuth: sinAuth, reintentar: reintentar, idempotente: idempotente, claveIdempotencia: claveIdempotencia, mudanza: false);
     }
     if (firma != null) _clavesSinRespuesta.remove(firma);
     return _trasCambio(ruta, await _decodificar(r));
@@ -461,10 +475,8 @@ class Api {
 
   /// Activación de una app sin dominio compilado. Acepta "https://dominio" y completa /api/v1.
   /// Cambiar de servidor cierra la sesión: los tokens de otro servidor no sirven aquí.
-  /// [forzar]: cambiarlo aunque la app ya tenga uno (enlace «Cambiar servidor» del inicio de sesión;
-  /// un túnel temporal cambia de dirección y la app no debe quedar apuntando a la nada).
-  Future<void> cambiarServidor(String url, {bool forzar = false}) async {
-    if (activada && !forzar) return;
+  Future<void> cambiarServidor(String url) async {
+    if (activada) return;
     // Acepta el enlace del QR (tanta://activar?servidor=…) o la dirección escrita a mano.
     var u = url.trim();
     final enlace = Uri.tryParse(u);
@@ -490,13 +502,58 @@ class Api {
   /* --------------------------------------------- configuración y perfil */
   Future<Map<String, dynamic>> cargarConfig() async {
     if (!activada) return config;
+    var respondio = false;
     try {
       // 5 s: sin red la app abre igual con la marca por defecto.
       final r = await http.get(Uri.parse('$base/config/publica')).timeout(const Duration(seconds: 5));
-      if (r.statusCode == 200) config = jsonDecode(r.body) as Map<String, dynamic>;
-    } catch (_) {/* sin red: se usa la marca por defecto */}
+      if (r.statusCode == 200) {
+        config = jsonDecode(r.body) as Map<String, dynamic>;
+        respondio = true;
+        await _recordarInstalacion();
+      }
+    } catch (_) {/* sin red o servidor que ya no existe */}
+    // Su servidor no responde: puede haber cambiado de dominio (túnel nuevo). Se busca en el directorio.
+    if (!respondio) await buscarEnDirectorio();
     await _seguirServidorIndicado();
     return config;
+  }
+
+  /// Dirección fija que la APK trae grabada (rama «servidor» del repositorio): ahí el sistema publica su dominio vigente.
+  static const _directorio = String.fromEnvironment('DIRECTORIO');
+  DateTime? _ultimaBusqueda;
+
+  Future<void> _recordarInstalacion() async {
+    final id = '${config['instalacion'] ?? ''}';
+    if (id.isNotEmpty) await _seguro.write(key: 'instalacion', value: id);
+  }
+
+  /// Si el servidor no responde, lee el directorio y se muda sola al dominio vigente, sin que el usuario haga nada.
+  /// Solo a https y solo si el nuevo es la MISMA instalación (mismo identificador): por eso conserva la sesión.
+  /// Devuelve true si se mudó (la operación que falló se puede reintentar).
+  Future<bool> buscarEnDirectorio() async {
+    if (_directorio.isEmpty) return false;
+    // Como mucho una consulta cada 30 s: sin red no se insiste en bucle.
+    if (_ultimaBusqueda != null && DateTime.now().difference(_ultimaBusqueda!) < const Duration(seconds: 30)) return false;
+    _ultimaBusqueda = DateTime.now();
+    try {
+      final d = jsonDecode((await http.get(Uri.parse(_directorio)).timeout(const Duration(seconds: 8))).body) as Map<String, dynamic>;
+      final nuevo = '${d['urlApi'] ?? ''}'.trim().replaceAll(RegExp(r'/+$'), '');
+      final instalacion = '${d['instalacion'] ?? ''}';
+      if (!nuevo.startsWith('https://') || nuevo == base || instalacion.isEmpty) return false;
+      final mia = await _seguro.read(key: 'instalacion');
+      if (mia != null && mia.isNotEmpty && mia != instalacion) return false;
+      final r = await http.get(Uri.parse('$nuevo/config/publica')).timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return false;
+      final c = jsonDecode(r.body) as Map<String, dynamic>;
+      if ('${c['instalacion'] ?? ''}' != instalacion) return false;
+      base = nuevo;
+      config = c;
+      await _seguro.write(key: 'servidor', value: nuevo);
+      await _recordarInstalacion();
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Si el superadmin indicó otro servidor (Configuración → App móvil), la app se muda sola,
@@ -507,11 +564,14 @@ class Api {
     try {
       final r = await http.get(Uri.parse('$indicado/config/publica')).timeout(const Duration(seconds: 5));
       if (r.statusCode != 200) return;
-      // Las credenciales son del servidor anterior: no se envían al nuevo (se vuelve a ingresar).
-      if (_refresco != null || _acceso != null) await cerrarSesion();
+      final nueva = jsonDecode(r.body) as Map<String, dynamic>;
+      // Mismo sistema con otro dominio: la sesión sigue valiendo. Otro sistema: se vuelve a ingresar.
+      final misma = '${nueva['instalacion'] ?? ''}'.isNotEmpty && nueva['instalacion'] == config['instalacion'];
+      if (!misma && (_refresco != null || _acceso != null)) await cerrarSesion();
       base = indicado;
-      config = jsonDecode(r.body) as Map<String, dynamic>;
+      config = nueva;
       await _seguro.write(key: 'servidor', value: indicado);
+      await _recordarInstalacion();
     } catch (_) {/* el nuevo aún no responde: se reintenta en la próxima apertura */}
   }
 

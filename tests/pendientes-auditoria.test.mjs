@@ -128,3 +128,17 @@ test('verificación en dos pasos por rol: administrable y protegida', async () =
   assert.equal((await api(sa, 'PATCH', '/sistema/roles/COMPRAS/seguridad', { exigeMfa: false })).s, 200);
   assert.equal(sql(`SELECT exige_mfa::text FROM core.rol WHERE id = 'COMPRAS'`), 'false');
 });
+
+test('dominio automático: la configuración pública trae la instalación y nunca el token de GitHub', async () => {
+  const antes = (await api(sa, 'GET', '/sistema/config')).b.movil;
+  const conToken = { ...antes, tokenGithub: 'github_pat_PRUEBA_que_no_debe_salir' };
+  const g = await api(sa, 'PUT', '/sistema/config/movil', conToken);
+  assert.equal(g.s, 200, JSON.stringify(g.b));
+  assert.equal(g.b.tokenGithub, '••••••••', 'el administrador lo ve enmascarado');
+  const pub = await (await fetch(B + '/config/publica')).json();
+  assert.ok(pub.instalacion && /^[0-9a-f-]{36}$/.test(pub.instalacion), 'identificador de la instalación');
+  assert.equal('tokenGithub' in pub.movil, false, 'el token jamás sale en la configuración pública');
+  assert.ok(!JSON.stringify(pub).includes('PRUEBA_que_no_debe_salir'));
+  assert.notEqual(sql(`SELECT valor->>'tokenGithub' FROM core.configuracion WHERE clave = 'movil'`), 'github_pat_PRUEBA_que_no_debe_salir', 'cifrado en la base');
+  assert.equal((await api(sa, 'PUT', '/sistema/config/movil', { ...antes, tokenGithub: '' })).s, 200);
+});
