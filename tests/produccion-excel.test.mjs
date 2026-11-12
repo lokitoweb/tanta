@@ -68,7 +68,7 @@ test('CP-16: presupuesto de 4,000 panes con 3 % de merma = 4,124 a preparar (red
 test('CP-17/18/35: requisición, salida al entregar, cierre con merma y varianza', async () => {
   await flujoCompras(api, login).comprarInventario(harina, 470, 2.80);
   const stock = () => Number(sql(`SELECT stock FROM core.insumo WHERE id = '${harina}'`));
-  const op = await api(pro, 'POST', '/ordenes-produccion', { productoId, cantidad: 1000, entrega: new Date().toISOString().slice(0, 10), criterio: 'LOTES_COMPLETOS' });
+  const op = await api(pro, 'POST', '/ordenes-produccion', { productoId, cantidad: 1000, entrega: hoyLima(), criterio: 'LOTES_COMPLETOS' });
   assert.equal(op.s, 201, JSON.stringify(op.b));
   assert.equal(op.b.calculo.lotes, 4);
   cerca(stock(), 500, 0.001, 'CP-17: crear la OP no descuenta insumos');
@@ -101,7 +101,7 @@ test('CP-17/18/35: requisición, salida al entregar, cierre con merma y varianza
   const insumosOp = Number(sql(`SELECT sum(costo_entregado) FROM core.requisicion_detalle d JOIN core.requisicion q ON q.id = d.requisicion_id WHERE q.codigo = '${req.codigo}'`));
   assert.ok(insumosOp > 0 && insumosOp <= costoTotal + 0.01, 'insumos = lo entregado, dentro del costo total');
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyLima();
   const v = (await api(ger, 'GET', `/reportes/P-02?desde=${hoy}&hasta=${hoy}&producto=${productoId}`)).b;
   const lev = v.filas.find((f) => f.op === op.b.codigo && f.insumo.startsWith('Levadura'));
   cerca(lev.variacionPct, 0.075, 0.0001, 'CP-35: variación %');
@@ -109,7 +109,7 @@ test('CP-17/18/35: requisición, salida al entregar, cierre con merma y varianza
 });
 
 test('PRO-12: anular con motivo; con insumos entregados no se anula', async () => {
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyLima();
   const op = (await api(pro, 'POST', '/ordenes-produccion', { productoId, cantidad: 100, entrega: hoy })).b;
   assert.equal((await api(pro, 'POST', `/ordenes-produccion/${op.codigo}/anular`, { motivo: 'x' })).s, 422);
   assert.equal((await api(pro, 'POST', `/ordenes-produccion/${op.codigo}/anular`, { motivo: 'Pedido cancelado' })).s, 200);
