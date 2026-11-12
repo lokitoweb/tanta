@@ -61,6 +61,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          # Versión fija: la 3.50 marca obsoleto material.dart y el análisis estricto frena la compilación. Subirla a propósito, probando.
+          flutter-version: 3.47.9
           cache: true
 
       - name: Dependencias
