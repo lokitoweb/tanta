@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '@/core/app-state';
-import { cant, cantidad, money, num2, partesQueSuman, pct, semaforo } from '@/core/format';
+import { cant, cantidad, money, num, num2, partesQueSuman, pct, semaforo } from '@/core/format';
 import { Boton, Encabezado, Insignia, Tarjeta, TarjetaTitulo } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
 import type { Receta } from '@/core/types';
@@ -52,7 +52,9 @@ export function Recetas() {
 
   // Si el rol no ve costos, el API no los envía: aquí no hay nada que calcular.
   // RN-15: costo total = insumos por unidad esperada + mano de obra + CIF (redondeados para que sumen).
-  const r2 = receta as typeof receta & { moUnit?: number; masaLoteKg?: number; unidadesEsperadas?: number };
+  const r2 = receta as typeof receta & { moUnit?: number; masaLoteKg?: number; unidadesEsperadas?: number; unidadesTeoricas?: number };
+  // Unidades reales del producto (lo que de verdad sale por lote): mandan en el costo; la fórmula por peso es referencia.
+  const reales = dataset.productos.find((p) => p.id === receta.productoId)?.unidadesLote ?? null;
   const [insumos, mo] = verCosto
     ? partesQueSuman([receta.costoConMerma ?? 0, r2.moUnit ?? 0, receta.cifUnit ?? 0], receta.costoUnitario ?? 0)
     : [0, 0];
@@ -96,7 +98,7 @@ export function Recetas() {
                 <p className="receta-head__eyebrow">Receta vigente · versión {receta.version}</p>
                 <h2 className="receta-head__title">{receta.producto}</h2>
                 <p className="receta-head__sub">
-                  Masa del lote {num2(r2.masaLoteKg ?? 0)} kg · {num2(r2.unidadesEsperadas ?? receta.rendimiento)} unidades esperadas · merma {pct(receta.mermaEstandar)} · estado{' '}
+                  Masa del lote {num2(r2.masaLoteKg ?? 0)} kg · {reales ? <><b>{num(reales)} unidades reales</b> (por fórmula {num2(r2.unidadesTeoricas ?? 0)})</> : <>{num2(r2.unidadesEsperadas ?? receta.rendimiento)} unidades esperadas</>} · merma {pct(receta.mermaEstandar)} · estado{' '}
                   <Insignia tono="ok" punto>Vigente</Insignia>
                 </p>
               </div>
@@ -153,7 +155,7 @@ export function Recetas() {
             <Tarjeta>
               <TarjetaTitulo
                 titulo="Cómo se forma el costo"
-                subtitulo="Modelo del informe técnico: unidades esperadas = masa ÷ peso × (1 − merma)"
+                subtitulo={reales ? `Con las ${reales} unidades reales por lote del producto (Maestros → Productos)` : 'Modelo del informe técnico: unidades esperadas = masa ÷ peso × (1 − merma)'}
               />
               <ol className="cascada">
                 <li>

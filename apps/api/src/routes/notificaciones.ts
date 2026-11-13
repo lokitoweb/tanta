@@ -49,10 +49,10 @@ const AVISO_PEDIDO: Record<string, { area?: string; texto: string; textoArea?: s
 
 /** Envía los avisos de los cambios de estado registrados por el trigger. SKIP LOCKED: cada cambio sale una vez. */
 export async function despacharAvisosPedido(): Promise<number> {
-  const cambios = await tx(async (c) => (await c.query<{ codigo: string; cliente_id: string; cliente: string; estado: string; total: string; motivo: string | null }>(`
+  const cambios = await tx(async (c) => (await c.query<{ codigo: string; cliente_id: string; cliente: string; estado: string; total: string; motivo: string | null; es_oferta: boolean }>(`
     UPDATE core.pedido_historial h SET notificado_en = now() FROM core.pedido p
     WHERE h.id IN (SELECT id FROM core.pedido_historial WHERE notificado_en IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED) AND p.id = h.pedido_id
-    RETURNING p.codigo, p.cliente_id, p.cliente, h.estado, p.total, p.motivo`)).rows);
+    RETURNING p.codigo, p.cliente_id, p.cliente, h.estado, p.total, p.motivo, p.es_oferta`)).rows);
   for (const ch of cambios) {
     const regla = AVISO_PEDIDO[ch.estado];
     if (!regla) continue;
@@ -61,7 +61,9 @@ export async function despacharAvisosPedido(): Promise<number> {
     if (regla.area) {
       await notificar([{ permiso: regla.area }], {
         tipo: 'pedido', titulo: `${ch.codigo} · ${ch.cliente}`,
-        cuerpo: `${regla.textoArea![0].toUpperCase()}${regla.textoArea!.slice(1)} · S/ ${num(ch.total).toFixed(2)}${motivo}`, ruta: '/ventas/pedidos',
+        // Oferta tomada: el vendedor la confirma y sale del stock, sin producción.
+        cuerpo: ch.es_oferta && ch.estado === 'REGISTRADO' ? `Tomó una oferta · S/ ${num(ch.total).toFixed(2)} · confírmala: sale del stock, sin producción`
+          : `${regla.textoArea![0].toUpperCase()}${regla.textoArea!.slice(1)} · S/ ${num(ch.total).toFixed(2)}${motivo}`, ruta: '/ventas/pedidos',
       });
     }
     void emitirEvento('pedido.aviso', { codigo: ch.codigo, estado: ch.estado });

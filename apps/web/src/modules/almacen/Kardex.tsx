@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { useApp } from '@/core/app-state';
-import { money, num, num2 } from '@/core/format';
+import { money, money3, num, num2, num3 } from '@/core/format';
 import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio, Buscador } from '@/ui/primitives';
 
 interface Mov { fecha: string; tipo: string; documento: string; almacen?: string; lote?: string; vence?: string; cantidad: number; costoUnitario?: number; valor?: number; saldoCantidad: number; saldoValor?: number; cpp?: number }
@@ -42,12 +42,20 @@ export function Kardex() {
   const recientes = useMemo(() => filtrarTexto([...(movs ?? [])].reverse(), filtroMov), [movs, filtroMov]);
   const pag = usePaginado(recientes, 50);
   const ultimo = movs?.at(-1); // el endpoint devuelve en orden cronológico: el último es el saldo vigente
+  const u = (item?.unidad ?? '').toLowerCase() || 'unid';
+  // Excel con la misma estructura que la tabla (y el Excel de CPP del cliente).
+  const filasExcel = () => (movs ?? []).map((m) => ({
+    fecha: m.fecha.slice(0, 16).replace('T', ' '), movimiento: TIPOS[m.tipo]?.label ?? m.tipo, documento: m.documento, almacen: m.almacen ?? '',
+    [`entrada_${u}`]: m.cantidad > 0 ? m.cantidad : null, ...(valoriza ? { costo_unitario_entrada: m.cantidad > 0 ? m.costoUnitario ?? null : null } : {}),
+    [`salida_${u}`]: m.cantidad < 0 ? -m.cantidad : null, [`stock_${u}`]: m.saldoCantidad,
+    ...(valoriza ? { valor_del_stock: m.saldoValor ?? null, cpp: m.cpp ?? null } : {}),
+  }));
 
   return (
     <>
       <Encabezado titulo="Kárdex valorizado" descripcion={`${item ? `${item.nombre} · ${item.codigo} · ` : ''}libro inmutable: ningún asiento se edita ni se borra`}
         acciones={<>
-          <Boton icono="download" disabled={!movs?.length} onClick={() => exportarExcel(`kardex-${codigo}`, (movs ?? []).map((m) => ({ ...m })))}>Excel</Boton>
+          <Boton icono="download" disabled={!movs?.length} onClick={() => exportarExcel(`kardex-${codigo}`, filasExcel())}>Excel</Boton>
           <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
         </>} />
 
@@ -81,23 +89,25 @@ export function Kardex() {
                 <>
                 <div className="tabla__barra"><Buscador valor={filtroMov} onChange={setFiltroMov} placeholder="Buscar por documento, OP, venta o motivo…" /><span className="t-muted">{recientes.length} asientos</span></div>
                 <div className="table-wrap">
+                  {/* Estructura del Excel del cliente (CPP): entrada con su costo, salida, stock, valor del stock y CPP vigente. */}
                   <table className="table table--kardex">
-                    <thead><tr><th>Fecha</th><th>Movimiento</th><th>Documento / motivo</th><th>Almacén</th><th className="t-right">Cantidad</th>
-                      {valoriza && <><th className="t-right">Costo unit.</th><th className="t-right">Valor</th></>}
-                      <th className="t-right">Saldo</th>{valoriza && <th className="t-right">Saldo valorizado</th>}</tr></thead>
+                    <thead><tr><th>Fecha</th><th>Movimiento</th>
+                      <th className="t-right">Entrada ({u})</th>{valoriza && <th className="t-right">Costo unitario de entrada</th>}
+                      <th className="t-right">Salida ({u})</th><th className="t-right">Stock ({u})</th>
+                      {valoriza && <><th className="t-right">Valor del stock</th><th className="t-right">CPP (por {u})</th></>}</tr></thead>
                     <tbody>
                       {pag.visibles.map((m, i) => {
                         const t = TIPOS[m.tipo] ?? { label: m.tipo, tono: 'neutral' as const };
                         return (
                           <tr key={`${m.fecha}-${i}`}>
                             <td className="t-muted">{m.fecha.slice(0, 16).replace('T', ' ')}</td>
-                            <td><Insignia tono={t.tono}>{t.label}</Insignia></td>
-                            <td><span className="mono">{m.documento}</span>{m.lote && <small className="t-muted"> · lote {m.lote}{m.vence ? ` · vence ${m.vence}` : ''}</small>}</td>
-                            <td className="t-muted">{m.almacen || '—'}</td>
-                            <td className={`t-right ${m.cantidad < 0 ? 't-neg' : 't-pos'}`}>{m.cantidad > 0 ? '+' : ''}{num2(m.cantidad)}</td>
-                            {valoriza && <><td className="t-right">{money(m.costoUnitario ?? 0)}</td><td className={`t-right ${(m.valor ?? 0) < 0 ? 't-neg' : ''}`}>{money(m.valor ?? 0)}</td></>}
-                            <td className="t-right"><strong>{num2(m.saldoCantidad)}</strong></td>
-                            {valoriza && <td className="t-right">{money(m.saldoValor ?? 0)}</td>}
+                            <td><Insignia tono={t.tono}>{t.label}</Insignia>
+                              <div className="kardex__doc"><span className="mono">{m.documento}</span>{m.almacen ? ` · ${m.almacen}` : ''}{m.lote ? ` · lote ${m.lote}${m.vence ? `, vence ${m.vence}` : ''}` : ''}</div></td>
+                            <td className="t-right t-pos">{m.cantidad > 0 ? num3(m.cantidad) : ''}</td>
+                            {valoriza && <td className="t-right">{m.cantidad > 0 ? money3(m.costoUnitario ?? 0) : ''}</td>}
+                            <td className="t-right t-neg">{m.cantidad < 0 ? num3(-m.cantidad) : ''}</td>
+                            <td className="t-right"><strong>{num3(m.saldoCantidad)}</strong></td>
+                            {valoriza && <><td className="t-right">{money(m.saldoValor ?? 0)}</td><td className="t-right"><strong>{money3(m.cpp ?? 0)}</strong></td></>}
                           </tr>
                         );
                       })}

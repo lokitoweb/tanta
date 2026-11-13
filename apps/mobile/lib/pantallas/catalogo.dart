@@ -23,6 +23,12 @@ void ponerEnCarrito(String id, int cantidad) {
   carrito.value = c;
 }
 
+/// Tope de cantidad: lo que queda de una oferta, o el máximo por línea que acepta el servidor.
+int maximoDe(Map<String, dynamic>? p) {
+  final d = (p?['disponible'] as num?)?.floor();
+  return p?['promocionId'] != null && d != null ? d.clamp(1, 10000) : 10000;
+}
+
 /// Base + IGV = total por línea (RN-31): el precio con IGV y el neto vienen del servidor.
 ({double base, double igv, double total}) totalesCarrito(List<Map<String, dynamic>> productos) {
   double base = 0, total = 0;
@@ -78,7 +84,8 @@ class _CatalogoState extends State<Catalogo> {
         final peso = p['pesoMasaG'] as num?;
         final anticipacion = (p['anticipacionHoras'] as num?) ?? 0;
         return Padding(
-          padding: EdgeInsets.fromLTRB(20, 20, 20, 28 + MediaQuery.of(ctx).viewPadding.bottom),
+          // El teclado (al escribir la cantidad) empuja la hoja hacia arriba en vez de taparla.
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 28 + MediaQuery.of(ctx).viewPadding.bottom + MediaQuery.viewInsetsOf(ctx).bottom),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${p['nombre']}', style: estiloDisplay.copyWith(fontSize: 22)),
             const SizedBox(height: 4),
@@ -89,12 +96,12 @@ class _CatalogoState extends State<Catalogo> {
             ].join('\n'), style: const TextStyle(color: TantaColors.textMuted, height: 1.5)),
             const SizedBox(height: 18),
             Row(children: [
-              IconButton.outlined(tooltip: 'Quitar uno', onPressed: cantidad > 1 ? () => set(() => cantidad--) : null, icon: const Icon(Icons.remove)),
-              SizedBox(width: 56, child: Text('$cantidad', textAlign: TextAlign.center, style: estiloDisplay.copyWith(fontSize: 20))),
-              IconButton.outlined(tooltip: 'Agregar uno', onPressed: () => set(() => cantidad++), icon: const Icon(Icons.add)),
+              SelectorCantidad(valor: cantidad, maximo: maximoDe(p), onCambio: (n) => set(() => cantidad = n)),
               const Spacer(),
-              Text(dinero(precio * cantidad), style: estiloDisplay.copyWith(fontSize: 18)),
+              Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: Text(dinero(precio * cantidad), style: estiloDisplay.copyWith(fontSize: 18)))),
             ]),
+            if (p['promocionId'] != null) Padding(padding: const EdgeInsets.only(top: 6),
+                child: Text('Quedan ${maximoDe(p)} en oferta', style: const TextStyle(fontSize: 12.5, color: TantaColors.textMuted))),
             const SizedBox(height: 18),
             SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Agregar al pedido'))),
           ]),
@@ -301,15 +308,18 @@ class CarritoPantalla extends StatelessWidget {
               itemBuilder: (_, i) {
                 final (e, p) = lineas[i];
                 final precio = (p!['precioConIgv'] as num).toDouble();
-                return ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${p['nombre']}'),
-                  subtitle: Text('${dinero(precio)} c/u · ${dinero(precio * e.value)}'),
-                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                    IconButton(tooltip: 'Quitar uno', icon: const Icon(Icons.remove_circle_outline), onPressed: () => ponerEnCarrito(e.key, e.value - 1)),
-                    SizedBox(width: 28, child: Text('${e.value}', textAlign: TextAlign.center)),
-                    IconButton(tooltip: 'Agregar uno', icon: const Icon(Icons.add_circle_outline), onPressed: () => ponerEnCarrito(e.key, e.value + 1)),
-                    IconButton(tooltip: 'Quitar del carrito', icon: const Icon(Icons.delete_outline), onPressed: () => ponerEnCarrito(e.key, 0)),
+                // Nombre y precio arriba; abajo la cantidad (− campo +) y quitar: entra en pantallas angostas.
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('${p['nombre']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text('${dinero(precio)} c/u · ${dinero(precio * e.value)}', style: const TextStyle(fontSize: 12.5, color: TantaColors.textMuted)),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      SelectorCantidad(compacto: true, valor: e.value, maximo: maximoDe(p), onCambio: (n) => ponerEnCarrito(e.key, n)),
+                      const Spacer(),
+                      IconButton(tooltip: 'Quitar del carrito', icon: const Icon(Icons.delete_outline), onPressed: () => ponerEnCarrito(e.key, 0)),
+                    ]),
                   ]),
                 );
               },
@@ -419,7 +429,12 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
       );
       carrito.value = {};
       nav.popUntil((r) => r.isFirst);
-      aviso.showSnackBar(SnackBar(content: Text('Pedido ${r['codigo'] ?? ''} registrado. Entrega: ${fechaCorta('${r['fechaEntrega']}')}.')));
+      // Oferta y productos regulares salen en dos pedidos: la oferta no pasa por producción y se cobra aparte.
+      final ps = ((r['pedidos'] as List?) ?? const []).cast<Map>();
+      final oferta = ps.where((x) => x['esOferta'] == true).firstOrNull, regular = ps.where((x) => x['esOferta'] != true).firstOrNull;
+      aviso.showSnackBar(SnackBar(content: Text(oferta != null && regular != null
+          ? 'Pedido ${regular['codigo']} y oferta ${oferta['codigo']} registrados (la oferta se cobra aparte). Entrega: ${fechaCorta('${r['fechaEntrega']}')}.'
+          : 'Pedido ${r['codigo'] ?? ''} registrado. Entrega: ${fechaCorta('${r['fechaEntrega']}')}.')));
     } on ApiException catch (e) {
       aviso.showSnackBar(SnackBar(content: Text(e.mensaje)));
     } catch (_) {

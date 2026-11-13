@@ -43,7 +43,9 @@ const numero = (v: string) => {
 
 export interface ResultadoImportacion { ok: number; errores: Array<{ fila: number; nombre?: string; codigo?: string; motivo: string }> }
 
-export function Importar({ titulo, descripcion, plantilla, numericas, enviar, onListo }: {
+export function Importar({ titulo, descripcion, plantilla, numericas, enviar, onListo, boton = 'Importar' }: {
+  /** Texto del botón (p. ej. «Inventario inicial»): dice qué se importa. */
+  boton?: string;
   titulo: string; descripcion: string;
   /** Fila de ejemplo: sus claves son los encabezados de la plantilla. */
   plantilla: Record<string, string | number>;
@@ -71,7 +73,7 @@ export function Importar({ titulo, descripcion, plantilla, numericas, enviar, on
 
   return (
     <>
-      <Boton icono="up" onClick={() => { setAbierto(true); setRes(null); setError(null); }}>Importar</Boton>
+      <Boton icono="up" onClick={() => { setAbierto(true); setRes(null); setError(null); }}>{boton}</Boton>
       <Dialogo abierto={abierto} titulo={titulo} descripcion={descripcion} onCerrar={() => setAbierto(false)}
         acciones={<Boton onClick={() => setAbierto(false)}>Cerrar</Boton>}>
         <div className="form">

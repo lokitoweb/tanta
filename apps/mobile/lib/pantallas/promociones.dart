@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
@@ -72,14 +73,14 @@ class _PromocionesState extends State<Promociones> {
                               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                 Row(children: [
                                   Expanded(child: Text('${p['titulo']}', style: const TextStyle(fontWeight: FontWeight.w600))),
-                                  Insignia(vigente ? (soloHoy ? 'Solo hoy' : 'Vigente') : p['activa'] == true ? 'Programada / vencida' : 'Inactiva',
+                                  Insignia(vigente && p['agotadaEn'] != null ? 'Agotada' : vigente ? (soloHoy ? 'Solo hoy' : 'Vigente') : p['activa'] == true ? 'Programada / vencida' : 'Inactiva',
                                       tono: vigente ? Tono.ok : Tono.neutral, punto: true),
                                 ]),
                                 const SizedBox(height: 2),
                                 Text('${p['producto']} · ${dinero(((p['precioConIgv'] as num?) ?? 0).toDouble())} (antes ${dinero(((p['precioNormal'] as num?) ?? 0).toDouble())})',
                                     style: const TextStyle(fontSize: 12.5)),
                                 Text(soloHoy ? 'Solo el ${fechaCorta('${p['desde']}')}' : 'Del ${fechaCorta('${p['desde']}')} al ${fechaCorta('${p['hasta']}')}'
-                                    ' · stock ${((p['disponible'] as num?) ?? 0).toStringAsFixed(0)} · pedidas ${((p['vendidas'] as num?) ?? 0).toStringAsFixed(0)}',
+                                    '${p['cantidad'] == null ? '' : ' · ofrecidas ${p['cantidad']}'} · tomadas ${((p['vendidas'] as num?) ?? 0).toStringAsFixed(0)} · quedan ${((p['disponible'] as num?) ?? 0).toStringAsFixed(0)}',
                                     style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
                               ]),
                             ),
@@ -102,6 +103,8 @@ class _FormPromocion extends StatefulWidget {
 class _FormPromocionState extends State<_FormPromocion> {
   late final _titulo = TextEditingController(text: '${widget.promo?['titulo'] ?? ''}');
   late final _precio = TextEditingController(text: widget.promo == null ? '' : '${widget.promo!['precioConIgv']}');
+  // Unidades en oferta (10 panes); vacío = hasta agotar el stock del producto.
+  late final _unidades = TextEditingController(text: widget.promo?['cantidad'] == null ? '' : '${widget.promo!['cantidad']}');
   late String? _producto = widget.promo?['productoId'] as String? ?? widget.productos.firstOrNull?['id'] as String?;
   late String _desde = '${widget.promo?['desde'] ?? _hoyLima()}';
   late String _hasta = '${widget.promo?['hasta'] ?? _hoyLima()}';
@@ -129,6 +132,7 @@ class _FormPromocionState extends State<_FormPromocion> {
     try {
       await Api.instancia.guardarPromocion(widget.promo?['id'] as String?, {
         'productoId': _producto, 'titulo': _titulo.text.trim(), 'precioConIgv': _valor, 'desde': _desde, 'hasta': _hasta, 'activa': _activa, 'avisar': _avisar,
+        'cantidad': (int.tryParse(_unidades.text.trim()) ?? 0) > 0 ? int.parse(_unidades.text.trim()) : null,
       });
       aviso.showSnackBar(SnackBar(content: Text(_avisar && _activa ? 'Promoción publicada y avisada a los clientes' : 'Promoción guardada')));
       nav.pop(true);
@@ -158,7 +162,10 @@ class _FormPromocionState extends State<_FormPromocion> {
         ),
         const SizedBox(height: 12),
         TextField(controller: _precio, keyboardType: const TextInputType.numberWithOptions(decimal: true), onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(labelText: 'Precio de promoción con IGV (S/)', helperText: normal == null ? null : 'Precio normal ${dinero(normal)}')),
+            decoration: InputDecoration(labelText: 'Precio por unidad con IGV (S/)', helperText: normal == null ? null : 'Precio normal ${dinero(normal)} · 10 panes a S/ 20 = S/ 2.00')),
+        const SizedBox(height: 12),
+        TextField(controller: _unidades, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(labelText: 'Unidades en oferta (opcional)', helperText: 'Al tomarse todas, se avisa a los clientes que se agotó. Vacío = hasta agotar el stock')),
         const SizedBox(height: 16),
         Text('Vigencia', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),

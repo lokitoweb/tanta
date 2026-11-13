@@ -1611,3 +1611,4 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .mfa__alternativa { margin-top: 8px; font-size: 0.8125rem; color: var(--tanta-text-secondary); }
 .mfa__alternativa summary { cursor: pointer; }
 .mfa__alternativa .mfa__clave { display: block; margin-top: 6px; }
+.kardex__doc { margin-top: 3px; font-size: .75rem; color: var(--tanta-text-muted); }

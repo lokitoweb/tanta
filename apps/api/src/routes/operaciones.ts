@@ -888,6 +888,9 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (estadoPrevio !== 'LISTO') return liberarPromos(c, pedidoId);
     const lineas = (await c.query<{ producto_id: string; cantidad: string }>('SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 GROUP BY producto_id ORDER BY producto_id', [pedidoId])).rows;
     for (const l of lineas) await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
+    // Las unidades de oferta devueltas vuelven a estar disponibles.
+    await c.query(`UPDATE core.promocion SET agotada_en = NULL WHERE agotada_en IS NOT NULL
+      AND id IN (SELECT promocion_id FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL)`, [pedidoId]);
   };
 
   // VEN-06: el vendedor cancela varios pedidos a la vez con un motivo. Cada uno se valida y audita por separado:
@@ -921,7 +924,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const { codigo } = req.params as { codigo: string };
     const parseo = CambioPedido.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'ESTADO_INVALIDO', parseo.error.issues[0]?.message ?? 'Estado de pedido inválido.'));
-    const destino = parseo.data.estado;
+    let destino = parseo.data.estado;
     const { motivo, observaciones, pagos, voucher } = parseo.data;
     if (pagos.length && destino !== 'ENTREGADO') return reply.code(422).send(error(422, 'PAGO_FUERA_DE_ENTREGA', 'Los pagos se registran al entregar el pedido.'));
     if (pagos.length && !req.usuario!.permisos.has('cobranza.registrar')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso cobranza.registrar para cobrar al entregar.'));
@@ -939,13 +942,15 @@ export async function rutasOperaciones(app: FastifyInstance) {
       return reply.send(cuerpo);
     };
 
-    const pedido = await uno<{ id: string; estado: string; cliente: string }>(
-      'SELECT id, estado, cliente FROM core.pedido WHERE codigo = $1', [codigo],
+    const pedido = await uno<{ id: string; estado: string; cliente: string; es_oferta: boolean }>(
+      'SELECT id, estado, cliente, es_oferta FROM core.pedido WHERE codigo = $1', [codigo],
     );
     if (!pedido) return reply.code(404).send(error(404, 'PEDIDO_NO_EXISTE', 'El pedido no existe.'));
+    // Oferta: productos terminados ya reservados. Confirmarla la deja lista para despacho, sin pasar por producción.
+    if (pedido.es_oferta && pedido.estado === 'REGISTRADO' && destino === 'CONFIRMADO') destino = 'LISTO';
 
     const permitidos = TRANSICIONES[pedido.estado] ?? [];
-    if (!permitidos.includes(destino)) {
+    if (!permitidos.includes(destino) && !(pedido.es_oferta && pedido.estado === 'REGISTRADO' && destino === 'LISTO')) {
       return reply.code(409).send(error(409, 'TRANSICION_INVALIDA',
         `No se puede pasar de ${pedido.estado} a ${destino}.`));
     }
@@ -959,7 +964,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
         // Condicionado al estado leído: dos vendedores a la vez no pueden saltarse la máquina de estados.
         const cambio = await c.query(`UPDATE core.pedido SET estado = $1,
             motivo = CASE WHEN $1 IN ('RECHAZADO','CANCELADO') THEN $4 ELSE motivo END,
-            confirmado_en = CASE WHEN $1 = 'CONFIRMADO' THEN now() ELSE confirmado_en END,
+            confirmado_en = CASE WHEN $1 = 'CONFIRMADO' OR ($1 = 'LISTO' AND confirmado_en IS NULL) THEN now() ELSE confirmado_en END,
             -- Word 04: si la producción de su fecha ya empezó, el pedido del cliente pasa a la siguiente.
             fecha_entrega = CASE WHEN $1 = 'CONFIRMADO' THEN core.entrega_libre(fecha_entrega) ELSE fecha_entrega END,
             entregado_en = CASE WHEN $1 = 'ENTREGADO' THEN now() ELSE entregado_en END,

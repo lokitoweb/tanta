@@ -19,7 +19,9 @@ interface Item { productoId: string; producto: string; cantidad: number; precio:
 const cantidadTxt = (i: Item) => (i.presentacion && i.cantidadPresentacion ? `${i.cantidadPresentacion} × ${i.presentacion.toLowerCase()} (${i.cantidad} unid)` : String(i.cantidad));
 interface Pedido { id: string; codigo: string; clienteId: string; cliente: string; vendedor: string; estado: string; total: number; fecha_entrega: string; hora_entrega: string; observaciones: string; venta: string | null; items: Item[];
   tipoEntrega?: string; direccion?: string; motivo?: string | null; entregaObs?: string | null; observacion?: string | null; porCobrar?: number | null;
-  comprobanteTipo?: string; comprobante?: { nombre: string; numero: string } | null }
+  comprobanteTipo?: string; comprobante?: { nombre: string; numero: string } | null;
+  /** Pedido de oferta: productos terminados en promoción; no pasa por producción y se cobra aparte. */
+  esOferta?: boolean }
 // Estados desde los que se puede cancelar (máquina de estados de la API).
 const CANCELABLES = ['REGISTRADO', 'CONFIRMADO', 'EN_PRODUCCION', 'LISTO'];
 
@@ -85,7 +87,8 @@ export function Pedidos() {
   const avanzar = (p: Pedido, a: string, texto = '') => accion(async () => {
     await api(`/pedidos/${p.codigo}/estado`, { method: 'PATCH', body: { estado: a, motivo: texto, observaciones: texto } });
     setMotivo(null);
-    return `${p.codigo} → ${ESTADOS[a].label}${a === 'LISTO' ? ' · stock reservado' : ''}`;
+    const fin = p.esOferta && a === 'CONFIRMADO' ? 'LISTO' : a; // la oferta confirmada queda lista: es stock, no se produce
+    return `${p.codigo} → ${ESTADOS[fin].label}${fin === 'LISTO' ? ' · stock reservado' : ''}`;
   });
   const observar = (p: Pedido, mensaje: string) => accion(async () => {
     await api(`/pedidos/${p.codigo}/observar`, { method: 'POST', body: { mensaje } });
@@ -177,7 +180,7 @@ export function Pedidos() {
               <tr key={p.id} className={`is-clickable${marcados.has(p.codigo) ? ' is-selected' : ''}`} onClick={() => { setPago({ descuento: '0' }); setMotivo(null); setEntrega(null); setSel(p); }}>
                 {gestiona && <td className="col-check" onClick={(e) => e.stopPropagation()}>
                   {CANCELABLES.includes(p.estado) && <input type="checkbox" aria-label={`Seleccionar ${p.codigo}`} checked={marcados.has(p.codigo)} onChange={() => marcar(p.codigo)} />}</td>}
-                <td><strong className="mono">{p.codigo}</strong>{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
+                <td><strong className="mono">{p.codigo}</strong>{p.esOferta && <> <Insignia tono="ok">Oferta</Insignia></>}{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
                 <td>{p.cliente}</td>
                 <td className="t-muted">{p.items.slice(0, 2).map((i) => `${num(i.cantidad)} ${i.producto}`).join(', ')}{p.items.length > 2 ? ` +${p.items.length - 2}` : ''}</td>
                 <td>{p.fecha_entrega}{p.hora_entrega ? ` · ${p.hora_entrega}` : ''}</td>

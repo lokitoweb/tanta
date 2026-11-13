@@ -228,12 +228,13 @@ test('Promociones: salen del stock con su precio, no entran a producción y se l
   assert.equal(p.s, 201, JSON.stringify(p.b));
   assert.equal(p.b.total, 2, 'el precio lo pone el servidor');
   assert.equal(reservado(), antes + 4, 'queda reservado al pedir');
+  // Informe del 13/11: la oferta confirmada queda lista para despacho (es stock reservado, no se produce).
   assert.equal((await api(ven, 'PATCH', `/pedidos/${p.b.codigo}/estado`, { estado: 'CONFIRMADO' })).s, 200);
+  assert.equal(sql(`SELECT estado FROM core.pedido WHERE codigo = '${p.b.codigo}'`), 'LISTO');
   const h = (await api(adm, 'GET', `/produccion/hoja?fecha=${sql(`SELECT fecha_entrega FROM core.pedido WHERE codigo = '${p.b.codigo}'`)}`)).b;
   assert.ok(!h.filas.some((f) => f.productoId === prodA), 'no entra a la hoja de producción');
 
   // Listo no reserva otra vez; al despachar se cobra a precio de promoción y se libera la reserva.
-  assert.equal((await api(ven, 'PATCH', `/pedidos/${p.b.codigo}/estado`, { estado: 'LISTO' })).s, 200);
   assert.equal(reservado(), antes + 4, 'sin doble reserva');
   const ped = (await api(ven, 'GET', '/pedidos')).b.find((x) => x.codigo === p.b.codigo);
   const venta = await api(ven, 'POST', '/ventas', { pedidoId: ped.id, items: [{ productoId: prodA, cantidad: 4 }] });

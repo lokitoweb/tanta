@@ -37,7 +37,8 @@ export function Almacen() {
       ),
     },
     { key: 'stock', header: 'Stock', align: 'right', render: (i) => <strong>{num2(i.stock)} {i.unidad}</strong> },
-    { key: 'minimo', header: 'Mínimo', align: 'right', render: (i) => <span className="t-muted">{num(i.minimo)}</span> },
+    // Cada insumo en su unidad (kg, L, unidad): el mínimo se lee igual que el stock.
+    { key: 'minimo', header: 'Mínimo', align: 'right', render: (i) => <span className="t-muted">{num2(i.minimo)} {i.unidad}</span> },
     { key: 'cpp', header: 'CPP', align: 'right', render: (i) => money(i.cpp) },
     { key: 'valorizado', header: 'Valorizado', align: 'right', render: (i) => money(i.valorizado) },
     {
@@ -55,7 +56,7 @@ export function Almacen() {
         titulo="Almacén e inventario"
         descripcion="Stock de insumos y productos terminados, valorizado al costo promedio ponderado"
         acciones={<><Boton icono="download" onClick={() => exportarExcel('inventario', insumos.map((i) => ({ codigo: i.codigo ?? i.id, insumo: i.nombre, unidad: i.unidad, stock: i.stock, minimo: i.minimo, ...(verValor ? { cpp: i.cpp, valorizado: i.valorizado } : {}), estado: i.estado })))}>Excel</Boton><Boton icono="report" onClick={exportarPdf}>PDF</Boton>{(puede('inventario.mover') || puede('maestros.editar')) && (
-          <Importar titulo="Inventario inicial" descripcion="Stock inicial valorizado de insumos y productos terminados (tipo INSUMO o PRODUCTO, con su código). Cada fila genera un movimiento «Saldo inicial»; solo se aplica a ítems sin movimientos."
+          <Importar boton="Inventario inicial" titulo="Inventario inicial" descripcion="Stock inicial valorizado de insumos y productos terminados (tipo INSUMO o PRODUCTO, con su código). Cada fila genera un movimiento «Saldo inicial»; solo se aplica a ítems sin movimientos."
             plantilla={{ tipo: 'INSUMO', codigo: 'INS-001', cantidad: 50, costoUnitario: 2.4, lote: '', venceEn: '' }}
             numericas={['cantidad', 'costoUnitario']}
             enviar={async (filas) => { const r = await api<{ aplicados: unknown[]; errores: Array<{ fila: number; codigo: string; motivo: string }> }>('/inventario/inicial', { method: 'POST', body: { filas } }); return { ok: r.aplicados.length, errores: r.errores }; }}

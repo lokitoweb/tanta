@@ -106,3 +106,9 @@ export function partesQueSuman(partes: number[], total: number): number[] {
   }
   return salida.map((c) => c / 100);
 }
+
+// Kárdex (formato del Excel de CPP): cantidades y costo unitario con 3 decimales.
+const PEN3 = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const NUM3 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+export const money3 = (n: number) => (Number.isFinite(n) ? PEN3.format(Math.abs(n) < 0.0005 ? 0 : n) : '—');
+export const num3 = (n: number) => NUM3.format(n ?? 0);

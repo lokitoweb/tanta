@@ -1,3 +1,5 @@
+import { useNavigate } from 'react-router-dom';
+import { useApp } from '@/core/app-state';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/core/api';
 import { Dialogo } from '@/ui/Dialogo';
@@ -12,6 +14,8 @@ const VACIO = { titulo: '', cuerpo: '' };
 
 /** Promociones y comunicados a todos los clientes o a los elegidos. Llegan a quienes tienen cuenta en la app. */
 export function AvisosClientes() {
+  const navegar = useNavigate();
+  const { puede } = useApp();
   const [datos, setDatos] = useState<Datos | null>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
   const [form, setForm] = useState(VACIO);
@@ -47,6 +51,13 @@ export function AvisosClientes() {
   return (
     <>
       <Encabezado titulo="Avisos a clientes" descripcion="Promociones y comunicados · llegan a la campana y como notificación del celular" />
+      {/* Una oferta de un producto se publica en Promociones: el cliente la ve con su imagen y la pide; al agotarse se avisa a todos. */}
+      {puede('promociones.gestionar') && (
+        <div className="aviso aviso--info" role="note"><span className="aviso__icono">i</span><div>
+          <p><b>¿Es una oferta de un pan?</b> Publícala en Promociones eligiendo el producto: en la app aparece con su imagen y el cliente la pide desde ahí. Se avisa a los clientes al guardarla y otra vez cuando se agota.</p>
+          <p><Boton size="sm" icono="plus" onClick={() => navegar('/ventas/promociones')}>Crear oferta con producto</Boton></p>
+        </div></div>
+      )}
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
 
       <Dialogo abierto={confirmar} titulo="¿Enviar este aviso?" descripcion={`Lo recibirán ${destinos} cliente(s). Una vez enviado no se puede retirar.`}

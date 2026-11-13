@@ -106,7 +106,9 @@ class _PedidosState extends State<Pedidos> {
       } else {
         await ColaOffline.instancia.encolar('pedido', {'codigo': '${p['codigo']}', 'estado': destino}, descripcion: '${p['codigo']} → ${etiquetaPedido[destino]}');
         final enviadas = await ColaOffline.instancia.sincronizar(Api.instancia);
-        _aviso(enviadas > 0 ? '${p['codigo']} → ${etiquetaPedido[destino]}' : 'Sin conexión · guardado, se enviará al volver la red',
+        // Una oferta confirmada queda lista (el servidor la pasa a Listo: es stock, no se produce).
+        final real = p['esOferta'] == true && destino == 'CONFIRMADO' ? 'LISTO' : destino;
+        _aviso(enviadas > 0 ? '${p['codigo']} → ${etiquetaPedido[real]}' : 'Sin conexión · guardado, se enviará al volver la red',
             color: enviadas > 0 ? TantaColors.stateOk : TantaColors.stateWarn);
         if (enviadas == 0) setState(() { p['estado'] = destino; p['pendiente'] = true; });
       }
@@ -314,7 +316,8 @@ class _PedidosState extends State<Pedidos> {
         ])),
         const SizedBox(height: 16),
         if (gestiona && p['pendiente'] != true) Wrap(spacing: 8, runSpacing: 8, children: [
-          if (estado == 'REGISTRADO') accion(ctx, 'Confirmar', () => _cambiar(p, 'CONFIRMADO'), principal: true),
+          // Oferta: al confirmarla queda lista para despacho (es stock reservado, no se produce).
+          if (estado == 'REGISTRADO') accion(ctx, p['esOferta'] == true ? 'Confirmar · sale del stock' : 'Confirmar', () => _cambiar(p, 'CONFIRMADO'), principal: true),
           if (estado == 'CONFIRMADO' || estado == 'EN_PRODUCCION') accion(ctx, 'Marcar listo', () => _cambiar(p, 'LISTO'), principal: true),
           if (estado == 'LISTO' && vende) accion(ctx, 'Despachar', () => _despachar(p), principal: true),
           if (estado == 'DESPACHADO' && Api.instancia.puede('cobranza.registrar')) accion(ctx, 'Entregar y cobrar', () => _entregar(p), principal: true),
@@ -437,6 +440,7 @@ class _PedidosState extends State<Pedidos> {
                   size: 22, color: !_cancelable(p) ? TantaColors.textMuted : marcado ? TantaColors.stateDanger : TantaColors.ink800,
                   semanticLabel: _cancelable(p) ? (marcado ? 'Seleccionado' : 'Sin seleccionar') : 'No se puede cancelar')),
               Expanded(child: Text('${p['cliente']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+              if (p['esOferta'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Insignia('Oferta', tono: Tono.ok)),
               if (ocupado) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               else Insignia(p['pendiente'] == true ? 'Por enviar' : etiquetaPedido[estado] ?? estado,
                   tono: p['pendiente'] == true ? Tono.warn : tonoPedido(estado), punto: true),

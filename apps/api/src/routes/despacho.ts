@@ -18,6 +18,10 @@ const Vehiculo = z.object({
   activo: z.boolean().default(true),
 });
 
+// Unidades tomadas en pedidos vivos y lo que queda: lo ofrecido menos lo tomado, sin pasar del stock libre.
+const VENDIDAS = `coalesce((SELECT sum(d.cantidad) FROM core.pedido_detalle d JOIN core.pedido k ON k.id = d.pedido_id WHERE d.promocion_id = x.id AND k.estado NOT IN ('CANCELADO','RECHAZADO')), 0)`;
+const DISPONIBLE = `greatest(least(p.stock - p.reservado, coalesce(x.cantidad - ${VENDIDAS}, p.stock - p.reservado)), 0)`;
+
 const hoyLima = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 const Promocion = z.object({
@@ -28,6 +32,8 @@ const Promocion = z.object({
   hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   activa: z.boolean().default(true),
   avisar: z.boolean().default(false),
+  // Unidades que se ofrecen (10 panes en oferta); vacío = hasta agotar el stock del producto.
+  cantidad: z.number().int().positive().max(100_000).nullable().default(null),
 }).refine((d) => d.hasta >= d.desde, { message: 'La fecha final no puede ser anterior a la inicial.', path: ['hasta'] });
 
 export async function rutasDespacho(app: FastifyInstance) {
@@ -86,30 +92,30 @@ export async function rutasDespacho(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------------------- promociones */
-  // Lo que ve el cliente: promociones vigentes con stock disponible (stock − reservado).
+  // Lo que ve el cliente: promociones vigentes con unidades: lo que queda de la oferta, sin pasar del stock libre.
   app.get('/promociones/vigentes', { preHandler: autenticar }, async () => {
     const igv = num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'igv'"))?.valor ?? '0.18');
     const filas = await q<Record<string, string>>(`SELECT x.id, x.producto_id, p.nombre producto, x.titulo, x.precio_con_igv, p.precio_con_igv precio_normal, x.hasta::text, p.imagen_id,
-        greatest(p.stock - p.reservado, 0) disponible
+        ${DISPONIBLE} disponible
       FROM core.promocion x JOIN core.producto p ON p.id = x.producto_id
-      WHERE x.activa AND p.estado = 'ACTIVO' AND $1::date BETWEEN x.desde AND x.hasta AND p.stock - p.reservado >= 1 ORDER BY x.hasta, p.nombre`, [hoyLima()]);
+      WHERE x.activa AND p.estado = 'ACTIVO' AND $1::date BETWEEN x.desde AND x.hasta AND ${DISPONIBLE} >= 1 ORDER BY x.hasta, p.nombre`, [hoyLima()]);
     return filas.map((f) => ({ id: f.id, productoId: f.producto_id, producto: f.producto, titulo: f.titulo, precioConIgv: num(f.precio_con_igv), precioNormal: num(f.precio_normal),
       hasta: f.hasta, imagenId: f.imagen_id, disponible: Math.floor(num(f.disponible)), precioNeto: Number((num(f.precio_con_igv) / (1 + igv)).toFixed(4)) }));
   });
 
   app.get('/promociones', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'promociones.gestionar')) return;
-    const filas = await q<Record<string, string>>(`SELECT x.id, x.producto_id, p.nombre producto, x.titulo, x.precio_con_igv, p.precio_con_igv precio_normal, x.desde::text, x.hasta::text, x.activa,
-        greatest(p.stock - p.reservado, 0) disponible,
-        coalesce((SELECT sum(d.cantidad) FROM core.pedido_detalle d JOIN core.pedido k ON k.id = d.pedido_id WHERE d.promocion_id = x.id AND k.estado NOT IN ('CANCELADO','RECHAZADO')), 0) vendidas
+    const filas = await q<Record<string, string>>(`SELECT x.id, x.producto_id, p.nombre producto, x.titulo, x.precio_con_igv, p.precio_con_igv precio_normal, x.desde::text, x.hasta::text, x.activa, x.cantidad, x.agotada_en::text agotada_en,
+        ${DISPONIBLE} disponible, ${VENDIDAS} vendidas
       FROM core.promocion x JOIN core.producto p ON p.id = x.producto_id ORDER BY x.hasta DESC, x.creado_en DESC LIMIT 200`);
     return filas.map((f) => ({ id: f.id, productoId: f.producto_id, producto: f.producto, titulo: f.titulo, precioConIgv: num(f.precio_con_igv), precioNormal: num(f.precio_normal),
-      desde: f.desde, hasta: f.hasta, activa: Boolean(f.activa), disponible: num(f.disponible), vendidas: num(f.vendidas) }));
+      desde: f.desde, hasta: f.hasta, activa: Boolean(f.activa), cantidad: f.cantidad === null ? null : num(f.cantidad), agotadaEn: f.agotada_en,
+      disponible: Math.floor(num(f.disponible)), vendidas: num(f.vendidas) }));
   });
 
   const avisarPromocion = async (d: z.infer<typeof Promocion>) => {
     const cuentas = await q<{ id: string }>(`SELECT u.id FROM core.usuario u JOIN core.cliente c ON c.id = u.cliente_id WHERE u.estado = 'ACTIVO' AND c.estado = 'ACTIVO'`);
-    await notificar(cuentas.map((u) => ({ usuarioId: u.id })), { tipo: 'promocion', titulo: d.titulo, cuerpo: `A S/ ${d.precioConIgv.toFixed(2)} hasta el ${d.hasta.split('-').reverse().join('/')}, mientras haya stock.`, ruta: '/catalogo' });
+    await notificar(cuentas.map((u) => ({ usuarioId: u.id })), { tipo: 'promocion', titulo: d.titulo, cuerpo: `${d.cantidad ? `Solo ${d.cantidad} unidades a` : 'A'} S/ ${d.precioConIgv.toFixed(2)} c/u hasta el ${d.hasta.split('-').reverse().join('/')}, mientras haya stock. Pídela en el catálogo.`, ruta: '/catalogo' });
   };
 
   app.post('/promociones', { preHandler: autenticar }, async (req, reply) => {
@@ -118,8 +124,8 @@ export async function rutasDespacho(app: FastifyInstance) {
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Promoción inválida.'));
     const d = p.data;
     if (!(await uno(`SELECT 1 FROM core.producto WHERE id = $1 AND estado = 'ACTIVO'`, [d.productoId]))) return reply.code(422).send(error(422, 'PRODUCTO_INVALIDO', 'El producto no existe o está inactivo.'));
-    const f = await uno<{ id: string }>(`INSERT INTO core.promocion (producto_id, titulo, precio_con_igv, desde, hasta, activa, creado_por) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [d.productoId, d.titulo, d.precioConIgv.toFixed(4), d.desde, d.hasta, d.activa, req.usuario!.id]);
+    const f = await uno<{ id: string }>(`INSERT INTO core.promocion (producto_id, titulo, precio_con_igv, desde, hasta, activa, creado_por, cantidad) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [d.productoId, d.titulo, d.precioConIgv.toFixed(4), d.desde, d.hasta, d.activa, req.usuario!.id, d.cantidad]);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PROMOCION_CREADA', entidad: 'promocion', entidadId: f!.id, detalle: d, ip: req.ip });
     if (d.avisar && d.activa) await avisarPromocion(d);
     return reply.code(201).send({ id: f!.id });
@@ -131,8 +137,9 @@ export async function rutasDespacho(app: FastifyInstance) {
     const p = Promocion.safeParse(req.body);
     if (!p.success || !z.string().uuid().safeParse(id).success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.success ? 'Promoción inválida.' : p.error.issues[0]?.message ?? 'Promoción inválida.'));
     const d = p.data;
-    const r = await q('UPDATE core.promocion SET producto_id=$2, titulo=$3, precio_con_igv=$4, desde=$5, hasta=$6, activa=$7 WHERE id=$1 RETURNING id',
-      [id, d.productoId, d.titulo, d.precioConIgv.toFixed(4), d.desde, d.hasta, d.activa]);
+    // Editarla (más unidades, otra fecha) la reabre si estaba agotada; lo tomado se cuenta siempre de los pedidos vivos.
+    const r = await q('UPDATE core.promocion SET producto_id=$2, titulo=$3, precio_con_igv=$4, desde=$5, hasta=$6, activa=$7, cantidad=$8, agotada_en = NULL WHERE id=$1 RETURNING id',
+      [id, d.productoId, d.titulo, d.precioConIgv.toFixed(4), d.desde, d.hasta, d.activa, d.cantidad]);
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La promoción no existe.'));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PROMOCION_EDITADA', entidad: 'promocion', entidadId: id, detalle: d, ip: req.ip });
     if (d.avisar && d.activa) await avisarPromocion(d);

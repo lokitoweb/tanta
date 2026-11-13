@@ -99,13 +99,42 @@ async function armarLineas(c: Cliente, items: ItemPedido[]) {
   return { lineas, total: lineas.reduce((s, i) => s + i.importe, 0), horas: Math.max(0, ...prods.rows.map((x) => Number(x.anticipacion_horas))) };
 }
 
-/** Las promociones venden lo que hay: se reserva al pedir y no pasa a producción. */
-async function reservarPromos(c: Cliente, lineas: LineaPedido[]) {
+/** Unidades de una promoción ya tomadas en pedidos vivos (lo cancelado o rechazado vuelve a la oferta). */
+const TOMADAS = `coalesce((SELECT sum(d.cantidad) FROM core.pedido_detalle d JOIN core.pedido k ON k.id = d.pedido_id
+  WHERE d.promocion_id = $1 AND k.estado NOT IN ('CANCELADO','RECHAZADO')), 0)`;
+
+/**
+ * Las promociones venden lo que hay: se reserva al pedir y no pasa a producción. Respeta las unidades ofrecidas
+ * (si la promoción las limita) y el stock libre. Devuelve las que se acaban de agotar para avisar a los clientes.
+ */
+async function reservarPromos(c: Cliente, lineas: LineaPedido[]): Promise<Array<{ id: string; titulo: string }>> {
+  const agotadas: Array<{ id: string; titulo: string }> = [];
   for (const l of lineas.filter((x) => x.promocionId).sort((a, b) => a.productoId.localeCompare(b.productoId))) {
     const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.productoId])).rows[0];
-    const disponible = num(p.stock) - num(p.reservado);
-    if (disponible + 1e-6 < l.unidades) throw Object.assign(new Error(`Solo quedan ${Math.max(0, Math.floor(disponible))} de ${l.nombre} en promoción.`), { status: 409 });
+    // La fila de la promoción se bloquea: dos clientes no pueden tomar la última unidad a la vez.
+    const pr = (await c.query<{ titulo: string; cantidad: number | null; tomadas: string }>(
+      `SELECT titulo, cantidad, ${TOMADAS} tomadas FROM core.promocion WHERE id = $1 FOR UPDATE`, [l.promocionId])).rows[0];
+    const libre = num(p.stock) - num(p.reservado);
+    const disponible = pr.cantidad == null ? libre : Math.min(libre, pr.cantidad - num(pr.tomadas));
+    if (disponible + 1e-6 < l.unidades) {
+      throw Object.assign(new Error(disponible < 1 ? `La promoción «${pr.titulo}» ya se agotó.` : `Solo quedan ${Math.floor(disponible)} de ${l.nombre} en promoción.`), { status: 409 });
+    }
     await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [l.productoId, l.unidades]);
+    if (disponible - l.unidades < 1 - 1e-6) {
+      const r = await c.query('UPDATE core.promocion SET agotada_en = now() WHERE id = $1 AND agotada_en IS NULL RETURNING id', [l.promocionId]);
+      if (r.rowCount) agotadas.push({ id: l.promocionId!, titulo: pr.titulo });
+    }
+  }
+  return agotadas;
+}
+
+/** Aviso a todos los clientes con cuenta: la oferta ya no está (otro cliente se la llevó). */
+export function avisarAgotadas(agotadas: Array<{ titulo: string }>) {
+  for (const a of agotadas) {
+    void q<{ id: string }>(`SELECT u.id FROM core.usuario u JOIN core.cliente c ON c.id = u.cliente_id WHERE u.estado = 'ACTIVO' AND c.estado = 'ACTIVO'`)
+      .then((cuentas) => avisar(cuentas.map((u) => ({ usuarioId: u.id })), { tipo: 'promocion', titulo: `Promoción agotada: ${a.titulo}`,
+        cuerpo: 'Otro cliente ya tomó las unidades de esta oferta. ¡Atento a las próximas!', ruta: '/catalogo' }))
+      .catch(() => {});
   }
 }
 
@@ -113,6 +142,9 @@ export async function liberarPromos(c: Cliente, pedidoId: string) {
   for (const l of (await c.query<{ producto_id: string; cantidad: string }>('SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL GROUP BY producto_id ORDER BY producto_id', [pedidoId])).rows) {
     await c.query('UPDATE core.producto SET reservado = greatest(reservado - $2, 0) WHERE id = $1', [l.producto_id, l.cantidad]);
   }
+  // Lo devuelto vuelve a la oferta: deja de estar agotada (se llama ya con el pedido cancelado o por corregir).
+  await c.query(`UPDATE core.promocion SET agotada_en = NULL WHERE agotada_en IS NOT NULL
+    AND id IN (SELECT promocion_id FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL)`, [pedidoId]);
 }
 
 /** RN-29 / APT-04: un pedido listo reserva su stock (lo de promoción ya está reservado). Sin stock: error, o false si no es estricto. */
@@ -186,9 +218,11 @@ export async function rutasFlujo(app: FastifyInstance) {
           const suyas = (await direccionesDe(clienteId)).map((x) => x.direccion.trim().toLowerCase());
           if (suyas.length && !suyas.includes(d.direccion.toLowerCase())) throw Object.assign(new Error('Elige una de tus direcciones de entrega (o agrégala en tu perfil).'), { status: 422 });
         }
-        const { lineas, total, horas } = await armarLineas(c, d.items);
-        await reservarPromos(c, lineas);
-        const fechaEntrega = fechaPedida ?? await fechaEntregaSugerida(horas);
+        const { lineas, horas } = await armarLineas(c, d.items);
+        const agotadas = await reservarPromos(c, lineas);
+        // Oferta y pedido regular van separados: la oferta sale del stock (sin producción) y se cobra aparte.
+        const regulares = lineas.filter((l) => !l.promocionId), ofertas = lineas.filter((l) => l.promocionId);
+        const fechaEntrega = fechaPedida ?? await fechaEntregaSugerida(regulares.length ? horas : 0);
         // PED-04 / CP-09: si el personal fija la fecha, respeta la anticipación del producto más exigente (hora de Lima, UTC−5).
         const entrega = Date.parse(`${fechaEntrega}T${d.horaEntrega || '23:59'}:00-05:00`);
         if (fechaPedida && horas > 0 && entrega < Date.now() + horas * 3_600_000) {
@@ -199,18 +233,30 @@ export async function rutasFlujo(app: FastifyInstance) {
         const tipoEntrega = d.tipoEntrega ?? (direccion ? 'DELIVERY' : 'RECOJO');
         // PED-09: el pedido que registra el vendedor ya queda confirmado; el del cliente espera confirmación (PED-08).
         const estadoInicial = yo?.cliente_id ? 'REGISTRADO' : 'CONFIRMADO';
-        const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
-        const ped = (await c.query<{ id: string }>(
-          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en, comprobante_tipo)
-           VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 = 'CONFIRMADO' THEN now() END, $13) RETURNING id`,
-          [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
-            estadoInicial, tipoEntrega, tipoEntrega === 'DELIVERY' ? direccion : '', comp.codigo])).rows[0];
-        await guardarLineas(c, ped.id, lineas);
-        return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: estadoInicial, fechaEntrega, comprobanteTipo: comp.codigo };
+        const insertar = async (ls: LineaPedido[], esOferta: boolean) => {
+          const total = ls.reduce((s, i) => s + i.importe, 0);
+          // Una oferta registrada por el personal ya está lista: es stock reservado, no se produce.
+          const estado = esOferta && estadoInicial === 'CONFIRMADO' ? 'LISTO' : estadoInicial;
+          const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
+          const ped = (await c.query<{ id: string }>(
+            `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en, comprobante_tipo, es_oferta)
+             VALUES ($1,$2,$3,$4,$10,$5,$6,$7,$8,$9,$11,$12, CASE WHEN $10 <> 'REGISTRADO' THEN now() END, $13, $14) RETURNING id`,
+            [cod, clienteId, cli.nombre, yo?.cliente_id ? 'App cliente' : req.usuario!.nombre, total.toFixed(4), fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
+              estado, tipoEntrega, tipoEntrega === 'DELIVERY' ? direccion : '', comp.codigo, esOferta])).rows[0];
+          await guardarLineas(c, ped.id, ls);
+          return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado, fechaEntrega, comprobanteTipo: comp.codigo, esOferta };
+        };
+        const pedidos = [...(regulares.length ? [await insertar(regulares, false)] : []), ...(ofertas.length ? [await insertar(ofertas, true)] : [])];
+        return { pedidos, agotadas };
       });
-      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CREADO', entidad: 'pedido', entidadId: r.codigo, detalle: { total: r.total, items: d.items.length }, ip: req.ip });
-      void emitirEvento('pedido.estado', { codigo: r.codigo, de: null, a: r.estado });
-      return reply.code(201).send(r);
+      for (const x of r.pedidos) {
+        await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_CREADO', entidad: 'pedido', entidadId: x.codigo,
+          detalle: { total: x.total, oferta: x.esOferta || undefined, items: d.items.length }, ip: req.ip });
+        void emitirEvento('pedido.estado', { codigo: x.codigo, de: null, a: x.estado });
+      }
+      avisarAgotadas(r.agotadas);
+      // Compatible con las apps instaladas: los campos del primer pedido (el regular, si hay) y la lista completa.
+      return reply.code(201).send({ ...r.pedidos[0], pedidos: r.pedidos });
     } catch (e) {
       const err = e as Error & { status?: number };
       if (!err.status) throw e;
@@ -226,7 +272,7 @@ export async function rutasFlujo(app: FastifyInstance) {
       SELECT p.id, p.codigo, p.cliente_id AS "clienteId", p.cliente, p.estado, p.vendedor,
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
              p.tipo_entrega AS "tipoEntrega", p.direccion, (SELECT ve.placa FROM core.vehiculo ve WHERE ve.id = p.vehiculo_id) vehiculo, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
-             p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn", p.comprobante_tipo AS "comprobanteTipo",
+             p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn", p.comprobante_tipo AS "comprobanteTipo", p.es_oferta AS "esOferta",
              -- El comprobante emitido al despachar, para descargarlo (sin costos: solo lo que el cliente pagó).
              (SELECT json_build_object('tipo', v.comprobante_tipo, 'nombre', coalesce(t.nombre, v.comprobante_tipo), 'numero', v.serie || '-' || lpad(v.correlativo::text, 8, '0'),
                 'fecha', v.creado_en, 'base', v.base, 'igv', v.igv, 'total', v.total_con_igv, 'vendedor', v.vendedor,

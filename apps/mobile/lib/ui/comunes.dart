@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/tema.dart';
 import '../core/tokens.dart';
@@ -361,4 +362,85 @@ class AccionesDialogo extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: principal),
       ]);
+}
+
+/// Cantidad con − / + y un campo para escribirla (100 sin tocar «+» cien veces).
+/// Solo enteros entre [minimo] y [maximo]; al tocar el campo se selecciona el número para reemplazarlo.
+class SelectorCantidad extends StatefulWidget {
+  const SelectorCantidad({super.key, required this.valor, required this.onCambio, this.minimo = 1, this.maximo = 10000, this.compacto = false});
+  final int valor;
+  final ValueChanged<int> onCambio;
+  final int minimo;
+  final int maximo;
+  /// Versión angosta para filas de lista (carrito).
+  final bool compacto;
+
+  @override
+  State<SelectorCantidad> createState() => _SelectorCantidadState();
+}
+
+class _SelectorCantidadState extends State<SelectorCantidad> {
+  late final _c = TextEditingController(text: '${widget.valor}');
+  final _foco = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _foco.addListener(() {
+      if (_foco.hasFocus) {
+        _c.selection = TextSelection(baseOffset: 0, extentOffset: _c.text.length);
+      } else {
+        _fijar(int.tryParse(_c.text) ?? widget.minimo); // al salir del campo, un valor vacío o fuera de rango se corrige
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(SelectorCantidad old) {
+    super.didUpdateWidget(old);
+    // Cambió desde fuera (− / + u otra pantalla): se refleja, salvo mientras se escribe ese mismo número.
+    if (int.tryParse(_c.text) != widget.valor) _c.text = '${widget.valor}';
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    _foco.dispose();
+    super.dispose();
+  }
+
+  void _fijar(int n) {
+    final v = n.clamp(widget.minimo, widget.maximo);
+    if (_c.text != '$v') _c.text = '$v';
+    if (v != widget.valor) widget.onCambio(v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ancho = widget.compacto ? 52.0 : 72.0;
+    final boton = widget.compacto ? 40.0 : 48.0;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(width: boton, height: boton, child: IconButton.outlined(
+          tooltip: 'Quitar uno', padding: EdgeInsets.zero,
+          onPressed: widget.valor > widget.minimo ? () => _fijar(widget.valor - 1) : null, icon: const Icon(Icons.remove))),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: SizedBox(width: ancho, child: Semantics(label: 'Cantidad', textField: true, child: TextField(
+          controller: _c, focusNode: _foco,
+          textAlign: TextAlign.center,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.done,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter('${widget.maximo}'.length)],
+          style: estiloDisplay.copyWith(fontSize: widget.compacto ? 16 : 20),
+          decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 4)),
+          // Mientras escribe, el total se actualiza; el rango se corrige al terminar.
+          onChanged: (t) { final n = int.tryParse(t); if (n != null && n >= widget.minimo && n <= widget.maximo) widget.onCambio(n); },
+          onSubmitted: (t) => _fijar(int.tryParse(t) ?? widget.minimo),
+        ))),
+      ),
+      SizedBox(width: boton, height: boton, child: IconButton.outlined(
+          tooltip: 'Agregar uno', padding: EdgeInsets.zero,
+          onPressed: widget.valor < widget.maximo ? () => _fijar(widget.valor + 1) : null, icon: const Icon(Icons.add))),
+    ]);
+  }
 }

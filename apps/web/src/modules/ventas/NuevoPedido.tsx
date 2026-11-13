@@ -59,11 +59,13 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
     setError(null);
     setGuardando(true);
     try {
-      const r = await api<{ codigo: string }>('/pedidos', {
+      const r = await api<{ codigo: string; pedidos?: Array<{ codigo: string; esOferta: boolean }> }>('/pedidos', {
         method: 'POST', conIdempotencia: true,
         body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad), ...(i.presentacion ? { presentacion: i.presentacion } : {}), ...(i.promocionId ? { promocionId: i.promocionId } : {}) })), ...(fecha ? { fechaEntrega: fecha } : {}), observaciones: obs, direccion, ...(comprobante ? { comprobanteTipo: comprobante } : {}) },
       });
-      onCerrar(r.codigo);
+      // Con oferta y productos regulares salen dos pedidos: la oferta va aparte (sin producción, se cobra por separado).
+      const oferta = r.pedidos?.find((x) => x.esOferta), regular = r.pedidos?.find((x) => !x.esOferta);
+      onCerrar(oferta && regular ? `${regular.codigo} y la oferta ${oferta.codigo} (se cobra aparte)` : r.codigo);
     } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo registrar.'); }
     finally { setGuardando(false); }
   };

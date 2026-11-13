@@ -201,7 +201,7 @@ export function Productos() {
           { key: 'pesoFinalG', label: 'Peso final por unidad (g)', tipo: 'numero', ayuda: 'El pan pesado al salir del horno' },
           { key: 'c-perdida', label: 'Pérdida por cocción', tipo: 'calculado', ayuda: 'Lo calcula el sistema: 1 − peso final ÷ peso de masa',
             calcular: (form) => { const c = n(form.pesoMasaG), fin = n(form.pesoFinalG); return c > 0 && fin > 0 ? (fin > c ? 'El peso final no puede superar al de la masa' : pct(1 - fin / c)) : '—'; } },
-          { key: 'unidadesLote', label: 'N.° de unidades por lote', tipo: 'numero', ayuda: 'Cuántos panes entran al horno a la vez' },
+          { key: 'unidadesLote', label: 'N.° de unidades reales por lote', tipo: 'numero', ayuda: 'Cuántos panes salen de verdad de una receta (ej. 20). Manda sobre el cálculo por peso en el costo y en la producción' },
           { key: 'horasHornoLote', label: 'Tiempo de horneado por lote (horas)', tipo: 'numero', ayuda: 'Ej.: 0.8 = 48 minutos. Con él se calculan el gas del horno y la mano de obra' },
           { key: 'vidaUtilDias', label: 'Días de vida útil', tipo: 'numero', ayuda: 'Cada horneada guarda su fecha de producción y de vencimiento' },
           { key: 's-sku1', label: 'SKU #1 · presentación principal', tipo: 'seccion' },
@@ -248,11 +248,11 @@ function FichaCosto({ producto, receta, igv }: { producto: Producto; receta: Rec
     ['Pérdida por cocción', crudo && final ? pct(1 - final / crudo) : '—', '1 − peso final ÷ peso de masa'],
     ['Peso final por unidad', final ? `${num(final)} g` : '—'],
     ['Masa total del lote', `${v('masaLoteKg').toFixed(3)} kg`, 'Suma de los insumos de la receta'],
-    ['Unidades según Tanta (por lote)', lote ? String(lote) : '—', 'Ficha del producto'],
+    ['Unidades reales por lote (según Tanta)', lote ? String(lote) : '—', lote ? 'Ficha del producto: mandan en el costo' : 'Sin dato: se usan las esperadas por peso'],
     ['Unidades teóricas por lote', v('unidadesTeoricas').toFixed(2), 'Masa del lote ÷ peso de masa'],
     ['Unidades esperadas por lote', v('unidadesEsperadas').toFixed(2), 'Teóricas menos la merma de proceso'],
     ['Costo de insumos del lote', money(v('costoLote')), 'Cantidad de la receta × costo de cada insumo'],
-    ['Costo de insumos por unidad', money(v('costoConMerma')), 'Con la merma de proceso'],
+    ['Costo de insumos por unidad', money(v('costoConMerma')), lote ? `Costo del lote ÷ ${lote} unidades reales` : 'Con la merma de proceso'],
     ['Mano de obra por unidad', money(v('moUnit')), 'Tiempo de horneado × costo de la hora ÷ unidades del lote'],
     ['CIF por unidad', money(v('cifUnit')), 'Costos de producción repartidos'],
   ];
@@ -260,7 +260,7 @@ function FichaCosto({ producto, receta, igv }: { producto: Producto; receta: Rec
     <>
       {lote && v('unidadesTeoricas') > 0 && Math.abs(lote - v('unidadesTeoricas')) / lote > 0.05 && (
         <div className="aviso aviso--danger"><span className="aviso__icono">!</span><div><p>
-          Con esta receta salen {v('unidadesTeoricas').toFixed(1)} panes de {num(crudo)} g, pero el lote es de {lote}. Revisa la receta o el peso: el costo por unidad se calcula con las unidades reales.
+          Por peso, esta receta daría {v('unidadesTeoricas').toFixed(1)} panes de {num(crudo)} g; en la práctica salen {lote}. El costo por unidad y la producción usan las {lote} unidades reales.
         </p></div></div>
       )}
       <div className="table-wrap"><table className="table table--compacta">
