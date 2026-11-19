@@ -19,9 +19,6 @@ export function pct(fraccion: number, decimales = 1): string {
   return `${(fraccion * 100).toLocaleString('es-PE', { minimumFractionDigits: decimales, maximumFractionDigits: decimales })} %`;
 }
 
-export function pesosFirma(n: number): string {
-  return n >= 0 ? `+${pct(n)}` : pct(n);
-}
 
 export function fecha(iso: string): string {
   const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T'));
@@ -63,11 +60,6 @@ export function iniciales(nombre: string): string {
   return nombre.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
 }
 
-/** Eje de gráficos: sin decimales y compacto, siempre con la misma regla. */
-export function eje(n: number): string {
-  if (Math.abs(n) >= 1000) return `S/ ${(n / 1000).toLocaleString('es-PE', { maximumFractionDigits: 1 })}k`;
-  return `S/ ${Math.round(n).toLocaleString('es-PE')}`;
-}
 
 /** Cantidades de receta con unidad legible: 0.102 kg se muestra como 102 g. */
 export function cantidad(valor: number, unidad: string): string {

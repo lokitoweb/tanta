@@ -37,11 +37,3 @@ export function invalidar(prefijo?: string): void {
     if (clave.startsWith(prefijo)) store.delete(clave);
   }
 }
-
-export function estadisticas(): { claves: number; detalle: Array<{ clave: string; venceEnMs: number }> } {
-  const ahora = Date.now();
-  return {
-    claves: store.size,
-    detalle: [...store.entries()].map(([clave, e]) => ({ clave, venceEnMs: Math.max(0, e.expira - ahora) })),
-  };
-}

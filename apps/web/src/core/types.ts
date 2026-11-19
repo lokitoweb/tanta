@@ -1,4 +1,3 @@
-export type RolId = 'GERENTE' | 'ADMINISTRADOR' | 'PRODUCCION' | 'ALMACEN' | 'VENDEDOR' | 'CLIENTE' | 'SOPORTE';
 
 export interface Permiso { id: string; grupo: string; descripcion: string }
 export interface Rol {

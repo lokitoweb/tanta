@@ -67,9 +67,6 @@ export function leerConfigPublica(renovar = false): Promise<ConfigPublica> {
   return configPublica;
 }
 
-export function idempotencyKey(): string {
-  return crypto.randomUUID();
-}
 
 // Un solo refresco en vuelo: el servidor rota el token y detecta reuso, así que dos
 // refrescos paralelos cerrarían la sesión.
@@ -129,7 +126,7 @@ export async function api<T>(ruta: string, op: Opciones = {}): Promise<T> {
     const acceso = leerAcceso();
     if (acceso) cabeceras.Authorization = `Bearer ${acceso}`;
   }
-  if (conIdempotencia) cabeceras['Idempotency-Key'] = idempotencyKey();
+  if (conIdempotencia) cabeceras['Idempotency-Key'] = crypto.randomUUID();
 
   const res = await fetch(`${BASE}${ruta}`, {
     method,

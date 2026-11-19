@@ -13,3 +13,8 @@ coverage/
 apps/mobile/.dart_tool/
 apps/mobile/build/
 .pnpm-store/
+
+# Salidas generadas (pruebas de carga y capturas): quedan en disco, no en git
+tests/resultados-*.json
+tests/evidencia/
+.shots/

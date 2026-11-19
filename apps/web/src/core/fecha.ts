@@ -14,6 +14,3 @@ export function desdeIso(iso: string): string {
   return `${d.getDate()} ${MESES[d.getMonth()]}`;
 }
 
-export function hoyLargo(): string {
-  return fechaLarga(new Date());
-}
