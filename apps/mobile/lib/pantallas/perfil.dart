@@ -8,7 +8,7 @@ import '../core/tokens.dart';
 import '../ui/comunes.dart';
 import 'legal.dart';
 
-/// Mi perfil: datos, foto, contraseña, privacidad y eliminación de cuenta.
+/// Mi perfil: datos, foto, ficha de cliente y direcciones (solo clientes), contraseña, privacidad y eliminación de cuenta.
 /// Visible para todos los roles (requisito de App Store y Google Play).
 class Perfil extends StatefulWidget {
   const Perfil({super.key, required this.onSalir});
@@ -20,6 +20,8 @@ class Perfil extends StatefulWidget {
 
 class _PerfilState extends State<Perfil> {
   Map<String, dynamic>? _p;
+  /// Ficha de cliente (contacto, celular, direcciones): el servidor responde 403 al personal y la sección no aparece.
+  Map<String, dynamic>? _ficha;
   String? _error;
   String _version = '';
   bool _ocupado = false;
@@ -35,6 +37,7 @@ class _PerfilState extends State<Perfil> {
     try {
       final p = await Api.instancia.perfil();
       if (mounted) setState(() { _p = p; _error = null; });
+      await _cargarFicha();
     } catch (e) {
       final texto = e is SinConexion ? 'Sin conexión. Intenta cuando vuelva la red.' : '$e';
       // Sin perfil cargado se muestra el error con Reintentar; si ya había uno, basta el aviso.
@@ -44,6 +47,92 @@ class _PerfilState extends State<Perfil> {
         _aviso(texto, error: true);
       }
     }
+  }
+
+  Future<void> _cargarFicha() async {
+    try {
+      final f = await Api.instancia.miFicha();
+      if (mounted) setState(() => _ficha = f);
+    } on ApiException catch (e) {
+      if (e.status == 403 && mounted) setState(() => _ficha = null);
+    } catch (_) {} // Sin red: se conserva la que había.
+  }
+
+  Future<void> _editarFicha() async {
+    final f = _ficha!;
+    final contacto = TextEditingController(text: '${f['contacto'] ?? ''}');
+    final tel = TextEditingController(text: '${f['telefono'] ?? ''}');
+    final doc = '${f['docNumero'] ?? ''}';
+    final ok = await _dialogo('Mi ficha de cliente', [
+      TextField(controller: contacto, maxLength: 120, textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Persona de contacto', prefixIcon: Icon(Icons.person_outline))),
+      const SizedBox(height: 4),
+      TextField(controller: tel, maxLength: 30, keyboardType: TextInputType.phone, autofillHints: const [AutofillHints.telephoneNumber],
+          decoration: const InputDecoration(labelText: 'Celular', prefixIcon: Icon(Icons.phone_outlined))),
+    ], 'Guardar', subtitulo: '${f['docTipo'] ?? ''} ${doc.isEmpty ? '—' : doc} · el documento lo actualiza la panadería');
+    if (ok != true) return;
+    await _accion(() async {
+      await Api.instancia.guardarFicha(contacto: contacto.text.trim(), telefono: tel.text.trim());
+      await _cargarFicha();
+    }, 'Ficha actualizada');
+  }
+
+  Future<void> _direcciones() => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) => StatefulBuilder(builder: (ctx, refrescar) {
+          final f = _ficha ?? const <String, dynamic>{};
+          final dirs = ((f['direcciones'] as List?) ?? const []).cast<Map>();
+          final max = (f['maxDirecciones'] as num?)?.toInt() ?? dirs.length;
+          Future<void> hacer(Future<void> Function() fn, String ok) async {
+            await _accion(() async { await fn(); await _cargarFicha(); }, ok);
+            refrescar(() {});
+          }
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.viewInsetsOf(ctx).bottom),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text('Direcciones de entrega · ${dirs.length} de $max', style: estiloDisplay.copyWith(fontSize: 17)),
+                const SizedBox(height: 8),
+                for (final d in dirs)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.place_outlined),
+                    title: Text('${d['direccion']}'),
+                    subtitle: _detalleDireccion(d),
+                    // La principal la mantiene la panadería: no se quita desde aquí.
+                    trailing: d['id'] == null ? null : IconButton(
+                      tooltip: 'Quitar', icon: const Icon(Icons.delete_outline),
+                      onPressed: _ocupado ? null : () => hacer(() => Api.instancia.quitarDireccion('${d['id']}'), 'Dirección eliminada'),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                if (dirs.length >= max)
+                  const Text('Llegaste al máximo de direcciones: quita una para agregar otra.', style: TextStyle(fontSize: 13, color: TantaColors.textMuted))
+                else
+                  OutlinedButton.icon(
+                    onPressed: _ocupado ? null : () async {
+                      final dir = TextEditingController(), ref = TextEditingController();
+                      final ok = await _dialogo('Nueva dirección', [
+                        TextField(controller: dir, autofocus: true, maxLength: 200, decoration: const InputDecoration(labelText: 'Calle, número, distrito')),
+                        TextField(controller: ref, maxLength: 120, decoration: const InputDecoration(labelText: 'Referencia (opcional)')),
+                      ], 'Agregar');
+                      if (ok != true) return;
+                      if (dir.text.trim().length < 5) return _aviso('Escribe la dirección completa.', error: true);
+                      await hacer(() => Api.instancia.agregarDireccion(dir.text.trim(), ref.text.trim()), 'Dirección agregada');
+                    },
+                    icon: const Icon(Icons.add_location_alt_outlined),
+                    label: const Text('Agregar dirección'),
+                  ),
+              ]),
+            ),
+          );
+        }),
+      );
+
+  Widget? _detalleDireccion(Map d) {
+    final partes = [if (d['principal'] == true) 'Principal', if ('${d['referencia'] ?? ''}'.isNotEmpty) '${d['referencia']}'];
+    return partes.isEmpty ? null : Text(partes.join(' · '), style: const TextStyle(fontSize: 12));
   }
 
   void _aviso(String texto, {bool error = false}) {
@@ -204,6 +293,7 @@ class _PerfilState extends State<Perfil> {
     }
     final legal = (Api.instancia.config['legal'] as Map?) ?? const {};
     final foto = p['fotoUrl'] as String?;
+    final ficha = _ficha;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
@@ -233,6 +323,19 @@ class _PerfilState extends State<Perfil> {
             _item(Icons.lock_outline, 'Cambiar contraseña', 'Cierra tus sesiones en otros equipos', _cambiarClave),
           ]),
         ),
+        if (ficha != null) ...[
+          const SizedBox(height: 14),
+          Panel(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              _item(Icons.storefront_outlined, 'Mi ficha de cliente',
+                  [ficha['contacto'], ficha['telefono']].map((x) => '${x ?? ''}').where((x) => x.isNotEmpty).join(' · '), _editarFicha),
+              const Divider(height: 1),
+              _item(Icons.place_outlined, 'Direcciones de entrega',
+                  '${(ficha['direcciones'] as List?)?.length ?? 0} de ${ficha['maxDirecciones'] ?? '—'}', _direcciones),
+            ]),
+          ),
+        ],
         const SizedBox(height: 14),
         Panel(
           padding: EdgeInsets.zero,
