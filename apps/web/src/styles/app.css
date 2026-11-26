@@ -1638,3 +1638,59 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .seguimiento li { background: var(--tanta-surface-muted, #f4f1ec); border-radius: var(--tanta-radius-md, 10px); padding: 8px 12px; max-width: 85%; }
 .seguimiento li p { margin: 2px 0 0; }
 .seguimiento .seguimiento__cliente { align-self: flex-end; background: var(--tanta-surface-card); border: 1px solid var(--tanta-border, #e5e0d8); }
+
+/* ============================================================
+   Interior (26/11/2026, pedido del cliente): fondo blanco, tarjetas con relleno cálido
+   que nace del color de la marca, sombra suave, entrada animada y respuesta al pasar el mouse.
+   Todo sale de --tanta-primario / --tanta-acento: Configuración → Marca lo cambia en vivo.
+   ============================================================ */
+.card {
+  background: linear-gradient(160deg, var(--tanta-primario-suave) 0%, #FFFFFF 46%);
+  border-color: var(--tanta-border-tarjeta);
+  box-shadow: 0 1px 2px rgba(42, 35, 32, 0.04), 0 6px 18px -6px rgba(42, 35, 32, 0.08);
+}
+.kpi {
+  position: relative; overflow: hidden;
+  background: linear-gradient(150deg, var(--kpi-suave) 0%, #FFFFFF 62%);
+  border-color: var(--tanta-border-tarjeta);
+  box-shadow: 0 1px 2px rgba(42, 35, 32, 0.04), 0 6px 18px -6px rgba(42, 35, 32, 0.08);
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease, border-color 180ms ease;
+}
+.kpi:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--kpi) 35%, var(--tanta-border-tarjeta));
+  box-shadow: 0 2px 4px rgba(42, 35, 32, 0.05), 0 14px 28px -10px color-mix(in srgb, var(--kpi) 35%, transparent);
+}
+.kpi__icon { transition: transform 180ms cubic-bezier(.2,.8,.2,1), background 180ms ease, color 180ms ease; }
+.kpi:hover .kpi__icon { transform: scale(1.12) rotate(-4deg); background: var(--kpi); color: #FFFFFF; }
+
+/* Accesos rápidos: tarjetas pequeñas que responden. */
+.acceso-card { background: #FFFFFF; border-color: var(--tanta-border-tarjeta); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, color 160ms ease; }
+.acceso-card svg:first-child { color: var(--tanta-primario); }
+.acceso-card svg:last-child { transition: transform 160ms ease, opacity 160ms ease; }
+.acceso-card:hover { transform: translateY(-2px); background: #FFFFFF; border-color: color-mix(in srgb, var(--tanta-primario) 40%, transparent); color: var(--tanta-primario-texto); box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--tanta-primario) 40%, transparent); }
+.acceso-card:hover svg:last-child { opacity: 1; color: var(--tanta-primario); transform: translateX(2px); }
+
+/* Entrada: las tarjetas aparecen suaves y escalonadas al abrir cada pantalla. */
+@keyframes tanta-aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.kpi, .card { animation: tanta-aparecer 380ms cubic-bezier(.2,.8,.2,1) both; }
+.kpi:nth-child(2), .card:nth-child(2) { animation-delay: 50ms; }
+.kpi:nth-child(3), .card:nth-child(3) { animation-delay: 100ms; }
+.kpi:nth-child(4), .card:nth-child(4) { animation-delay: 150ms; }
+
+/* Menú: la opción activa se enciende en el color de la marca; el resto responde al pasar el mouse. */
+.navitem { transition: background 160ms ease, color 160ms ease, transform 160ms ease; }
+.navitem:hover { background: rgba(255, 255, 255, 0.07); color: #FFFFFF; transform: translateX(2px); }
+.navitem:hover svg { color: var(--tanta-primario-claro); }
+.navitem.is-active {
+  background: linear-gradient(135deg, var(--tanta-primario) 0%, color-mix(in srgb, var(--tanta-primario) 78%, var(--tanta-acento)) 100%);
+  color: var(--tanta-sobre-primario); transform: none;
+  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--tanta-primario) 70%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.navitem.is-active svg { color: var(--tanta-sobre-primario); }
+.navitem.is-active::before { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi, .card { animation: none; }
+  .kpi:hover, .acceso-card:hover, .navitem:hover { transform: none; }
+}
