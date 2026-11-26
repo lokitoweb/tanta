@@ -14,6 +14,9 @@
   --tanta-primario-texto: color-mix(in srgb, var(--tanta-primario) 72%, #000);
   --tanta-acento-suave: color-mix(in srgb, var(--tanta-acento) 16%, #fff);
   --tanta-primario-claro: color-mix(in srgb, var(--tanta-primario) 70%, #fff);
+  /* Relleno sólido de las tarjetas (Configuración → Marca → Color de tarjetas); el borde sale de él. */
+  --tanta-tarjeta: var(--tanta-surface-tarjeta);
+  --tanta-tarjeta-borde: color-mix(in srgb, var(--tanta-tarjeta) 92%, #6B4F3A);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -1645,27 +1648,27 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
    Todo sale de --tanta-primario / --tanta-acento: Configuración → Marca lo cambia en vivo.
    ============================================================ */
 .card {
-  background: linear-gradient(160deg, var(--tanta-primario-suave) 0%, #FFFFFF 46%);
-  border-color: var(--tanta-border-tarjeta);
+  background: var(--tanta-tarjeta);
+  border-color: var(--tanta-tarjeta-borde);
   box-shadow: 0 1px 2px rgba(42, 35, 32, 0.04), 0 6px 18px -6px rgba(42, 35, 32, 0.08);
 }
 .kpi {
   position: relative; overflow: hidden;
-  background: linear-gradient(150deg, var(--kpi-suave) 0%, #FFFFFF 62%);
-  border-color: var(--tanta-border-tarjeta);
+  background: var(--tanta-tarjeta);
+  border: 1px solid var(--tanta-tarjeta-borde);
   box-shadow: 0 1px 2px rgba(42, 35, 32, 0.04), 0 6px 18px -6px rgba(42, 35, 32, 0.08);
   transition: transform 180ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease, border-color 180ms ease;
 }
 .kpi:hover {
   transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--kpi) 35%, var(--tanta-border-tarjeta));
+  border-color: color-mix(in srgb, var(--kpi) 35%, var(--tanta-tarjeta-borde));
   box-shadow: 0 2px 4px rgba(42, 35, 32, 0.05), 0 14px 28px -10px color-mix(in srgb, var(--kpi) 35%, transparent);
 }
 .kpi__icon { transition: transform 180ms cubic-bezier(.2,.8,.2,1), background 180ms ease, color 180ms ease; }
 .kpi:hover .kpi__icon { transform: scale(1.12) rotate(-4deg); background: var(--kpi); color: #FFFFFF; }
 
 /* Accesos rápidos: tarjetas pequeñas que responden. */
-.acceso-card { background: #FFFFFF; border-color: var(--tanta-border-tarjeta); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, color 160ms ease; }
+.acceso-card { background: #FFFFFF; border-color: var(--tanta-tarjeta-borde); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, color 160ms ease; }
 .acceso-card svg:first-child { color: var(--tanta-primario); }
 .acceso-card svg:last-child { transition: transform 160ms ease, opacity 160ms ease; }
 .acceso-card:hover { transform: translateY(-2px); background: #FFFFFF; border-color: color-mix(in srgb, var(--tanta-primario) 40%, transparent); color: var(--tanta-primario-texto); box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--tanta-primario) 40%, transparent); }

@@ -10,7 +10,7 @@ import { ActivacionApp, leerArchivoFirebase, type ArchivoFirebase } from './Vinc
 type Seccion = 'marca' | 'movil' | 'legal' | 'correo' | 'integraciones';
 type Datos = Record<string, Record<string, unknown>>;
 /** Paleta por defecto (tokens: terracota-500 y miel-500). */
-const PALETA = { primario: '#B84A26', acento: '#E9A23B' };
+const PALETA = { primario: '#B84A26', acento: '#E9A23B', tarjeta: '#FAF6F1' };
 interface Dispositivo { nombre: string; usuario: string; plataforma: string; version_app: string; ultimo_uso: string; push: boolean; desactualizada: boolean }
 
 // Secciones de la app móvil que el superadmin puede apagar para todos (el permiso del rol sigue mandando).
@@ -151,10 +151,12 @@ export function Configuracion() {
             <span />
             <Campo etiqueta="Color principal"><input className="field__input field__color" type="color" value={marca.colorPrimario ?? PALETA.primario} onChange={(e) => campo('marca', 'colorPrimario', e.target.value.toUpperCase())} /></Campo>
             <Campo etiqueta="Color de acento"><input className="field__input field__color" type="color" value={marca.colorAcento ?? PALETA.acento} onChange={(e) => campo('marca', 'colorAcento', e.target.value.toUpperCase())} /></Campo>
+            <Campo etiqueta="Color de tarjetas"><input className="field__input field__color" type="color" value={marca.colorTarjeta ?? PALETA.tarjeta} onChange={(e) => campo('marca', 'colorTarjeta', e.target.value.toUpperCase())} /></Campo>
+            <span />
             <p className="dialogo__nota" style={{ gridColumn: '1 / -1' }}>
               El color principal pinta botones, el menú activo y las selecciones de toda la web; los tonos suaves salen solos de él.
               Texto sobre el principal: {textoSobre(marca.colorPrimario ?? PALETA.primario) === '#FFFFFF' ? 'blanco' : 'oscuro'} (contraste {contraste(marca.colorPrimario ?? PALETA.primario, textoSobre(marca.colorPrimario ?? PALETA.primario)).toFixed(1)}:1; mínimo legible 4.5).{' '}
-              <button type="button" className="enlace" onClick={() => { campo('marca', 'colorPrimario', PALETA.primario); campo('marca', 'colorAcento', PALETA.acento); }}>Volver a la paleta Tanta</button>
+              <button type="button" className="enlace" onClick={() => { campo('marca', 'colorPrimario', PALETA.primario); campo('marca', 'colorAcento', PALETA.acento); campo('marca', 'colorTarjeta', PALETA.tarjeta); }}>Volver a la paleta Tanta</button>
             </p>
             <SubirImagen etiqueta="Logo (PNG transparente, horizontal)" id={marca.logoId} onId={(id) => campo('marca', 'logoId', id)} onError={(t) => setAviso({ tono: 'danger', texto: t })} />
             <SubirImagen etiqueta="Ícono de la app (cuadrado, 1024×1024)" id={marca.iconoId} cuadrado onId={(id) => campo('marca', 'iconoId', id)} onError={(t) => setAviso({ tono: 'danger', texto: t })} />

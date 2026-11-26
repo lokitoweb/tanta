@@ -22,7 +22,7 @@ export function textoSobre(fondo: string): string {
   return contraste(fondo, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#2A2320';
 }
 
-export function aplicarMarca(marca: { colorPrimario?: string; colorAcento?: string } | undefined): void {
+export function aplicarMarca(marca: { colorPrimario?: string; colorAcento?: string; colorTarjeta?: string } | undefined): void {
   const raiz = document.documentElement.style;
   const p = marca?.colorPrimario;
   const a = marca?.colorAcento;
@@ -36,4 +36,7 @@ export function aplicarMarca(marca: { colorPrimario?: string; colorAcento?: stri
   }
   if (a && HEX.test(a)) raiz.setProperty('--tanta-acento', a);
   else raiz.removeProperty('--tanta-acento');
+  const t = marca?.colorTarjeta;
+  if (t && HEX.test(t)) raiz.setProperty('--tanta-tarjeta', t);
+  else raiz.removeProperty('--tanta-tarjeta');
 }

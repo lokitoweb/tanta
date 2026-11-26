@@ -66,6 +66,8 @@ const urlHttps = z.union([z.literal(''), z.string().url().startsWith('https://',
 const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 const ESQUEMAS: Record<Seccion, z.ZodTypeAny> = {
   marca: z.object({ nombreApp: z.string().trim().min(2).max(40), colorPrimario: color, colorAcento: color,
+    // Relleno de las tarjetas de la web (vacío = el de la paleta).
+    colorTarjeta: color.optional(),
     logoId: z.string().uuid().nullable(), iconoId: z.string().uuid().nullable(),
     // Fondos rotativos del ingreso, en orden. Vacío = los que trae el sistema.
     fondosIngreso: z.array(z.string().uuid()).max(8).default([]), fondoSegundos: z.number().int().min(3).max(30).default(7) }),
