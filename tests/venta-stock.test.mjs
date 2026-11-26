@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { sql } from './_sql.mjs';
 
-const B = process.env.API ?? 'http://127.0.0.1:3002/api/v1';
+const B = process.env.API ?? 'http://127.0.0.1:3001/api/v1';
 const sesiones = new Map();
 const entrar = async (u) => {
   for (let i = 0; i < 10; i++) {
