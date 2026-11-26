@@ -16,7 +16,7 @@
   --tanta-primario-claro: color-mix(in srgb, var(--tanta-primario) 70%, #fff);
   /* Relleno sólido de las tarjetas (Configuración → Marca → Color de tarjetas); el borde sale de él. */
   --tanta-tarjeta: var(--tanta-surface-tarjeta);
-  --tanta-tarjeta-borde: color-mix(in srgb, var(--tanta-tarjeta) 92%, #6B4F3A);
+  --tanta-tarjeta-borde: color-mix(in srgb, var(--tanta-tarjeta) 93%, #1F2A3A);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -1643,57 +1643,76 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .seguimiento .seguimiento__cliente { align-self: flex-end; background: var(--tanta-surface-card); border: 1px solid var(--tanta-border, #e5e0d8); }
 
 /* ============================================================
-   Interior (26/11/2026, pedido del cliente): fondo blanco, tarjetas con relleno cálido
-   que nace del color de la marca, sombra suave, entrada animada y respuesta al pasar el mouse.
-   Todo sale de --tanta-primario / --tanta-acento: Configuración → Marca lo cambia en vivo.
+   Interior (26/11/2026, referencia del cliente): fondo casi blanco, tarjetas blancas con sombra
+   suave, menú lateral claro con íconos de color y la opción activa encendida.
+   Todo sale de --tanta-primario / --tanta-acento / --tanta-tarjeta: Configuración → Marca los cambia en vivo.
    ============================================================ */
-.card {
-  background: var(--tanta-tarjeta);
-  border-color: var(--tanta-tarjeta-borde);
-  box-shadow: 0 1px 2px rgba(42, 35, 32, 0.04), 0 6px 18px -6px rgba(42, 35, 32, 0.08);
-}
-.kpi {
-  position: relative; overflow: hidden;
+
+/* Tarjetas: blancas, borde finísimo y sombra que les da profundidad. */
+.card, .kpi {
   background: var(--tanta-tarjeta);
   border: 1px solid var(--tanta-tarjeta-borde);
-  box-shadow: 0 1px 2px rgba(42, 35, 32, 0.04), 0 6px 18px -6px rgba(42, 35, 32, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px -4px rgba(16, 24, 40, 0.07);
+}
+
+/* Indicadores: ícono grande de color a la izquierda, etiqueta en versalitas y cifra destacada. */
+.kpi {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr); column-gap: 14px; row-gap: 4px; align-items: center;
+  padding: 18px 20px;
   transition: transform 180ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease, border-color 180ms ease;
 }
-.kpi:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--kpi) 35%, var(--tanta-tarjeta-borde));
-  box-shadow: 0 2px 4px rgba(42, 35, 32, 0.05), 0 14px 28px -10px color-mix(in srgb, var(--kpi) 35%, transparent);
+.kpi__top { display: contents; }
+.kpi__label { grid-column: 2; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tanta-text-secondary); }
+.kpi__icon {
+  grid-column: 1; grid-row: 1 / span 3; align-self: center;
+  width: 46px; height: 46px; border-radius: 12px;
+  background: var(--kpi-suave); color: var(--kpi);
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), background 180ms ease, color 180ms ease;
 }
-.kpi__icon { transition: transform 180ms cubic-bezier(.2,.8,.2,1), background 180ms ease, color 180ms ease; }
-.kpi:hover .kpi__icon { transform: scale(1.12) rotate(-4deg); background: var(--kpi); color: #FFFFFF; }
+.kpi__icon svg { width: 22px; height: 22px; }
+.kpi__value { grid-column: 2; font-size: 1.625rem; font-weight: 700; }
+.kpi__foot { grid-column: 2; }
+.kpi:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--kpi) 30%, var(--tanta-tarjeta-borde)); box-shadow: 0 2px 4px rgba(16, 24, 40, 0.05), 0 14px 28px -10px color-mix(in srgb, var(--kpi) 35%, transparent); }
+.kpi:hover .kpi__icon { transform: scale(1.08) rotate(-4deg); background: var(--kpi); color: #FFFFFF; }
 
-/* Accesos rápidos: tarjetas pequeñas que responden. */
-.acceso-card { background: #FFFFFF; border-color: var(--tanta-tarjeta-borde); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, color 160ms ease; }
+/* Accesos rápidos */
+.acceso-card { background: var(--tanta-tarjeta); border-color: var(--tanta-tarjeta-borde); transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, color 160ms ease; }
 .acceso-card svg:first-child { color: var(--tanta-primario); }
 .acceso-card svg:last-child { transition: transform 160ms ease, opacity 160ms ease; }
-.acceso-card:hover { transform: translateY(-2px); background: #FFFFFF; border-color: color-mix(in srgb, var(--tanta-primario) 40%, transparent); color: var(--tanta-primario-texto); box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--tanta-primario) 40%, transparent); }
+.acceso-card:hover { transform: translateY(-2px); background: var(--tanta-tarjeta); border-color: color-mix(in srgb, var(--tanta-primario) 40%, transparent); color: var(--tanta-primario-texto); box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--tanta-primario) 40%, transparent); }
 .acceso-card:hover svg:last-child { opacity: 1; color: var(--tanta-primario); transform: translateX(2px); }
 
-/* Entrada: las tarjetas aparecen suaves y escalonadas al abrir cada pantalla. */
+/* Entrada suave y escalonada al abrir cada pantalla. */
 @keyframes tanta-aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .kpi, .card { animation: tanta-aparecer 380ms cubic-bezier(.2,.8,.2,1) both; }
 .kpi:nth-child(2), .card:nth-child(2) { animation-delay: 50ms; }
 .kpi:nth-child(3), .card:nth-child(3) { animation-delay: 100ms; }
 .kpi:nth-child(4), .card:nth-child(4) { animation-delay: 150ms; }
 
-/* Menú: la opción activa se enciende en el color de la marca; el resto responde al pasar el mouse. */
-.navitem { transition: background 160ms ease, color 160ms ease, transform 160ms ease; }
-.navitem:hover { background: rgba(255, 255, 255, 0.07); color: #FFFFFF; transform: translateX(2px); }
-.navitem:hover svg { color: var(--tanta-primario-claro); }
-.navitem.is-active {
-  background: linear-gradient(135deg, var(--tanta-primario) 0%, color-mix(in srgb, var(--tanta-primario) 78%, var(--tanta-acento)) 100%);
-  color: var(--tanta-sobre-primario); transform: none;
-  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--tanta-primario) 70%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-}
-.navitem.is-active svg { color: var(--tanta-sobre-primario); }
+/* Menú lateral claro: íconos de color, la opción activa encendida en una pastilla. */
+.sidebar { background: var(--tanta-surface-menu); border-right: 1px solid var(--tanta-border-subtle); }
+.sidebar__brand, .sidebar__foot { border-color: var(--tanta-border-subtle); }
+.sidebar__fijar { color: var(--tanta-text-menu-muted); }
+.sidebar__fijar:hover, .sidebar__fijar[aria-pressed="true"] { background: #FFFFFF; color: var(--tanta-primario); }
+.sidebar__nav { scrollbar-color: var(--tanta-border-default) transparent; }
+.sidebar__nav::-webkit-scrollbar-thumb { background: var(--tanta-border-default); }
+.navgroup__title { color: var(--tanta-text-menu-muted); }
+:is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .navgroup + .navgroup { border-top-color: var(--tanta-border-default); }
+.navitem { color: var(--tanta-text-menu); border-radius: 10px; transition: background 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+.navitem svg { color: var(--tanta-primario); opacity: 0.85; transition: color 160ms ease, opacity 160ms ease, transform 160ms ease; }
+.navitem:hover { background: #FFFFFF; color: var(--tanta-text-primary); box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08); }
+.navitem:hover svg { opacity: 1; transform: scale(1.08); }
+.navitem.is-active { background: var(--tanta-primario-suave); color: var(--tanta-primario-texto); font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tanta-primario) 22%, transparent); }
+.navitem.is-active svg { color: var(--tanta-primario); opacity: 1; }
 .navitem.is-active::before { display: none; }
+.perfil:hover { background: #FFFFFF; }
+.perfil__nombre { color: var(--tanta-text-primary); }
+.perfil__rol, .perfil__btn { color: var(--tanta-text-menu-muted); }
+.perfil__btn:hover { background: #FFFFFF; color: var(--tanta-primario); }
+.sidebar :where(a, button):focus-visible { outline-color: var(--tanta-primario); }
 
 @media (prefers-reduced-motion: reduce) {
   .kpi, .card { animation: none; }
-  .kpi:hover, .acceso-card:hover, .navitem:hover { transform: none; }
+  .kpi:hover, .acceso-card:hover { transform: none; }
 }

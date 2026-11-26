@@ -10,7 +10,7 @@ import { ActivacionApp, leerArchivoFirebase, type ArchivoFirebase } from './Vinc
 type Seccion = 'marca' | 'movil' | 'legal' | 'correo' | 'integraciones';
 type Datos = Record<string, Record<string, unknown>>;
 /** Paleta por defecto (tokens: terracota-500 y miel-500). */
-const PALETA = { primario: '#B84A26', acento: '#E9A23B', tarjeta: '#FAF6F1' };
+const PALETA = { primario: '#B84A26', acento: '#E9A23B', tarjeta: '#FFFFFF' };
 interface Dispositivo { nombre: string; usuario: string; plataforma: string; version_app: string; ultimo_uso: string; push: boolean; desactualizada: boolean }
 
 // Secciones de la app móvil que el superadmin puede apagar para todos (el permiso del rol sigue mandando).
