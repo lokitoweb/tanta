@@ -38,7 +38,7 @@ export function AppShell() {
 
       <aside className="sidebar" onMouseLeave={() => setForzarCierre(false)}>
         <div className="sidebar__brand">
-          <span className="sidebar__logo"><BrandMark size="sm" /></span>
+          <span className="sidebar__logo"><BrandMark variant="dark" size="sm" /></span>
           <button className="sidebar__fijar" onClick={alternarFijo} aria-pressed={fijo}
             aria-label={fijo ? 'Colapsar menú' : 'Mantener menú abierto'} title={fijo ? 'Colapsar menú' : 'Mantener menú abierto'}>
             <Icon name="panel" size={18} />
