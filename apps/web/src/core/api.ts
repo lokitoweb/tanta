@@ -6,6 +6,7 @@
  * - El token de refresco viaja en una cookie HttpOnly: JavaScript no puede leerla,
  *   así un XSS no se lleva la sesión. Por eso todas las llamadas usan `credentials: 'include'`.
  */
+import { aplicarMarca } from './tema';
 import { useEffect, useState } from 'react';
 
 // Mismo origen siempre: en desarrollo lo reenvía Vite, en producción Caddy.
@@ -60,7 +61,9 @@ let configPublica: Promise<ConfigPublica> | null = null;
 export function leerConfigPublica(renovar = false): Promise<ConfigPublica> {
   if (renovar || !configPublica) {
     // Si falla (API reiniciando, sin red) no se guarda el error: el próximo uso reintenta.
-    configPublica = api<ConfigPublica>('/config/publica', { sinAuth: true }).catch((e) => { configPublica = null; throw e; });
+    configPublica = api<ConfigPublica>('/config/publica', { sinAuth: true })
+      .then((c) => { aplicarMarca(c.marca); return c; })
+      .catch((e) => { configPublica = null; throw e; });
     // Avisa a logo, título, etc. que la marca cambió, sin recargar la página.
     if (renovar) void configPublica.then(() => window.dispatchEvent(new Event('tanta:config')));
   }

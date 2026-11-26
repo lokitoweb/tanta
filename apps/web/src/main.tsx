@@ -8,6 +8,10 @@ import { Legal } from '@/modules/auth/Legal';
 import './styles/fonts.css';
 import '@tanta/tokens/tokens.css';
 import './styles/app.css';
+import { leerConfigPublica } from '@/core/api';
+
+// Los colores de la marca (Configuración → Marca) se aplican desde el arranque, en todas las pantallas.
+void leerConfigPublica().catch(() => {});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
