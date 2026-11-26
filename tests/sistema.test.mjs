@@ -131,3 +131,19 @@ test('si PostgreSQL corta las conexiones, la API sigue viva y se reconecta', asy
   await new Promise((ok) => setTimeout(ok, 500));
   assert.ok(await login('cmedina'), 'la API responde con conexiones nuevas');
 });
+
+test('editar usuario: nombre y usuario, sin duplicados ni saltarse la jerarquía', async () => {
+  const sa = await login('superadmin');
+  const u = 'edit' + Date.now();
+  const creado = await api(sa, 'POST', '/usuarios', { nombre: 'Editable Prueba', usuario: u, clave: 'ClaveInicial1', rol: 'VENDEDOR' });
+  assert.equal(creado.s, 201);
+  const id = creado.b.id;
+  const r = await api(sa, 'PATCH', `/usuarios/${id}`, { nombre: 'Editado Prueba', usuario: u + 'x' });
+  assert.equal(r.s, 200);
+  assert.ok(await login(u + 'x', 'ClaveInicial1'), 'ingresa con el usuario nuevo');
+  assert.equal((await api(sa, 'PATCH', `/usuarios/${id}`, { nombre: 'Editado Prueba', usuario: 'superadmin' })).s, 409, 'usuario duplicado');
+  assert.equal((await api(sa, 'PATCH', `/usuarios/${id}`, { nombre: 'X', usuario: 'Con Espacio' })).s, 422);
+  const superId = (await api(sa, 'GET', '/perfil')).b.id;
+  assert.equal((await api(await login('lbermudez'), 'PATCH', `/usuarios/${superId}`, { nombre: 'Intruso', usuario: 'intruso' })).s, 403, 'admin no edita al superadmin');
+  assert.equal((await api(sa, 'PATCH', `/usuarios/${id}/estado`, { estado: 'BLOQUEADO' })).s, 200);
+});

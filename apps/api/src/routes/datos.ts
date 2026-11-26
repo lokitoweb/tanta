@@ -198,7 +198,8 @@ export async function rutasDatos(app: FastifyInstance) {
             SELECT us.id, us.nombre, us.usuario, us.estado, us.ultimo_acceso::text AS ultimo_acceso,
                    (SELECT r.nombre FROM core.usuario_rol ur JOIN core.rol r ON r.id = ur.rol_id
                     WHERE ur.usuario_id = us.id ORDER BY r.orden LIMIT 1) AS rol,
-                   (SELECT ur.rol_id FROM core.usuario_rol ur WHERE ur.usuario_id = us.id LIMIT 1) AS rol_id
+                   (SELECT ur.rol_id FROM core.usuario_rol ur WHERE ur.usuario_id = us.id LIMIT 1) AS rol_id,
+                   us.cliente_id::text AS cliente_id
             FROM core.usuario us WHERE us.eliminado_en IS NULL ORDER BY us.nombre`)
         : Promise.resolve([]),
     ]);
@@ -368,7 +369,7 @@ export async function rutasDatos(app: FastifyInstance) {
         };
       }),
       usuarios: usuarios.map((x) => ({
-        id: x.id, nombre: x.nombre, usuario: x.usuario, rol: x.rol, rolId: x.rol_id,
+        id: x.id, nombre: x.nombre, usuario: x.usuario, rol: x.rol, rolId: x.rol_id, clienteId: x.cliente_id ?? undefined,
         estado: x.estado, ultimoAcceso: x.ultimo_acceso ?? '',
       })),
       permisos: [...u.permisos],

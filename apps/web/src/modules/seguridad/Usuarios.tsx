@@ -20,7 +20,9 @@ export function Usuarios() {
   // Roles y clientes vienen de la base: un rol creado en «Roles y permisos» aparece aquí al instante.
   const [roles, setRoles] = useState<Array<{ id: string; nombre: string }>>([]);
   const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
-  const [cambio, setCambio] = useState<{ u: Usuario; rol: string; clienteId: string } | null>(null);
+  type Edicion = { u: Usuario; nombre: string; usuario: string; rol: string; clienteId: string; clave: string };
+  const [edicion, setEdicion] = useState<Edicion | null>(null);
+  const editar = (u: Usuario) => { setError(null); setEdicion({ u, nombre: u.nombre, usuario: u.usuario, rol: u.rolId ?? 'VENDEDOR', clienteId: u.clienteId ?? '', clave: '' }); };
   const [opcionesError, setOpcionesError] = useState<string | null>(null);
   const cargarOpciones = () => {
     if (!gestiona) return;
@@ -30,15 +32,21 @@ export function Usuarios() {
     api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => setClientes(r.clientes)).catch(falla('los clientes'));
   };
   useEffect(cargarOpciones, []);
-  const cambiarRol = async () => {
-    if (!cambio) return;
+  // Guarda solo lo que cambió: datos, rol (no el propio) y clave (si se escribió una nueva).
+  const guardarEdicion = async () => {
+    if (!edicion) return;
+    const { u, nombre, usuario, rol, clienteId, clave } = edicion;
     setGuardando(true);
     setError(null);
     try {
-      await api(`/usuarios/${cambio.u.id}/rol`, { method: 'PATCH', body: { rol: cambio.rol, ...(cambio.rol === 'CLIENTE' ? { clienteId: cambio.clienteId } : {}) } });
-      setCambio(null);
+      if (nombre !== u.nombre || usuario !== u.usuario) await api(`/usuarios/${u.id}`, { method: 'PATCH', body: { nombre, usuario } });
+      if (u.id !== sesion.usuario.id && (rol !== u.rolId || (rol === 'CLIENTE' && clienteId !== (u.clienteId ?? '')))) {
+        await api(`/usuarios/${u.id}/rol`, { method: 'PATCH', body: { rol, ...(rol === 'CLIENTE' ? { clienteId } : {}) } });
+      }
+      if (clave) await api(`/usuarios/${u.id}/clave`, { method: 'PATCH', body: { clave } });
+      setEdicion(null);
       await refrescarDatos();
-    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo cambiar el rol.'); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'No se pudo guardar el usuario.'); await refrescarDatos(); }
     finally { setGuardando(false); }
   };
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +102,7 @@ export function Usuarios() {
       key: 'acciones', header: '', align: 'right',
       render: (u) => gestiona && (
         <span className="acciones-fila">
-        <Boton size="sm" variant="ghost" disabled={u.id === sesion.usuario.id} onClick={() => setCambio({ u, rol: u.rolId ?? 'VENDEDOR', clienteId: '' })}>Cambiar rol</Boton>
+        <Boton size="sm" variant="ghost" onClick={() => editar(u)}>Editar</Boton>
         <Boton
           size="sm"
           variant={u.estado === 'ACTIVO' ? 'ghost' : 'secondary'}
@@ -196,17 +204,29 @@ export function Usuarios() {
           )}
         </div>
       </Dialogo>
-      <Dialogo abierto={cambio !== null} titulo={`Cambiar rol · ${cambio?.u.nombre ?? ''}`} descripcion="Sus sesiones abiertas se cierran: vuelve a ingresar con el rol nuevo."
-        onCerrar={() => setCambio(null)}
-        acciones={<><Boton onClick={() => setCambio(null)}>Cancelar</Boton><Boton variant="primary" disabled={guardando || (cambio?.rol === 'CLIENTE' && !cambio.clienteId)} onClick={() => void cambiarRol()}>Cambiar rol</Boton></>}>
-        {cambio && (
+      <Dialogo abierto={edicion !== null} titulo={`Editar usuario · ${edicion?.u.nombre ?? ''}`}
+        descripcion="Si cambias el rol o la contraseña, sus sesiones abiertas se cierran y vuelve a ingresar."
+        onCerrar={() => setEdicion(null)}
+        acciones={<><Boton onClick={() => setEdicion(null)}>Cancelar</Boton>
+          <Boton variant="primary" disabled={guardando || (edicion?.rol === 'CLIENTE' && !edicion.clienteId)} onClick={() => void guardarEdicion()}>{guardando ? 'Guardando…' : 'Guardar cambios'}</Boton></>}>
+        {edicion && (
           <div className="form form--compacto">
+            {error && <p className="form__error" role="alert">{error}</p>}
+            <label className="field"><span className="field__label">Nombre completo</span>
+              <input className="field__input" value={edicion.nombre} onChange={(e) => setEdicion({ ...edicion, nombre: e.target.value })} /></label>
+            <label className="field"><span className="field__label">Usuario</span>
+              <input className="field__input" value={edicion.usuario} onChange={(e) => setEdicion({ ...edicion, usuario: e.target.value.toLowerCase() })} /></label>
             <label className="field"><span className="field__label">Rol</span>
-              <select className="field__input" value={cambio.rol} onChange={(e) => setCambio({ ...cambio, rol: e.target.value })}>{roles.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}</select></label>
-            {cambio.rol === 'CLIENTE' && (
+              <select className="field__input" value={edicion.rol} disabled={edicion.u.id === sesion.usuario.id} title={edicion.u.id === sesion.usuario.id ? 'No puedes cambiar tu propio rol' : undefined}
+                onChange={(e) => setEdicion({ ...edicion, rol: e.target.value })}>
+                {!roles.some((r) => r.id === edicion.rol) && <option value={edicion.rol}>{edicion.u.rol}</option>}
+                {roles.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}</select></label>
+            {edicion.rol === 'CLIENTE' && (
               <label className="field"><span className="field__label">Ficha de cliente</span>
-                <select className="field__input" value={cambio.clienteId} onChange={(e) => setCambio({ ...cambio, clienteId: e.target.value })}><option value="">Elegir…</option>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
+                <select className="field__input" value={edicion.clienteId} onChange={(e) => setEdicion({ ...edicion, clienteId: e.target.value })}><option value="">Elegir…</option>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
             )}
+            <label className="field"><span className="field__label">Nueva contraseña</span>
+              <input className="field__input" type="text" autoComplete="new-password" value={edicion.clave} onChange={(e) => setEdicion({ ...edicion, clave: e.target.value })} placeholder={`déjala vacía para no cambiarla · mínimo ${claveMin}`} /></label>
           </div>
         )}
       </Dialogo>

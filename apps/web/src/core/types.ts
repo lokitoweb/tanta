@@ -69,7 +69,7 @@ export interface Receta {
   costoInsumos?: number; costoConMerma?: number; cifUnit?: number; costoUnitario?: number; margen?: number;
 }
 export interface Usuario {
-  id: string; nombre: string; usuario: string; rol: string; rolId?: string; estado: string; ultimoAcceso: string;
+  id: string; nombre: string; usuario: string; rol: string; rolId?: string; clienteId?: string; estado: string; ultimoAcceso: string;
 }
 export interface Kpis {
   ventasNetas: number; costoVentas: number; utilidadBruta: number; margen: number;

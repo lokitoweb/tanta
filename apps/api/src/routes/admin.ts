@@ -181,6 +181,34 @@ export async function rutasAdmin(app: FastifyInstance) {
     return reply.send({ id, estado: parseo.data.estado });
   });
 
+  // Editar datos de la cuenta (nombre y usuario de ingreso). Rol, clave y estado tienen su propia ruta.
+  const EdicionUsuario = z.object({
+    nombre: NuevoUsuario.shape.nombre,
+    usuario: NuevoUsuario.shape.usuario,
+  });
+  app.patch('/usuarios/:id', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'usuarios.gestionar')) return;
+    const { id } = req.params as { id: string };
+    const p = EdicionUsuario.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.'));
+    // La propia cuenta siempre se puede renombrar; la de otros, solo si es de menor nivel.
+    if (id !== req.usuario!.id && !(await protegeJerarquia(req, reply, { usuarioId: id }))) return;
+    const antes = await uno<{ nombre: string; usuario: string }>('SELECT nombre, usuario FROM core.usuario WHERE id::text = $1 AND eliminado_en IS NULL', [id]);
+    if (!antes) return reply.code(404).send(error(404, 'USUARIO_NO_EXISTE', 'El usuario no existe.'));
+    const usuario = p.data.usuario.toLowerCase();
+    if (await uno('SELECT 1 FROM core.usuario WHERE lower(usuario) = $1 AND id::text <> $2', [usuario, id])) {
+      return reply.code(409).send(error(409, 'USUARIO_DUPLICADO', 'Ese nombre de usuario ya está en uso.'));
+    }
+    await q('UPDATE core.usuario SET nombre = $2, usuario = $3 WHERE id::text = $1', [id, p.data.nombre, usuario]);
+    invalidar(`sesion:${id}`);
+    await auditar({
+      actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
+      accion: 'USUARIO_EDITADO', entidad: 'usuario', entidadId: id,
+      detalle: { antes, despues: { nombre: p.data.nombre, usuario } }, ip: req.ip,
+    });
+    return { id, nombre: p.data.nombre, usuario };
+  });
+
   // Roles que puede asignar quien gestiona usuarios (el Superadmin solo lo asigna otro Superadmin).
   app.get('/roles-asignables', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'usuarios.gestionar')) return;
