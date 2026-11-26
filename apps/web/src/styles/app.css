@@ -139,9 +139,14 @@ input, select, textarea { font-family: inherit; }
 .kpi__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi__label { font-size: 0.75rem; font-weight: 500; color: var(--tanta-text-muted); }
 .kpi__icon {
-  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px;
-  background: var(--tanta-neutral-100); color: var(--tanta-text-secondary);
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px;
+  background: var(--kpi-suave); color: var(--kpi-texto);
 }
+/* Cada indicador con su color: franja arriba e ícono. El primero sigue al color de la marca. */
+.kpi { --kpi: var(--tanta-primario); --kpi-suave: var(--tanta-primario-suave); --kpi-texto: var(--tanta-primario-texto); border-top: 3px solid var(--kpi); }
+.kpi:nth-child(4n+2) { --kpi: var(--tanta-acento); --kpi-suave: var(--tanta-acento-suave); --kpi-texto: var(--tanta-miel-700); }
+.kpi:nth-child(4n+3) { --kpi: var(--tanta-salvia-500); --kpi-suave: var(--tanta-salvia-100); --kpi-texto: var(--tanta-salvia-700); }
+.kpi:nth-child(4n+4) { --kpi: var(--tanta-ciruela-500); --kpi-suave: var(--tanta-ciruela-100); --kpi-texto: var(--tanta-ciruela-700); }
 .kpi__value {
   font-size: 1.5rem; font-weight: 650; line-height: 1.15; letter-spacing: -0.025em;
   color: var(--tanta-text-primary); font-variant-numeric: tabular-nums;
