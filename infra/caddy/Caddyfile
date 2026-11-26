@@ -1,7 +1,16 @@
 # Caddy: TLS automático (Let's Encrypt), cabeceras de seguridad y SPA.
 # Sustituye {$DOMINIO} por tantapanaderia.com en el .env.production.
 
-{$DOMINIO}, www.{$DOMINIO} {
+# Detrás de otro proxy (Nginx del servidor con su propio TLS) confía en su X-Forwarded-For;
+# sin proxy, PROXY_CONFIABLE queda en 127.0.0.1/32 y nadie puede falsear su IP.
+{
+	servers {
+		trusted_proxies static {$PROXY_CONFIABLE:127.0.0.1/32}
+	}
+}
+
+# SITIO: por defecto "dominio, www.dominio" (TLS automático). Detrás de Nginx: ":80" (solo HTTP interno).
+{$SITIO} {
 	encode zstd gzip
 
 	# --- Seguridad ---
@@ -27,7 +36,7 @@
 	# --- API ---
 	handle /api/* {
 		reverse_proxy api:3001 {
-			header_up X-Real-IP {remote_host}
+			header_up X-Real-IP {client_ip}
 			# Sin chequeo activo (dejaba el API fuera ~2 min al arrancar): Docker ya vigila su salud.
 			# Durante un reinicio del API, Caddy reintenta hasta 15 s antes de responder error.
 			lb_try_duration 15s

@@ -110,6 +110,8 @@ services:
       - "${PUERTO_HTTPS:-443}:443"
     environment:
       DOMINIO: ${DOMINIO}
+      SITIO: ${SITIO:-${DOMINIO}, www.${DOMINIO}}
+      PROXY_CONFIABLE: ${PROXY_CONFIABLE:-127.0.0.1/32}
       CORREO: ${CORREO}
     volumes:
       - caddy_data:/data
