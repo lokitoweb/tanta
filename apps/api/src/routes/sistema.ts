@@ -20,7 +20,7 @@ type Config = Record<string, unknown>;
 const SECCIONES = ['marca', 'movil', 'legal', 'firebase', 'webhook', 'correo'] as const;
 type Seccion = (typeof SECCIONES)[number];
 // Campos que nunca salen del servidor: se devuelven como "••••" si tienen valor.
-const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'], correo: ['clave'], movil: ['tokenGithub'] };
+export const SECRETOS: Partial<Record<Seccion, string[]>> = { firebase: ['cuentaServicio'], webhook: ['secreto'], correo: ['clave'], movil: ['tokenGithub'] };
 const MASCARA = '••••••••';
 
 /**
