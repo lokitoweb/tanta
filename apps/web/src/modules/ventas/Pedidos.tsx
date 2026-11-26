@@ -10,18 +10,20 @@ import { Boton, Buscador, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio }
 import { Dialogo } from '@/ui/Dialogo';
 import { useCatalogos } from '@/core/catalogos';
 import { NuevoPedido } from './NuevoPedido';
+import { VentaStock } from './VentaStock';
+import { FacturaPedido, type Factura } from '@/ui/FacturaPedido';
 import { LineasPago, useMediosCobro, type LineaPago } from './LineasPago';
 
 const aNumero = (x: string): number | '' => (x === '' ? '' : Number(x));
 
-interface Item { productoId: string; producto: string; cantidad: number; precio: number; presentacion?: string | null; cantidadPresentacion?: number | null; promocionId?: string | null }
+interface Item { productoId: string; producto: string; cantidad: number; precio: number; presentacion?: string | null; cantidadPresentacion?: number | null; promocionId?: string | null; precioLista?: number | null }
 /** «2 Paquete x 6 (12 unid)» o «5 unid». */
 const cantidadTxt = (i: Item) => (i.presentacion && i.cantidadPresentacion ? `${i.cantidadPresentacion} × ${i.presentacion.toLowerCase()} (${i.cantidad} unid)` : String(i.cantidad));
 interface Pedido { id: string; codigo: string; clienteId: string; cliente: string; vendedor: string; estado: string; total: number; fecha_entrega: string; hora_entrega: string; observaciones: string; venta: string | null; items: Item[];
   tipoEntrega?: string; direccion?: string; motivo?: string | null; entregaObs?: string | null; observacion?: string | null; porCobrar?: number | null;
   comprobanteTipo?: string; comprobante?: { nombre: string; numero: string } | null;
-  /** Pedido de oferta: productos terminados en promoción; no pasa por producción y se cobra aparte. */
-  esOferta?: boolean }
+  /** Pedido de stock: pan ya producido (venta de stock u oferta); no pasa por producción y se cobra aparte. */
+  esOferta?: boolean; factura?: Factura | null }
 // Estados desde los que se puede cancelar (máquina de estados de la API).
 const CANCELABLES = ['REGISTRADO', 'CONFIRMADO', 'EN_PRODUCCION', 'LISTO'];
 
@@ -30,14 +32,18 @@ const ESTADOS: Record<string, { label: string; tono: 'info' | 'warn' | 'ok' | 'd
   EN_PRODUCCION: { label: 'En producción', tono: 'warn' }, LISTO: { label: 'Listo', tono: 'info' }, DESPACHADO: { label: 'En tránsito', tono: 'info' },
   ENTREGADO: { label: 'Entregado', tono: 'ok' }, RECHAZADO: { label: 'Rechazado', tono: 'danger' }, CANCELADO: { label: 'Cancelado', tono: 'danger' },
 };
-// RN-26: siguiente paso natural. Un confirmado con stock puede pasar directo a Listo (reserva el stock).
+// Un pedido de producción pasa a Listo solo al grabar la producción en la Hoja de producción. «Completar con stock» aparece
+// únicamente si el almacén ya tiene el pan libre (sin lo apartado ni lo vencido): por ejemplo, si a la hoja le faltó producción.
 // WEB-01 (informe 03): un pedido «Por confirmar» se confirma solo desde la app; la web lo consulta.
-const SIGUIENTE: Record<string, string> = { CONFIRMADO: 'LISTO', EN_PRODUCCION: 'LISTO' };
+const COMPLETABLE = ['CONFIRMADO', 'EN_PRODUCCION'];
 interface Aprobacion { id: string; porcentaje: number; estado: string; vigente: boolean }
 
 /** Pedidos: registro, avance por estados y despacho con venta vinculada (trazabilidad pedido → venta). */
 export function Pedidos() {
-  const { puede, refrescarDatos } = useApp();
+  const { puede, refrescarDatos, dataset } = useApp();
+  const [ventaStock, setVentaStock] = useState(false);
+  const alcanzaStock = (p: Pedido) => !p.esOferta && p.items.length > 0 && Object.entries(p.items.reduce<Record<string, number>>((m, i) => ({ ...m, [i.productoId]: (m[i.productoId] ?? 0) + i.cantidad }), {}))
+    .every(([id, n]) => (dataset.productos.find((x) => x.id === id)?.disponible ?? 0) + 1e-6 >= n);
   // null = cargando (esqueleto); [] = cargó y no hay pedidos.
   const [lista, setLista] = useState<Pedido[] | null>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
@@ -133,6 +139,7 @@ export function Pedidos() {
         acciones={<>
           <Boton icono="download" onClick={() => exportarExcel('pedidos', filas.map(({ items, ...p }) => ({ ...p, productos: items.map((i) => `${cantidadTxt(i)} ${i.producto}`).join(', ') })))}>Excel</Boton>
           <Boton icono="report" onClick={exportarPdf}>PDF</Boton>
+          {puede('ventas.stock') && <Boton icono="box" onClick={() => setVentaStock(true)}>Venta de stock</Boton>}
           {puede('pedidos.crear') && <Boton variant="primary" icono="plus" onClick={() => setNuevo(true)}>Registrar pedido</Boton>}
         </>} />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
@@ -180,7 +187,7 @@ export function Pedidos() {
               <tr key={p.id} className={`is-clickable${marcados.has(p.codigo) ? ' is-selected' : ''}`} onClick={() => { setPago({ descuento: '0' }); setMotivo(null); setEntrega(null); setSel(p); }}>
                 {gestiona && <td className="col-check" onClick={(e) => e.stopPropagation()}>
                   {CANCELABLES.includes(p.estado) && <input type="checkbox" aria-label={`Seleccionar ${p.codigo}`} checked={marcados.has(p.codigo)} onChange={() => marcar(p.codigo)} />}</td>}
-                <td><strong className="mono">{p.codigo}</strong>{p.esOferta && <> <Insignia tono="ok">Oferta</Insignia></>}{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
+                <td><strong className="mono">{p.codigo}</strong>{p.esOferta && <> <Insignia tono="ok">Stock</Insignia></>}{p.factura && <> <Insignia tono="info">Factura</Insignia></>}{p.venta && <div className="t-muted mono">{p.venta}</div>}</td>
                 <td>{p.cliente}</td>
                 <td className="t-muted">{p.items.slice(0, 2).map((i) => `${num(i.cantidad)} ${i.producto}`).join(', ')}{p.items.length > 2 ? ` +${p.items.length - 2}` : ''}</td>
                 <td>{p.fecha_entrega}{p.hora_entrega ? ` · ${p.hora_entrega}` : ''}</td>
@@ -195,6 +202,7 @@ export function Pedidos() {
         <div className="card__foot"><span className="t-muted">{num(filas.length)} pedidos · {money(filas.reduce((s, p) => s + p.total, 0))} en total</span></div>
       </Tarjeta>
 
+      {ventaStock && <VentaStock onCerrar={(c) => { setVentaStock(false); if (c) { setAviso({ tono: 'ok', texto: `Venta de stock ${c} registrada: el pan quedó apartado y el pedido está listo para despacho` }); void Promise.all([cargar(), refrescarDatos()]); } }} />}
       {nuevo && <NuevoPedido elegirCliente={puede('pedidos.gestionar')} onCerrar={(c) => { setNuevo(false); if (c) { setAviso({ tono: 'ok', texto: `Pedido ${c} registrado` }); void cargar(); } }} />}
 
       <Dialogo abierto={sel !== null} titulo={`Pedido ${sel?.codigo ?? ''}`} descripcion={sel ? `${sel.cliente} · entrega ${sel.fecha_entrega}${sel.hora_entrega ? ' ' + sel.hora_entrega : ''} · ${ESTADOS[sel.estado]?.label}` : ''}
@@ -206,7 +214,7 @@ export function Pedidos() {
           {['REGISTRADO', 'CONFIRMADO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'OBSERVAR', texto: '' })} disabled={ocupado}>Observar</Boton>}
           {sel.estado === 'REGISTRADO' && <Boton onClick={() => setMotivo({ destino: 'RECHAZADO', texto: '' })} disabled={ocupado}>Rechazar</Boton>}
           {['CONFIRMADO', 'EN_PRODUCCION', 'LISTO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'CANCELADO', texto: '' })} disabled={ocupado}>Anular pedido</Boton>}
-          {SIGUIENTE[sel.estado] && <Boton variant="primary" onClick={() => void avanzar(sel, SIGUIENTE[sel.estado])} disabled={ocupado}>Marcar listo</Boton>}
+          {COMPLETABLE.includes(sel.estado) && alcanzaStock(sel) && <Boton onClick={() => void avanzar(sel, 'LISTO')} disabled={ocupado} title="Hay pan libre en el almacén: se aparta y el pedido queda listo sin esperar la hoja">Completar con stock</Boton>}
           {sel.estado === 'DESPACHADO' && !entrega && <Boton variant="primary" onClick={() => setEntrega({ lineas: [lineaNueva(debeEntrega(sel))], nota: '', voucher: null })} disabled={ocupado}>Entregar y cobrar</Boton>}
           {sel.estado === 'DESPACHADO' && entrega && <>
             <Boton onClick={() => void entregar(sel, false)} disabled={ocupado}>No pagó: dejar como deuda</Boton>
@@ -217,7 +225,7 @@ export function Pedidos() {
         {sel && (
           <>
             <table className="table table--compacta"><tbody>
-              {sel.items.map((i, k) => <tr key={k}><td>{i.producto}</td><td className="t-right">{i.presentacion ? cantidadTxt(i) : num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
+              {sel.items.map((i, k) => <tr key={k}><td>{i.producto}{sel.esOferta && i.precioLista != null && Math.abs(i.precioLista - i.precio) > 0.0001 && <div className="t-muted">{money(i.precio)} c/u (lista {money(i.precioLista)})</div>}</td><td className="t-right">{i.presentacion ? cantidadTxt(i) : num2(i.cantidad)}</td><td className="t-right">{money(i.precio * i.cantidad)}</td></tr>)}
               <tr><td><strong>Total</strong></td><td /><td className="t-right"><strong>{money(sel.total)}</strong></td></tr>
             </tbody></table>
             {corregir && <div className="form form--2col form--dialogo">
@@ -229,6 +237,10 @@ export function Pedidos() {
             <p className="dialogo__nota">{sel.tipoEntrega === 'DELIVERY' ? `Entrega en: ${sel.direccion}` : 'Recojo en tienda'}{(sel as Pedido & { vehiculo?: string | null }).vehiculo ? ` · móvil ${(sel as Pedido & { vehiculo?: string | null }).vehiculo}` : ''}{sel.porCobrar != null ? ` · por cobrar ${money(sel.porCobrar)}` : ' · se cobra al entregar'}</p>
             <p className="dialogo__nota">Comprobante: {sel.comprobante ? `${sel.comprobante.nombre} ${sel.comprobante.numero}` : `${nombreComprobante(sel.comprobanteTipo)} (se emite al despachar)`}</p>
             {sel.estado === 'REGISTRADO' && <p className="dialogo__nota t-warn">Este pedido se confirma desde la app Tanta.</p>}
+            {sel.esOferta && <p className="dialogo__nota">Venta de stock: pan ya producido y apartado; no pasa por producción.</p>}
+            {COMPLETABLE.includes(sel.estado) && !sel.esOferta && <p className="dialogo__nota">Pasa a Listo solo al grabar la producción en la Hoja de producción.</p>}
+            {!['CANCELADO', 'RECHAZADO'].includes(sel.estado) && (sel.factura || puede('comprobantes.subir')) && <FacturaPedido key={sel.codigo} codigo={sel.codigo} factura={sel.factura} puedeSubir={puede('comprobantes.subir')}
+              onCambio={(t) => { setSel(null); void cargar(); setAviso({ tono: 'ok', texto: t }); }} onError={(t) => setAviso({ tono: 'danger', texto: t })} />}
             {sel.observaciones && <p className="dialogo__nota">Nota del cliente: {sel.observaciones}</p>}
             {sel.observacion && <p className="dialogo__nota t-warn">Observación enviada al cliente: {sel.observacion}</p>}
             {sel.motivo && <p className="dialogo__nota">Motivo: {sel.motivo}</p>}

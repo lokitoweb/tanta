@@ -91,6 +91,20 @@ const ESQUEMAS = {
     columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden', tipo: 'tipo', banco: 'banco', numero: 'numero' },
     enUso: 'SELECT 1 FROM core.movimiento_caja WHERE cuenta = $1 UNION ALL SELECT 1 FROM core.medio_pago WHERE cuenta_caja = $1 LIMIT 1',
   },
+  // Turnos de la hoja de producción (mañana, noche…): se elige al cerrar los pedidos y da el reporte por turno.
+  'turnos-produccion': {
+    tabla: 'core.turno_produccion',
+    campos: z.object(base),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden' },
+    enUso: 'SELECT 1 FROM core.hoja_produccion WHERE turno = $1 LIMIT 1',
+  },
+  // Motivos con que el cliente registra un reclamo desde la app.
+  'tipos-reclamo': {
+    tabla: 'core.tipo_reclamo',
+    campos: z.object(base),
+    columnas: { nombre: 'nombre', activo: 'activo', orden: 'orden' },
+    enUso: 'SELECT 1 FROM core.reclamo WHERE tipo = $1 LIMIT 1',
+  },
   bancos: {
     tabla: 'core.banco',
     campos: z.object(base),
@@ -114,6 +128,7 @@ export async function leerCatalogos(todos = false) {
     tiposInsumo: await leer('core.tipo_insumo'), unidades: await leer('core.unidad_medida'),
     presentacionesCompra: await leer('core.presentacion_compra'), presentacionesVenta: await leer('core.presentacion_venta'), tiposGasto: await leer('core.tipo_gasto'), bancos: await leer('core.banco'),
     comprobantesVenta: await leer('core.tipo_comprobante_venta'), cuentasCaja: await leer('core.cuenta_caja'),
+    turnosProduccion: await leer('core.turno_produccion'), tiposReclamo: await leer('core.tipo_reclamo'),
   };
 }
 

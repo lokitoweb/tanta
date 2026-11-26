@@ -255,6 +255,11 @@ export async function rutasOperaciones(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------- órdenes de producción */
+  // Las OP de una hoja se cierran solo con «Grabar producción» de su hoja: así los pedidos del lote quedan listos y nada se cierra dos veces.
+  const hojaDeOP = async (codigo: string) => (await uno<{ hoja: string }>(
+    'SELECT h.codigo hoja FROM core.orden_produccion o JOIN core.hoja_produccion h ON h.id = o.hoja_id WHERE o.codigo = $1', [codigo]))?.hoja;
+  const soloEnHoja = (hoja: string) => error(409, 'OP_DE_HOJA', `Esta orden es de la hoja ${hoja}: grábala en Hoja de producción → «Grabar producción».`);
+
   app.post('/ordenes-produccion/:codigo/iniciar', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'produccion.ejecutar')) return;
     const { codigo } = req.params as { codigo: string };
@@ -280,6 +285,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const { codigo } = req.params as { codigo: string };
     const p = z.object({ motivo: z.string().trim().min(5).max(200) }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el motivo de la anulación (mínimo 5 caracteres).'));
+    const hojaA = await hojaDeOP(codigo);
+    if (hojaA) return reply.code(409).send(soloEnHoja(hojaA));
     try {
       await tx(async (c) => {
         const op = (await c.query<{ id: string; estado: string }>('SELECT id, estado FROM core.orden_produccion WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
@@ -329,6 +336,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (!parseo.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', parseo.error.issues[0]?.message ?? 'Cantidad producida inválida.'));
     const d = parseo.data;
     const cantidadProducida = d.unidadesBuenas ?? d.cantidadProducida!;
+    const hojaC = await hojaDeOP(codigo);
+    if (hojaC) return reply.code(409).send(soloEnHoja(hojaC));
     // Merma en unidades; con el formato anterior se deriva de la fracción.
     const unidadesMerma = d.unidadesMerma ?? (d.mermaReal > 0 ? Math.round(cantidadProducida * d.mermaReal / (1 - d.mermaReal)) : 0);
     const mermaReal = cantidadProducida + unidadesMerma > 0 ? unidadesMerma / (cantidadProducida + unidadesMerma) : 0;
@@ -458,11 +467,20 @@ export async function rutasOperaciones(app: FastifyInstance) {
             return ins?.maneja_stock ? it.cantidad * it.pres!.cantidadInsumo * Number(ins.cpp) : 0;
           };
           const stockRestante = new Map(prods.rows.map((r) => [r.id, Number(r.stock)]));
-          const reservado = new Map(prods.rows.map((r) => [r.id, Number(r.reservado)]));
+          // En una venta directa el pan vencido no se vende (cuenta como apartado); el despacho de un pedido ya lo tenía apartado.
+          const vencido = pedidoId ? new Map<string, number>() : new Map((await c.query<{ id: string; v: string }>(
+            `SELECT id, CASE WHEN coalesce((SELECT valor FROM core.parametro WHERE clave = 'excluir_pan_vencido'), 'true') = 'true' THEN core.producto_vencido(id) ELSE 0 END v
+             FROM core.producto WHERE id = ANY($1::uuid[])`, [ids])).rows.map((r) => [r.id, Number(r.v)]));
+          const reservado = new Map(prods.rows.map((r) => [r.id, Number(r.reservado) + (vencido.get(r.id) ?? 0)]));
           // Una línea en promoción se vende al precio pactado en el pedido, no al de lista.
           const precioPromo = new Map<string, number>();
           if (pedidoId) {
             for (const l of (await c.query<{ producto_id: string; precio_con_igv: string }>('SELECT producto_id, precio_con_igv FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL', [pedidoId])).rows) {
+              precioPromo.set(l.producto_id, Number(l.precio_con_igv));
+            }
+            // Venta de stock: cada línea va al precio que pactó el vendedor (con su aprobación si bajó del tope), no al de lista.
+            for (const l of (await c.query<{ producto_id: string; precio_con_igv: string }>(
+              'SELECT d.producto_id, d.precio_con_igv FROM core.pedido_detalle d JOIN core.pedido p ON p.id = d.pedido_id WHERE p.id = $1 AND p.es_oferta AND d.presentacion_codigo IS NULL', [pedidoId])).rows) {
               precioPromo.set(l.producto_id, Number(l.precio_con_igv));
             }
             if (vehiculoId && !(await c.query("SELECT 1 FROM core.vehiculo WHERE id = $1 AND activo", [vehiculoId])).rowCount) throw Object.assign(new Error('El vehículo no existe o está inactivo.'), { status: 422 });
@@ -751,7 +769,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const ped = (await c.query<{ estado: string }>('SELECT estado FROM core.pedido WHERE id = $1 FOR UPDATE', [v.pedido_id])).rows[0];
           if (ped?.estado === 'DESPACHADO') {
             await c.query('UPDATE core.pedido_detalle SET cantidad_despachada = 0 WHERE pedido_id = $1', [v.pedido_id]);
-            const reservado = await reservarListo(c, v.pedido_id);
+            const reservado = await reservarListo(c, v.pedido_id, false, true);
             await c.query('UPDATE core.pedido SET estado = $2 WHERE id = $1', [v.pedido_id, reservado ? 'LISTO' : 'EN_PRODUCCION']);
           }
         }

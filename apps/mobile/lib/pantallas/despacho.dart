@@ -118,7 +118,10 @@ class _DespachoState extends State<Despacho> {
         for (final p in listos) Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text('${p['codigo']} · ${p['cliente']}', style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+            Row(children: [
+              Expanded(child: Text('${p['codigo']} · ${p['cliente']}', style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600))),
+              if (p['esStock'] == true) const Insignia('Stock', tono: Tono.ok),
+            ]),
             if ('${p['direccion'] ?? ''}'.isNotEmpty) Text('${p['direccion']}', style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
             const SizedBox(height: 4),
             Text((p['items'] as List).cast<Map<String, dynamic>>().map((i) => '${_c(i['cantidad'])} · ${i['producto']}').join('\n'), style: const TextStyle(fontSize: 12.5)),

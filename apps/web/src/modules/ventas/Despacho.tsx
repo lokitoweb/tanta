@@ -9,7 +9,7 @@ import { Boton, Encabezado, Insignia, PilaEsqueleto, Tarjeta, TarjetaTitulo, Vac
 const aNumero = (x: string): number | '' => (x === '' ? '' : Number(x));
 
 interface Item { productoId: string; producto: string; cantidad: number; presentacion: string | null; cantidadPresentacion: number | null }
-interface Pedido { id: string; codigo: string; cliente: string; estado: 'LISTO' | 'DESPACHADO'; total: number; direccion: string; fecha: string; observaciones: string; vehiculo: string | null; items: Item[]; empaques: Array<{ insumo: string; cantidad: number }> }
+interface Pedido { id: string; codigo: string; esStock?: boolean; cliente: string; estado: 'LISTO' | 'DESPACHADO'; total: number; direccion: string; fecha: string; observaciones: string; vehiculo: string | null; items: Item[]; empaques: Array<{ insumo: string; cantidad: number }> }
 interface Vehiculo { id: string; placa: string; descripcion: string; conductor: string; activo: boolean }
 interface Empaque { id: string; nombre: string; unidad: string; stock: number }
 interface Datos { pedidos: Pedido[]; vehiculos: Vehiculo[]; empaques: Empaque[] }
@@ -94,7 +94,7 @@ export function Despacho() {
           {porDespachar.length === 0 ? <Vacio titulo="No hay pedidos listos" icono="truck" /> : (
             <div className="table-wrap"><table className="table">
               <thead><tr><th>Pedido</th><th>Cliente</th><th>Productos</th><th className="t-right">Total</th><th /></tr></thead>
-              <tbody>{porDespachar.map((p) => <tr key={p.id}><td><strong>{p.codigo}</strong></td><td>{p.cliente}<div className="t-muted">{p.direccion}</div></td>
+              <tbody>{porDespachar.map((p) => <tr key={p.id}><td><strong>{p.codigo}</strong>{p.esStock && <> <Insignia tono="ok">Stock</Insignia></>}</td><td>{p.cliente}<div className="t-muted">{p.direccion}</div></td>
                 <td className="t-muted">{p.items.map((i) => `${i.producto} × ${num(Number(i.cantidad))}`).join(' · ')}</td><td className="t-right">{money(p.total)}</td>
                 <td className="t-right">{gestiona && <Boton variant="primary" disabled={!activos.length} onClick={() => { setAviso(null); setCargarA({ p, vehiculoId: activos.length === 1 ? activos[0].id : '', empaques: {} }); }}>Cargar a móvil</Boton>}</td></tr>)}</tbody>
             </table></div>

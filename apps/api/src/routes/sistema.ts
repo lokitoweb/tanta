@@ -210,6 +210,16 @@ export async function guardarImagen(base64: string, usuarioId: string, privado =
   return f!.id;
 }
 
+/** PDF privado (factura de SUNAT): se valida por su firma «%PDF-», no por el nombre; tope en Parámetros → factura_max_mb. */
+export async function guardarPdf(base64: string, usuarioId: string, maxMb: number): Promise<string> {
+  const datos = Buffer.from(base64.replace(/^data:[^,]+,/, ''), 'base64');
+  if (datos.length < 8 || datos.toString('latin1', 0, 5) !== '%PDF-') throw Object.assign(new Error('El archivo no es un PDF.'), { status: 415, codigo: 'PDF_INVALIDO' });
+  const tope = Math.min(Math.max(maxMb, 1), 10);
+  if (datos.length > tope * 1_048_576) throw Object.assign(new Error(`El PDF supera ${tope} MB.`), { status: 413, codigo: 'PDF_GRANDE' });
+  const f = await uno<{ id: string }>("INSERT INTO core.archivo (mime, datos, creado_por, privado) VALUES ('application/pdf',$1,$2,true) RETURNING id", [datos, usuarioId]);
+  return f!.id;
+}
+
 /* -------------------------------------------------------------- webhook */
 /** IP no enrutable públicamente (loopback, privada, link-local/metadata, CGNAT, reservada). */
 function ipPrivada(ip: string): boolean {

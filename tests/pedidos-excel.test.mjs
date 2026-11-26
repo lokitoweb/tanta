@@ -53,7 +53,8 @@ test('CP-09 / PED-04: anticipación mínima por producto', async () => {
   } finally { sql(`UPDATE core.producto SET anticipacion_horas = 0 WHERE id = '${productoId}'`); }
 });
 
-test('PED-03: delivery exige dirección', async () => {
+test('PED-03: delivery exige dirección (elegida de las del cliente)', async () => {
+  sql(`INSERT INTO core.direccion_cliente (cliente_id, direccion, referencia) SELECT '${clienteId}', 'Jr. Las Flores 123', '' WHERE NOT EXISTS (SELECT 1 FROM core.direccion_cliente WHERE cliente_id = '${clienteId}' AND direccion = 'Jr. Las Flores 123')`);
   assert.equal((await api(ven, 'POST', '/pedidos', { clienteId, items: [{ productoId, cantidad: 1 }], fechaEntrega: enDias(1), tipoEntrega: 'DELIVERY' })).s, 422);
   const ok = await api(ven, 'POST', '/pedidos', { clienteId, items: [{ productoId, cantidad: 1 }], fechaEntrega: enDias(1), tipoEntrega: 'DELIVERY', direccion: 'Jr. Las Flores 123' });
   assert.equal(ok.s, 201);

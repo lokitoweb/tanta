@@ -5,6 +5,7 @@ import { useCatalogos } from '@/core/catalogos';
 import { money } from '@/core/format';
 import { Boton } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
+import { SelectorDireccion, type Direccion } from './VentaStock';
 
 export interface ItemPedido { productoId: string; cantidad: number; presentacion?: string; promocionId?: string; nombre?: string; precio?: number }
 const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
@@ -24,9 +25,13 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
     inicial.length ? inicial.map((i) => ({ productoId: i.productoId, cantidad: String(i.cantidad), presentacion: i.presentacion ?? '', promocionId: i.promocionId, nombre: i.nombre, precio: i.precio })) : [{ productoId: productos[0]?.id ?? '', cantidad: '1', presentacion: '' }]);
   const [fecha, setFecha] = useState('');
   const [estimada, setEstimada] = useState('');
-  // El cliente envía a una de sus direcciones (hasta el máximo de Parámetros); se agregan en su perfil.
-  const [misDirecciones, setMisDirecciones] = useState<string[]>([]);
-  useEffect(() => { if (!elegirCliente) api<Array<{ direccion: string }>>('/mis-direcciones').then((l) => { setMisDirecciones(l.map((x) => x.direccion)); if (l[0]) setDireccion(l[0].direccion); }).catch(() => {}); }, [elegirCliente]);
+  // La dirección se elige de las del cliente (no se escribe): él las agrega en Mi perfil y el personal en Maestros → Clientes.
+  const [direcciones, setDirecciones] = useState<Direccion[]>([]);
+  useEffect(() => {
+    if (elegirCliente && !clienteId) return;
+    const leer = elegirCliente ? api<{ direcciones: Direccion[] }>(`/clientes/${clienteId}/direcciones`).then((r) => r.direcciones) : api<Direccion[]>('/mis-direcciones');
+    leer.then((l) => { setDirecciones(l); setDireccion(l[0]?.direccion ?? ''); }).catch(() => setDirecciones([]));
+  }, [elegirCliente, clienteId]);
   // Boleta, factura o nota de pedido: el catálogo administrable; la factura exige RUC (lo valida la API).
   const { comprobantesVenta } = useCatalogos();
   const [comprobante, setComprobante] = useState('');
@@ -61,7 +66,7 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
     try {
       const r = await api<{ codigo: string; pedidos?: Array<{ codigo: string; esOferta: boolean }> }>('/pedidos', {
         method: 'POST', conIdempotencia: true,
-        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad), ...(i.presentacion ? { presentacion: i.presentacion } : {}), ...(i.promocionId ? { promocionId: i.promocionId } : {}) })), ...(fecha ? { fechaEntrega: fecha } : {}), observaciones: obs, direccion, ...(comprobante ? { comprobanteTipo: comprobante } : {}) },
+        body: { ...(elegirCliente ? { clienteId } : {}), items: items.map((i) => ({ productoId: i.productoId, cantidad: Number(i.cantidad), ...(i.presentacion ? { presentacion: i.presentacion } : {}), ...(i.promocionId ? { promocionId: i.promocionId } : {}) })), ...(fecha ? { fechaEntrega: fecha } : {}), observaciones: obs, direccion, tipoEntrega: direccion ? 'DELIVERY' : 'RECOJO', ...(comprobante ? { comprobanteTipo: comprobante } : {}) },
       });
       // Con oferta y productos regulares salen dos pedidos: la oferta va aparte (sin producción, se cobra por separado).
       const oferta = r.pedidos?.find((x) => x.esOferta), regular = r.pedidos?.find((x) => !x.esOferta);
@@ -102,11 +107,7 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
           <Boton size="sm" icono="plus" onClick={() => setItems([...items, { productoId: productos[0]?.id ?? '', cantidad: '1', presentacion: '' }])}>Agregar producto</Boton>
         </div>
         {elegirCliente && <label className="field"><span className="field__label">Fecha de entrega (opcional)</span><input className="field__input" type="date" min={hoy()} value={fecha} onChange={(e) => setFecha(e.target.value)} /><span className="field__ayuda">Sin fecha: {estimada ? estimada.split('-').reverse().join('/') : 'según la hora de corte'}</span></label>}
-        {!elegirCliente && misDirecciones.length > 0
-          ? <label className="field"><span className="field__label">Dirección de entrega</span>
-              <select className="field__input" value={direccion} onChange={(e) => setDireccion(e.target.value)}>{misDirecciones.map((d) => <option key={d} value={d}>{d}</option>)}</select>
-              <span className="field__ayuda">Agrega o quita direcciones en Mi perfil.</span></label>
-          : <label className="field"><span className="field__label">Dirección de entrega</span><input className="field__input" maxLength={200} value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder={elegirCliente ? 'La registrada del cliente' : 'Tu tienda: calle, número, distrito'} /></label>}
+        <SelectorDireccion direcciones={direcciones} valor={direccion} onChange={setDireccion} ayuda={elegirCliente ? 'Agrégalas en Maestros → Clientes.' : 'Agrega o quita direcciones en Mi perfil.'} />
         <label className="field"><span className="field__label">Comprobante</span>
           <select className="field__input" value={comprobante} onChange={(e) => setComprobante(e.target.value)}>
             {comprobantesVenta.map((t) => <option key={t.codigo} value={t.codigo}>{t.nombre}{t.requiereRuc ? ' (requiere RUC)' : ''}</option>)}</select></label>

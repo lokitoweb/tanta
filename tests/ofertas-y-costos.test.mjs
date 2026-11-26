@@ -83,7 +83,9 @@ test('Oferta: unidades limitadas, pedido aparte sin producción, aviso de agotad
   const titulo = `Oferta prueba ${randomUUID().slice(0, 6)}`;
   const p = await api(adm, 'POST', '/promociones', { productoId: promoProd, titulo, precioConIgv: 2, desde: hoyLima(), hasta: hoyLima(), cantidad: 5, avisar: false });
   assert.equal(p.s, 201, JSON.stringify(p.b));
-  after(() => { sql(`UPDATE core.promocion SET activa = false WHERE id = '${p.b.id}'`); });
+  // Desde la respuesta del ingeniero el cliente solo ve el aviso; esta prueba cubre el modo en que Parámetros lo permite.
+  sql(`UPDATE core.parametro SET valor = 'true' WHERE clave = 'ofertas_pedido_cliente'`);
+  after(() => { sql(`UPDATE core.promocion SET activa = false WHERE id = '${p.b.id}'`); sql(`UPDATE core.parametro SET valor = 'false' WHERE clave = 'ofertas_pedido_cliente'`); });
   const vigente = async () => (await api(cli, 'GET', '/promociones/vigentes')).b.find((x) => x.id === p.b.id);
   assert.equal((await vigente()).disponible, 5, 'el cliente ve las 5 unidades ofrecidas');
 

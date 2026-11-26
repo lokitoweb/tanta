@@ -6,6 +6,7 @@ import { cant, money, num } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
 import { InputNumero } from '@/ui/InputNumero';
 import { Boton, Encabezado, Insignia, PilaEsqueleto, Segmentado, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
+import { useCatalogos } from '@/core/catalogos';
 
 const aNumero = (x: string): number | '' => (x === '' ? '' : Number(x));
 
@@ -13,7 +14,7 @@ interface Cliente { id: string; nombre: string }
 interface Fila { productoId: string; producto: string; porCliente: Record<string, number>; pedido: number }
 interface InsumoHoja { insumoId: string; insumo: string; unidad: string; cantidad: number; stock: number; restante: number; minimo: number; costoUnitario?: number; costoTotal?: number; estado: 'NORMAL' | 'ALERTA' | 'FALTA' }
 interface Abierta { fecha: string; fechas: string[]; clientes: Cliente[]; filas: Fila[]; insumos: InsumoHoja[]; sinReceta: string[] }
-interface Hoja { codigo: string; fecha: string; estado: 'EN_PRODUCCION' | 'CERRADA'; cerradaEn: string | null; productos: number; unidades: number }
+interface Hoja { codigo: string; fecha: string; estado: 'EN_PRODUCCION' | 'CERRADA'; cerradaEn: string | null; productos: number; unidades: number; turno?: string | null; turnoNombre?: string | null }
 interface Resumen { op: string; productoId: string; producto: string; pedido: number; real: number | null; costo?: number | null; venta?: number | null; rentabilidad?: number | null; pctRentabilidad?: number | null }
 interface Detalle extends Omit<Hoja, 'productos' | 'unidades'> { tolerancia: number; clientes: Cliente[]; filas: Fila[]; resumen: Resumen[];
   insumosUsados: Array<{ insumo: string; unidad: string; cantidad: number; costo?: number }>;
@@ -54,13 +55,18 @@ export function HojaProduccion() {
   const [ocupado, setOcupado] = useState(false);
   // Diferencia grande entre lo solicitado y lo producido: se graba solo tras confirmarla.
   const [confirmado, setConfirmado] = useState(false);
+  // Turno de la producción (Maestros → Catálogos → Turnos de producción) y filtro del historial por turno.
+  const { turnosProduccion } = useCatalogos();
+  const [turno, setTurno] = useState('');
+  const [filtroTurno, setFiltroTurno] = useState('');
+  useEffect(() => { if (!turno && turnosProduccion[0]) setTurno(turnosProduccion[0].codigo); }, [turnosProduccion, turno]);
 
   const cargar = () => Promise.all([
     api<Abierta>(`/produccion/hoja${fecha ? `?fecha=${fecha}` : ''}`).then(setHoja),
-    api<Hoja[]>('/produccion/hojas').then(setHojas),
+    api<Hoja[]>(`/produccion/hojas${filtroTurno ? `?turno=${filtroTurno}` : ''}`).then(setHojas),
   ]).then(() => setCargaError(null)).catch((e) => setCargaError(e.message));
   // Los pedidos entran mientras el maestro mira la hoja.
-  useEffect(() => { void cargar(); const t = setInterval(() => void cargar(), 20_000); return () => clearInterval(t); }, [fecha]);
+  useEffect(() => { void cargar(); const t = setInterval(() => void cargar(), 20_000); return () => clearInterval(t); }, [fecha, filtroTurno]);
 
   const abrir = async (codigo: string) => {
     const d = await api<Detalle>(`/produccion/hojas/${encodeURIComponent(codigo)}`);
@@ -74,8 +80,8 @@ export function HojaProduccion() {
     finally { setOcupado(false); }
   };
   const cerrarPedidos = () => accion(async () => {
-    const r = await api<{ codigo: string }>('/produccion/hoja/cerrar-pedidos', { method: 'POST', body: { fecha: hoja!.fecha } });
-    return `${r.codigo}: pedidos en producción. Al terminar, indica la producción real.`;
+    const r = await api<{ codigo: string }>('/produccion/hoja/cerrar-pedidos', { method: 'POST', body: { fecha: hoja!.fecha, ...(turno ? { turno } : {}) } });
+    return `${r.codigo}${turno ? ` (turno ${turnosProduccion.find((t) => t.codigo === turno)?.nombre.toLowerCase() ?? turno})` : ''}: pedidos en producción. Al terminar, indica la producción real.`;
   });
   const cerrarProduccion = () => accion(async () => {
     const r = await api<{ listos: number; sinStock: string[] }>(`/produccion/hojas/${encodeURIComponent(det!.codigo)}/cerrar`, { method: 'POST',
@@ -103,7 +109,7 @@ export function HojaProduccion() {
         {enCurso.length > 0 && (
           <Tarjeta>
             <TarjetaTitulo titulo="En producción" subtitulo="Indica lo producido para cerrar" />
-            <div className="fila-acciones">{enCurso.map((h) => <Boton key={h.codigo} variant="primary" onClick={() => void abrir(h.codigo)}>{h.codigo} · {dma(h.fecha)}</Boton>)}</div>
+            <div className="fila-acciones">{enCurso.map((h) => <Boton key={h.codigo} variant="primary" onClick={() => void abrir(h.codigo)}>{h.codigo} · {dma(h.fecha)}{h.turnoNombre ? ` · ${h.turnoNombre.toLowerCase()}` : ''}</Boton>)}</div>
           </Tarjeta>
         )}
         <Tarjeta padding="none">
@@ -112,6 +118,8 @@ export function HojaProduccion() {
             <div className="fila-acciones">
               <input className="field__input" type="date" aria-label="Fecha de entrega" value={hoja.fecha} onChange={(e) => setFecha(e.target.value)} />
               <Boton icono="download" disabled={!hoja.filas.length} onClick={() => aExcel(`hoja-produccion-${hoja.fecha}`, hoja.clientes, hoja.filas)}>Excel</Boton>
+              {puede('produccion.planificar') && turnosProduccion.length > 0 && <select className="field__input" aria-label="Turno" value={turno} onChange={(e) => setTurno(e.target.value)}>
+                {turnosProduccion.map((t) => <option key={t.codigo} value={t.codigo}>Turno {t.nombre.toLowerCase()}</option>)}</select>}
               {puede('produccion.planificar') && <Boton variant="primary" disabled={ocupado || !hoja.filas.length || hoja.sinReceta.length > 0} onClick={() => void cerrarPedidos()}>Cerrar pedidos</Boton>}
             </div>
           </div>
@@ -135,10 +143,15 @@ export function HojaProduccion() {
 
       {vista === 'historial' && !cargaError && (
         <Tarjeta padding="none">
+          {turnosProduccion.length > 0 && <div className="toolbar"><div className="chips">
+            <button className={`chipfilter ${filtroTurno === '' ? 'is-active' : ''}`} onClick={() => setFiltroTurno('')}>Todos los turnos</button>
+            {turnosProduccion.map((t) => <button key={t.codigo} className={`chipfilter ${filtroTurno === t.codigo ? 'is-active' : ''}`} onClick={() => setFiltroTurno(t.codigo)}>{t.nombre}</button>)}
+            <Boton icono="download" size="sm" disabled={!hojas.length} onClick={() => exportarExcel(`producciones${filtroTurno ? `-${filtroTurno.toLowerCase()}` : ''}`, hojas.map((h) => ({ Lote: h.codigo, Fecha: h.fecha, Turno: h.turnoNombre ?? '', Productos: h.productos, Unidades: h.unidades, Estado: h.estado === 'CERRADA' ? 'Cerrada' : 'En producción' })))}>Excel</Boton>
+          </div></div>}
           {hojas.length === 0 ? <Vacio titulo="Aún no hay producciones" icono="clipboard" /> : (
             <div className="table-wrap"><table className="table">
-              <thead><tr><th>Lote</th><th>Fecha</th><th className="t-right">Productos</th><th className="t-right">Unidades</th><th className="t-right">Estado</th><th /></tr></thead>
-              <tbody>{hojas.map((h) => <tr key={h.codigo}><td><strong>{h.codigo}</strong></td><td>{dma(h.fecha)}</td><td className="t-right">{h.productos}</td><td className="t-right">{num(h.unidades)}</td>
+              <thead><tr><th>Lote</th><th>Fecha</th><th>Turno</th><th className="t-right">Productos</th><th className="t-right">Unidades</th><th className="t-right">Estado</th><th /></tr></thead>
+              <tbody>{hojas.map((h) => <tr key={h.codigo}><td><strong>{h.codigo}</strong></td><td>{dma(h.fecha)}</td><td>{h.turnoNombre ?? '—'}</td><td className="t-right">{h.productos}</td><td className="t-right">{num(h.unidades)}</td>
                 <td className="t-right"><Insignia tono={h.estado === 'CERRADA' ? 'ok' : 'warn'} punto>{h.estado === 'CERRADA' ? 'Cerrada' : 'En producción'}</Insignia></td>
                 <td className="t-right"><Boton onClick={() => void abrir(h.codigo)}>Ver</Boton></td></tr>)}</tbody>
             </table></div>
@@ -146,7 +159,7 @@ export function HojaProduccion() {
         </Tarjeta>
       )}
 
-      <Dialogo abierto={det !== null} titulo={`Hoja ${det?.codigo ?? ''} - Tanta`} descripcion={det ? `Entrega ${dma(det.fecha)} · ${det.estado === 'CERRADA' ? 'cerrada' : 'en producción'}` : ''} onCerrar={() => setDet(null)}
+      <Dialogo abierto={det !== null} titulo={`Hoja ${det?.codigo ?? ''} - Tanta`} descripcion={det ? `Entrega ${dma(det.fecha)}${det.turnoNombre ? ` · turno ${det.turnoNombre.toLowerCase()}` : ''} · ${det.estado === 'CERRADA' ? 'cerrada' : 'en producción'}` : ''} onCerrar={() => setDet(null)}
         acciones={<>
           <Boton icono="download" onClick={() => det && aExcel(`hoja-${det.codigo.replace(' ', '-')}`, det.clientes, det.filas)}>Excel</Boton>
           {det?.estado === 'EN_PRODUCCION' && puede('produccion.ejecutar') && <Boton variant="primary" disabled={ocupado} onClick={() => (fuera.length && !confirmado ? setConfirmado(true) : void cerrarProduccion())}>{ocupado ? 'Grabando…' : fuera.length && confirmado ? 'Sí, grabar así' : 'Grabar producción'}</Boton>}

@@ -468,24 +468,26 @@ export async function rutasCobranza(app: FastifyInstance) {
   });
 
   /* --------------------------------------------------- descuentos (RN-36) */
-  const Solicitud = z.object({ porcentaje: z.number().positive().max(0.9), motivo: z.string().trim().min(5).max(200), clienteId: z.string().uuid().optional() });
+  // paraStock: rebaja de precio en una venta de stock (su tope es venta_stock_descuento_maximo, no el del descuento de mostrador).
+  const Solicitud = z.object({ porcentaje: z.number().positive().max(0.9), motivo: z.string().trim().min(5).max(200), clienteId: z.string().uuid().optional(), paraStock: z.boolean().default(false) });
 
   app.post('/descuentos/solicitudes', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'ventas.registrar')) return;
     const p = Solicitud.safeParse(req.body);
+    // La rebaja de una venta de stock la pide quien vende stock (ventas.stock); el descuento de mostrador, quien registra ventas.
+    if (!exigir(req, reply, p.success && p.data.paraStock && req.usuario!.permisos.has('ventas.stock') ? 'ventas.stock' : 'ventas.registrar')) return;
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Indica el porcentaje y el motivo (mínimo 5 caracteres).'));
-    const tope = num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'descuento_maximo'"))?.valor ?? '0');
+    const tope = num((await uno<{ valor: string }>('SELECT valor FROM core.parametro WHERE clave = $1', [p.data.paraStock ? 'venta_stock_descuento_maximo' : 'descuento_maximo']))?.valor ?? '0');
     if (p.data.porcentaje <= tope + 1e-9) return reply.code(422).send(error(422, 'SIN_APROBACION', `Hasta ${Math.round(tope * 100)} % no necesita aprobación.`));
     const r = await uno<{ id: string }>('INSERT INTO core.descuento_aprobacion (solicitado_por, cliente_id, porcentaje, motivo) VALUES ($1,$2,$3,$4) RETURNING id',
       [req.usuario!.id, p.data.clienteId ?? null, p.data.porcentaje, p.data.motivo]);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'DESCUENTO_SOLICITADO', entidad: 'descuento_aprobacion', entidadId: r!.id, detalle: p.data, ip: req.ip });
-    avisar([{ permiso: 'descuentos.aprobar' }], { tipo: 'descuento', titulo: 'Descuento por aprobar', cuerpo: `${req.usuario!.nombre} pide ${Math.round(p.data.porcentaje * 100)} %: ${p.data.motivo}`, ruta: '/ventas/aprobaciones' });
+    avisar([{ permiso: 'descuentos.aprobar' }], { tipo: 'descuento', titulo: 'Descuento por aprobar', cuerpo: `${req.usuario!.nombre} pide ${Math.round(p.data.porcentaje * 100)} %${p.data.paraStock ? ' en una venta de stock' : ''}: ${p.data.motivo}`, ruta: '/ventas/aprobaciones' });
     return reply.code(201).send({ id: r!.id, estado: 'PENDIENTE' });
   });
 
   app.get('/descuentos/solicitudes', { preHandler: autenticar }, async (req, reply) => {
     const aprueba = req.usuario!.permisos.has('descuentos.aprobar');
-    if (!aprueba && !req.usuario!.permisos.has('ventas.registrar')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Sin permiso.'));
+    if (!aprueba && !req.usuario!.permisos.has('ventas.registrar') && !req.usuario!.permisos.has('ventas.stock')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Sin permiso.'));
     const filas = await q<Record<string, string>>(`
       SELECT a.id, a.porcentaje, a.motivo, a.estado, a.creado_en::text, a.expira_en::text, u.nombre solicitante, c.nombre cliente, r.nombre resuelto_por
       FROM core.descuento_aprobacion a JOIN core.usuario u ON u.id = a.solicitado_por

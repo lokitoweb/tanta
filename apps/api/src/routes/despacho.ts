@@ -20,7 +20,8 @@ const Vehiculo = z.object({
 
 // Unidades tomadas en pedidos vivos y lo que queda: lo ofrecido menos lo tomado, sin pasar del stock libre.
 const VENDIDAS = `coalesce((SELECT sum(d.cantidad) FROM core.pedido_detalle d JOIN core.pedido k ON k.id = d.pedido_id WHERE d.promocion_id = x.id AND k.estado NOT IN ('CANCELADO','RECHAZADO')), 0)`;
-const DISPONIBLE = `greatest(least(p.stock - p.reservado, coalesce(x.cantidad - ${VENDIDAS}, p.stock - p.reservado)), 0)`;
+// Lo que queda de la oferta sin pasar del pan libre (stock − apartado − vencido).
+const DISPONIBLE = `greatest(least(core.stock_libre(p.id), coalesce(x.cantidad - ${VENDIDAS}, core.stock_libre(p.id))), 0)`;
 
 const hoyLima = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
@@ -52,7 +53,7 @@ export async function rutasDespacho(app: FastifyInstance) {
   app.get('/despacho', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'despacho.ver')) return;
     const pedidos = await q<Record<string, unknown>>(`
-      SELECT p.id, p.codigo, p.cliente, p.estado, p.total, p.direccion, p.fecha_entrega::text fecha, p.observaciones, ve.placa vehiculo,
+      SELECT p.id, p.codigo, p.cliente, p.estado, p.total, p.direccion, p.fecha_entrega::text fecha, p.observaciones, ve.placa vehiculo, p.es_oferta "esStock",
              coalesce((SELECT json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'presentacion', d.presentacion_codigo,
                'cantidadPresentacion', d.cantidad_presentacion) ORDER BY d.id) FROM core.pedido_detalle d WHERE d.pedido_id = p.id), '[]') items,
              coalesce((SELECT json_agg(json_build_object('insumo', e.insumo, 'cantidad', e.cantidad) ORDER BY e.id) FROM core.pedido_empaque e WHERE e.pedido_id = p.id), '[]') empaques
@@ -94,13 +95,15 @@ export async function rutasDespacho(app: FastifyInstance) {
   /* ------------------------------------------------------------- promociones */
   // Lo que ve el cliente: promociones vigentes con unidades: lo que queda de la oferta, sin pasar del stock libre.
   app.get('/promociones/vigentes', { preHandler: autenticar }, async () => {
+    // Respuesta del ingeniero: el cliente ve el aviso (precio y cuánto queda) y la pide al vendedor, salvo que Parámetros lo permita.
+    const pedible = (await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'ofertas_pedido_cliente'"))?.valor === 'true';
     const igv = num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'igv'"))?.valor ?? '0.18');
     const filas = await q<Record<string, string>>(`SELECT x.id, x.producto_id, p.nombre producto, x.titulo, x.precio_con_igv, p.precio_con_igv precio_normal, x.hasta::text, p.imagen_id,
         ${DISPONIBLE} disponible
       FROM core.promocion x JOIN core.producto p ON p.id = x.producto_id
       WHERE x.activa AND p.estado = 'ACTIVO' AND $1::date BETWEEN x.desde AND x.hasta AND ${DISPONIBLE} >= 1 ORDER BY x.hasta, p.nombre`, [hoyLima()]);
     return filas.map((f) => ({ id: f.id, productoId: f.producto_id, producto: f.producto, titulo: f.titulo, precioConIgv: num(f.precio_con_igv), precioNormal: num(f.precio_normal),
-      hasta: f.hasta, imagenId: f.imagen_id, disponible: Math.floor(num(f.disponible)), precioNeto: Number((num(f.precio_con_igv) / (1 + igv)).toFixed(4)) }));
+      hasta: f.hasta, imagenId: f.imagen_id, disponible: Math.floor(num(f.disponible)), precioNeto: Number((num(f.precio_con_igv) / (1 + igv)).toFixed(4)), pedible }));
   });
 
   app.get('/promociones', { preHandler: autenticar }, async (req, reply) => {
@@ -113,9 +116,14 @@ export async function rutasDespacho(app: FastifyInstance) {
       disponible: Math.floor(num(f.disponible)), vendidas: num(f.vendidas) }));
   });
 
-  const avisarPromocion = async (d: z.infer<typeof Promocion>) => {
+  const avisarPromocion = async (d: z.infer<typeof Promocion>, id: string) => {
     const cuentas = await q<{ id: string }>(`SELECT u.id FROM core.usuario u JOIN core.cliente c ON c.id = u.cliente_id WHERE u.estado = 'ACTIVO' AND c.estado = 'ACTIVO'`);
-    await notificar(cuentas.map((u) => ({ usuarioId: u.id })), { tipo: 'promocion', titulo: d.titulo, cuerpo: `${d.cantidad ? `Solo ${d.cantidad} unidades a` : 'A'} S/ ${d.precioConIgv.toFixed(2)} c/u hasta el ${d.hasta.split('-').reverse().join('/')}, mientras haya stock. Pídela en el catálogo.`, ruta: '/catalogo' });
+    const pedible = (await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'ofertas_pedido_cliente'"))?.valor === 'true';
+    // Cuánto queda de verdad (oferta limitada o pan libre), como pidió el ingeniero: «de S/ 1 a 0.80, me quedan 10».
+    const queda = Math.floor(num((await uno<{ n: string }>(`SELECT ${DISPONIBLE} n FROM core.promocion x JOIN core.producto p ON p.id = x.producto_id WHERE x.id = $1`, [id]))?.n ?? '0'));
+    const normal = num((await uno<{ p: string }>('SELECT precio_con_igv p FROM core.producto WHERE id = $1', [d.productoId]))?.p ?? '0');
+    await notificar(cuentas.map((u) => ({ usuarioId: u.id })), { tipo: 'promocion', titulo: d.titulo,
+      cuerpo: `De S/ ${normal.toFixed(2)} a S/ ${d.precioConIgv.toFixed(2)} c/u${queda > 0 ? ` · quedan ${queda} unidades` : ''} · hasta el ${d.hasta.split('-').reverse().join('/')}. ${pedible ? 'Pídela en el catálogo.' : 'Pídesela a tu vendedor.'}`, ruta: '/catalogo' });
   };
 
   app.post('/promociones', { preHandler: autenticar }, async (req, reply) => {
@@ -127,7 +135,7 @@ export async function rutasDespacho(app: FastifyInstance) {
     const f = await uno<{ id: string }>(`INSERT INTO core.promocion (producto_id, titulo, precio_con_igv, desde, hasta, activa, creado_por, cantidad) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [d.productoId, d.titulo, d.precioConIgv.toFixed(4), d.desde, d.hasta, d.activa, req.usuario!.id, d.cantidad]);
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PROMOCION_CREADA', entidad: 'promocion', entidadId: f!.id, detalle: d, ip: req.ip });
-    if (d.avisar && d.activa) await avisarPromocion(d);
+    if (d.avisar && d.activa) await avisarPromocion(d, f!.id);
     return reply.code(201).send({ id: f!.id });
   });
 
@@ -142,7 +150,7 @@ export async function rutasDespacho(app: FastifyInstance) {
       [id, d.productoId, d.titulo, d.precioConIgv.toFixed(4), d.desde, d.hasta, d.activa, d.cantidad]);
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La promoción no existe.'));
     await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PROMOCION_EDITADA', entidad: 'promocion', entidadId: id, detalle: d, ip: req.ip });
-    if (d.avisar && d.activa) await avisarPromocion(d);
+    if (d.avisar && d.activa) await avisarPromocion(d, id);
     return { id };
   });
 }

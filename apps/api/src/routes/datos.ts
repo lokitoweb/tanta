@@ -100,7 +100,7 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:productos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT p.id, p.codigo, p.nombre, p.categoria_id, p.unidad,
                p.precio_con_igv, p.costo_unitario, p.merma_pct, p.vendidos_30d, p.stock, p.estado,
-               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, p.anticipacion_horas, p.imagen_id, p.insumo_id, p.peso_final_g, p.unidades_lote, p.vida_util_dias, p.sku, p.presentacion_codigo,
+               p.peso_masa_g, p.perdida_coccion, p.horas_hombre_lote, p.horas_horno_lote, p.reservado, core.stock_libre(p.id) libre, core.producto_vencido(p.id) vencido, p.anticipacion_horas, p.imagen_id, p.insumo_id, p.peso_final_g, p.unidades_lote, p.vida_util_dias, p.sku, p.presentacion_codigo,
                (SELECT json_build_object('nombre', v.nombre, 'equivalencia', v.equivalencia) FROM core.presentacion_venta v WHERE v.codigo = p.presentacion_codigo) sku1,
                coalesce((SELECT json_agg(json_build_object('presentacion', pp.presentacion_codigo, 'nombre', v.nombre, 'equivalencia', v.equivalencia,
                  'sku', coalesce(pp.sku, ''), 'precioConIgv', pp.precio_con_igv, 'activo', pp.activo) ORDER BY pp.orden)
@@ -135,8 +135,8 @@ export async function rutasDatos(app: FastifyInstance) {
         FROM core.insumo ORDER BY estado DESC, nombre`)),
 
       agg('4', () => q<Record<string, string>>(`
-        SELECT codigo, producto, cantidad, estado, entrega::text AS entrega, responsable, avance, merma_esperada
-        FROM core.orden_produccion ORDER BY (estado = 'TERMINADA'), entrega, codigo`)),
+        SELECT o.codigo, o.producto, o.cantidad, o.estado, o.entrega::text AS entrega, o.responsable, o.avance, o.merma_esperada, h.codigo hoja
+        FROM core.orden_produccion o LEFT JOIN core.hoja_produccion h ON h.id = o.hoja_id ORDER BY (o.estado = 'TERMINADA'), o.entrega, o.codigo`)),
 
       agg('5', () => q<Record<string, string>>(`
         SELECT codigo, cliente, estado, total, fecha_entrega::text AS fecha_entrega, vendedor
@@ -286,7 +286,7 @@ export async function rutasDatos(app: FastifyInstance) {
           mermaPct: num(pr.merma_pct), margenObjetivo: num(pr.margen_objetivo),
           pesoMasaG: pr.peso_masa_g === null ? null : num(pr.peso_masa_g), perdidaCoccion: num(pr.perdida_coccion),
           horasHombreLote: num(pr.horas_hombre_lote), horasHornoLote: num(pr.horas_horno_lote),
-          reservado: num(pr.reservado), disponible: num(pr.stock) - num(pr.reservado), anticipacionHoras: Number(pr.anticipacion_horas),
+          reservado: num(pr.reservado), disponible: num(pr.libre), vencido: num(pr.vencido), anticipacionHoras: Number(pr.anticipacion_horas),
           imagenUrl: pr.imagen_id ? `/archivos/${pr.imagen_id}` : null,
           // Producto intermedio (sub-receta): produce un insumo; no se vende ni sale en el catálogo.
           insumoId: pr.insumo_id ?? null,
@@ -328,7 +328,7 @@ export async function rutasDatos(app: FastifyInstance) {
       }),
       ops: ops.map((o) => ({
         codigo: o.codigo, producto: o.producto, cantidad: num(o.cantidad), estado: o.estado,
-        entrega: o.entrega, responsable: o.responsable, avance: num(o.avance), mermaEsperada: num(o.merma_esperada),
+        entrega: o.entrega, responsable: o.responsable, avance: num(o.avance), mermaEsperada: num(o.merma_esperada), hoja: o.hoja ?? null,
       })),
       pedidos: pedidos.map((pe) => ({
         codigo: pe.codigo, cliente: pe.cliente, estado: pe.estado, total: num(pe.total),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import '../core/api.dart';
 import '../core/cola.dart';
 import '../core/comprobante.dart';
@@ -261,6 +262,27 @@ class _PedidosState extends State<Pedidos> {
     }
   }
 
+  /// «Completar con stock»: solo si el almacén ya tiene el pan libre (sin lo apartado ni lo vencido). Un pedido de producción
+  /// pasa a Listo al grabar la producción en la Hoja; este atajo es para cuando a la hoja le faltó y sobra de otro lote.
+  bool _alcanzaStock(Map<String, dynamic> p) {
+    if (p['esOferta'] == true) return false;
+    final productos = ((widget.datos['productos'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final pide = <String, double>{};
+    for (final i in _items(p)) { pide['${i['productoId']}'] = (pide['${i['productoId']}'] ?? 0) + _n(i['cantidad']); }
+    return pide.isNotEmpty && pide.entries.every((e) => _n(productos.where((x) => x['id'] == e.key).firstOrNull?['disponible']) + 1e-6 >= e.value);
+  }
+
+  /// Factura de SUNAT (PDF) que subió la oficina: se abre para ver, imprimir o compartir.
+  Future<void> _factura(Map<String, dynamic> p) async {
+    final f = (p['factura'] as Map).cast<String, dynamic>();
+    try {
+      final b = await Api.instancia.facturaPedido('${p['codigo']}');
+      await Printing.sharePdf(bytes: b, filename: 'factura-${f['numero']}.pdf');
+    } catch (e) {
+      _aviso(e is ApiException ? e.mensaje : 'Sin conexión: no se pudo descargar la factura', color: TantaColors.stateDanger);
+    }
+  }
+
   /// Detalle completo del pedido con las acciones de su estado.
   Future<void> _detalle(Map<String, dynamic> p) async {
     final gestiona = Api.instancia.puede('pedidos.gestionar');
@@ -300,7 +322,8 @@ class _PedidosState extends State<Pedidos> {
           Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('${i['producto']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-              Text('${_cantidad(i)} · ${dinero(_n(i['precio']))} c/u', style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
+              Text('${_cantidad(i)} · ${dinero(_n(i['precio']))} c/u${i['precioLista'] != null && (_n(i['precioLista']) - _n(i['precio'])).abs() > 0.0001 ? ' (lista ${dinero(_n(i['precioLista']))})' : ''}',
+                  style: const TextStyle(fontSize: 12, color: TantaColors.textMuted)),
             ])),
             Text(dinero(_n(i['precio']) * _n(i['cantidad']))),
           ])),
@@ -309,6 +332,12 @@ class _PedidosState extends State<Pedidos> {
           const Expanded(child: Text('Total', style: TextStyle(fontWeight: FontWeight.w700))),
           Text(dinero(_n(p['total'])), style: estiloDisplay.copyWith(fontSize: 18)),
         ]),
+        if (p['esOferta'] == true) const Padding(padding: EdgeInsets.only(top: 6),
+            child: Text('Venta de stock: pan ya producido y apartado; no pasa por producción.', style: TextStyle(fontSize: 12.5, color: TantaColors.textMuted))),
+        if ((estado == 'CONFIRMADO' || estado == 'EN_PRODUCCION') && p['esOferta'] != true) const Padding(padding: EdgeInsets.only(top: 6),
+            child: Text('Pasa a Listo al grabar la producción en la Hoja de producción.', style: TextStyle(fontSize: 12.5, color: TantaColors.textMuted))),
+        if (p['factura'] is Map) Padding(padding: const EdgeInsets.only(top: 8), child: OutlinedButton.icon(
+            icon: const Icon(Icons.picture_as_pdf_outlined), label: Text('Factura SUNAT ${(p['factura'] as Map)['numero']}'), onPressed: () => _factura(p))),
         if (porCobrar != null) Padding(padding: const EdgeInsets.only(top: 4), child: Row(children: [
           const Expanded(child: Text('Por cobrar', style: TextStyle(color: TantaColors.textMuted))),
           Text(porCobrar > 0.009 ? dinero(porCobrar) : 'Pagado', style: TextStyle(fontWeight: FontWeight.w600,
@@ -318,7 +347,7 @@ class _PedidosState extends State<Pedidos> {
         if (gestiona && p['pendiente'] != true) Wrap(spacing: 8, runSpacing: 8, children: [
           // Oferta: al confirmarla queda lista para despacho (es stock reservado, no se produce).
           if (estado == 'REGISTRADO') accion(ctx, p['esOferta'] == true ? 'Confirmar · sale del stock' : 'Confirmar', () => _cambiar(p, 'CONFIRMADO'), principal: true),
-          if (estado == 'CONFIRMADO' || estado == 'EN_PRODUCCION') accion(ctx, 'Marcar listo', () => _cambiar(p, 'LISTO'), principal: true),
+          if ((estado == 'CONFIRMADO' || estado == 'EN_PRODUCCION') && _alcanzaStock(p)) accion(ctx, 'Completar con stock', () => _cambiar(p, 'LISTO')),
           if (estado == 'LISTO' && vende) accion(ctx, 'Despachar', () => _despachar(p), principal: true),
           if (estado == 'DESPACHADO' && Api.instancia.puede('cobranza.registrar')) accion(ctx, 'Entregar y cobrar', () => _entregar(p), principal: true),
           if (estado == 'REGISTRADO' || estado == 'CONFIRMADO') accion(ctx, 'Corregir pedido', () => _corregir(p)),
@@ -440,7 +469,7 @@ class _PedidosState extends State<Pedidos> {
                   size: 22, color: !_cancelable(p) ? TantaColors.textMuted : marcado ? TantaColors.stateDanger : TantaColors.ink800,
                   semanticLabel: _cancelable(p) ? (marcado ? 'Seleccionado' : 'Sin seleccionar') : 'No se puede cancelar')),
               Expanded(child: Text('${p['cliente']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
-              if (p['esOferta'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Insignia('Oferta', tono: Tono.ok)),
+              if (p['esOferta'] == true) const Padding(padding: EdgeInsets.only(right: 6), child: Insignia('Stock', tono: Tono.ok)),
               if (ocupado) const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
               else Insignia(p['pendiente'] == true ? 'Por enviar' : etiquetaPedido[estado] ?? estado,
                   tono: p['pendiente'] == true ? Tono.warn : tonoPedido(estado), punto: true),

@@ -96,7 +96,7 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
 
   // Cerrar pedidos: pasan a producción.
   assert.equal((await api(cli, 'POST', '/produccion/hoja/cerrar-pedidos', { fecha })).s, 403, 'un cliente no cierra');
-  const cierre = await api(pro, 'POST', '/produccion/hoja/cerrar-pedidos', { fecha });
+  const cierre = await api(pro, 'POST', '/produccion/hoja/cerrar-pedidos', { fecha, turno: 'MANANA' });
   assert.equal(cierre.s, 201, JSON.stringify(cierre.b));
   assert.match(cierre.b.codigo, /^LOT \d+$/);
   const cod = encodeURIComponent(cierre.b.codigo);
@@ -219,6 +219,9 @@ test('Promociones: salen del stock con su precio, no entran a producción y se l
   assert.equal((await api(adm, 'POST', '/promociones', { ...body, hasta: lima(-1) })).s, 422, 'fechas al revés');
   const pr = await api(adm, 'POST', '/promociones', body);
   assert.equal(pr.s, 201, JSON.stringify(pr.b));
+  // Desde la respuesta del ingeniero el cliente solo ve el aviso; aquí se cubre el modo en que Parámetros lo permite.
+  sql(`UPDATE core.parametro SET valor = 'true' WHERE clave = 'ofertas_pedido_cliente'`);
+  after(() => sql(`UPDATE core.parametro SET valor = 'false' WHERE clave = 'ofertas_pedido_cliente'`));
   const v = (await api(cli, 'GET', '/promociones/vigentes')).b.find((x) => x.id === pr.b.id);
   assert.equal(v.disponible, 10);
 

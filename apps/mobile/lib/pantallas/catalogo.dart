@@ -74,6 +74,10 @@ class _CatalogoState extends State<Catalogo> {
     }).catchError((_) {});
   }
 
+  /// Respuesta del ingeniero: la oferta se pide al vendedor; el cliente ve el precio y cuánto queda.
+  bool _soloAviso(Map<String, dynamic> p) => p['promocionId'] != null && p['pedible'] != true;
+  void _avisoVendedor() => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Esta oferta se pide a tu vendedor: llámalo o escríbele y él te la separa.')));
+
   /// A05: detalle con selector de cantidad.
   Future<void> _detalle(Map<String, dynamic> p) async {
     var cantidad = carrito.value[p['id']] ?? 1;
@@ -103,6 +107,11 @@ class _CatalogoState extends State<Catalogo> {
             if (p['promocionId'] != null) Padding(padding: const EdgeInsets.only(top: 6),
                 child: Text('Quedan ${maximoDe(p)} en oferta', style: const TextStyle(fontSize: 12.5, color: TantaColors.textMuted))),
             const SizedBox(height: 18),
+            if (_soloAviso(p)) ...[
+              const Text('Esta oferta se pide a tu vendedor: llámalo o escríbele y él te la separa.', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              SizedBox(width: double.infinity, child: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Entendido'))),
+            ] else
             SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Agregar al pedido'))),
           ]),
         );
@@ -230,7 +239,7 @@ class _CatalogoState extends State<Catalogo> {
                       final p = filtrados[i];
                       return _Producto(
                         p: p, cantidad: c[p['id']] ?? 0, onAbrir: () => _detalle(p),
-                        onAgregar: () => ponerEnCarrito('${p['id']}', (c[p['id']] ?? 0) + 1),
+                        onAgregar: () => _soloAviso(p) ? _avisoVendedor() : ponerEnCarrito('${p['id']}', (c[p['id']] ?? 0) + 1),
                       );
                     },
                   ),
@@ -362,7 +371,7 @@ class ConfirmarPedido extends StatefulWidget {
 
 class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   String? _estimada;
-  // Sin direcciones guardadas se escribe una; con varias, se elige a cuál va el pedido (CLI-09).
+  // La dirección se elige de las registradas (no se escribe); sin ninguna, se agrega a Mi perfil y queda elegida (CLI-09).
   final _dir = TextEditingController();
   List<String> _dirs = const [];
   final _obs = TextEditingController();
@@ -455,9 +464,10 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
         const SizedBox(height: 8),
         Text(_estimada == null ? 'Te llevamos tu pedido a tu tienda.' : 'Llega a tu tienda el ${fechaCorta(_estimada!)}.', style: const TextStyle(fontSize: 13.5)),
         const SizedBox(height: 12),
-        if (_dirs.isEmpty)
-          TextField(controller: _dir, maxLength: 200, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Dirección de tu tienda'))
-        else ...[
+        if (_dirs.isEmpty) ...[
+          const Text('Aún no tienes direcciones de entrega: agrega la de tu tienda (queda en Mi perfil).', style: TextStyle(fontSize: 13, color: TantaColors.textMuted)),
+          Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _agregarDireccion, icon: const Icon(Icons.add_location_alt_outlined), label: const Text('Agregar dirección'))),
+        ] else ...[
           Text(_dirs.length > 1 ? '¿A cuál de tus direcciones lo enviamos?' : 'Dirección de entrega', style: const TextStyle(fontSize: 13, color: TantaColors.textMuted)),
           for (final d in _dirs)
             ListTile(

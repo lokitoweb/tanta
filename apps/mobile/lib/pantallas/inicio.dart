@@ -5,6 +5,8 @@ import 'despacho.dart';
 import 'gastos.dart';
 import 'hoja_produccion.dart';
 import 'promociones.dart';
+import 'reclamos.dart';
+import 'venta_stock.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -201,6 +203,9 @@ class _InicioState extends State<Inicio> with WidgetsBindingObserver {
     Widget? pantalla;
     if (ruta.startsWith('/pedidos/') && api.puede('pedidos.crear') && !api.puede('pedidos.gestionar')) pantalla = MisPedidos(productos: _productos);
     if (ruta.startsWith('/almacen/requisiciones')) pantalla = const Requisiciones();
+    if (ruta.startsWith('/reclamos/')) pantalla = Reclamos(abrir: ruta.substring('/reclamos/'.length));
+    if (ruta.startsWith('/ventas/reclamos')) pantalla = const Reclamos();
+    if (ruta.startsWith('/ventas/aprobaciones') && api.puede('descuentos.aprobar')) pantalla = const Aprobaciones();
     if (ruta.startsWith('/almacen/compras') && api.puede('compras.verificar')) pantalla = const VerificarCompras();
     if (ruta.startsWith('/almacen/conteos')) pantalla = Conteos(datos: _datos);
     if (pantalla != null) { Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla!)); return; }
@@ -497,7 +502,10 @@ class _PanelInicio extends StatelessWidget {
           onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => pantalla)),
         );
     return [
+      if (api.puede('ventas.stock')) accion('Venta de stock', Icons.inventory_outlined, VentaStock(datos: datos)),
       if (api.puede('ventas.registrar')) accion('Nueva venta', Icons.point_of_sale_outlined, NuevaVenta(datos: datos)),
+      if (api.puede('descuentos.aprobar')) accion('Aprobaciones', Icons.verified_user_outlined, const Aprobaciones()),
+      if (api.puede('reclamos.ver') || api.puede('reclamos.crear')) accion(api.puede('reclamos.crear') ? 'Mis reclamos' : 'Reclamos', Icons.support_agent_outlined, const Reclamos()),
       if (api.puede('inventario.mover')) accion('Registrar baja', Icons.remove_shopping_cart_outlined, BajaInventario(datos: datos)),
       if (api.puede('produccion.planificar')) accion('Nueva OP', Icons.add_task_outlined, NuevaOrden(datos: datos)),
       if (api.puede('requisiciones.atender')) accion('Requisiciones', Icons.assignment_turned_in_outlined, const Requisiciones()),

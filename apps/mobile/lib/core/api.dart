@@ -619,7 +619,29 @@ class Api {
   Future<Map<String, dynamic>> hojaProduccion(String? fecha) async => await _get('/produccion/hoja${fecha == null ? '' : '?fecha=$fecha'}') as Map<String, dynamic>;
   Future<List<dynamic>> hojasProduccion() async => await _get('/produccion/hojas') as List<dynamic>;
   Future<Map<String, dynamic>> detalleHoja(String codigo) async => await _get('/produccion/hojas/${Uri.encodeComponent(codigo)}') as Map<String, dynamic>;
-  Future<Map<String, dynamic>> cerrarPedidosHoja(String fecha) async => await _post('/produccion/hoja/cerrar-pedidos', {'fecha': fecha}) as Map<String, dynamic>;
+  /// [turno]: del catálogo Turnos de producción (obligatorio mientras haya alguno activo).
+  Future<Map<String, dynamic>> cerrarPedidosHoja(String fecha, {String? turno}) async =>
+      await _post('/produccion/hoja/cerrar-pedidos', {'fecha': fecha, if (turno != null) 'turno': turno}) as Map<String, dynamic>;
+
+  // Venta de stock: pan ya producido, precio por producto; rebajarlo pide la aprobación del Gerente.
+  Future<Map<String, dynamic>> productosStock() async => await _get('/ventas-stock/productos') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> crearVentaStock(Map<String, dynamic> datos) async => await _post('/pedidos/stock', datos, idempotente: true) as Map<String, dynamic>;
+  Future<List<dynamic>> solicitudesDescuento() async => await _get('/descuentos/solicitudes') as List<dynamic>;
+  Future<void> pedirAprobacion({required double porcentaje, required String motivo, String? clienteId, bool paraStock = false}) async =>
+      await _post('/descuentos/solicitudes', {'porcentaje': porcentaje, 'motivo': motivo, if (clienteId != null) 'clienteId': clienteId, 'paraStock': paraStock});
+  Future<void> resolverAprobacion(String id, bool aprobar) async => await _post('/descuentos/solicitudes/$id/resolver', {'aprobar': aprobar});
+  Future<Map<String, dynamic>> direccionesCliente(String clienteId) async => await _get('/clientes/$clienteId/direcciones') as Map<String, dynamic>;
+
+  /// Factura de SUNAT (PDF) subida al pedido: solo su cliente o el personal la descargan.
+  Future<Uint8List> facturaPedido(String codigo) async => archivoPrivado('/pedidos/$codigo/factura');
+
+  // Reclamos: el cliente registra y responde; la panadería responde y cambia el estado.
+  Future<List<dynamic>> reclamos() async => await _get('/reclamos') as List<dynamic>;
+  Future<Map<String, dynamic>> reclamo(String codigo) async => await _get('/reclamos/$codigo') as Map<String, dynamic>;
+  Future<Map<String, dynamic>> crearReclamo({required String tipo, required String descripcion, String? pedido, String? foto}) async =>
+      await _post('/reclamos', {'tipo': tipo, 'descripcion': descripcion, if (pedido != null) 'pedido': pedido, if (foto != null) 'foto': foto}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> responderReclamo(String codigo, String mensaje, {String? estado}) async =>
+      await _post('/reclamos/$codigo/seguimiento', {'mensaje': mensaje, if (estado != null) 'estado': estado}) as Map<String, dynamic>;
   Future<Map<String, dynamic>> cerrarProduccionHoja(String codigo, List<Map<String, dynamic>> lineas, {bool confirmar = false}) async =>
       await _post('/produccion/hojas/${Uri.encodeComponent(codigo)}/cerrar', {'lineas': lineas, 'confirmar': confirmar}) as Map<String, dynamic>;
 

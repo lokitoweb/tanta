@@ -1,4 +1,6 @@
 import 'visor_comprobante.dart';
+import 'reclamos.dart';
+import 'package:printing/printing.dart';
 import 'package:flutter/material.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -79,7 +81,9 @@ class _NuevaVentaState extends State<NuevaVenta> {
 
   @override
   Widget build(BuildContext context) {
-    final productos = _lista(widget.datos, 'productos').where((p) => (p['stock'] as num? ?? 0) > 0).toList();
+    // Solo el pan libre: sin lo apartado para pedidos ni lo vencido (lo valida también el servidor).
+    num libre(Map p) => (p['disponible'] as num?) ?? (p['stock'] as num? ?? 0);
+    final productos = _lista(widget.datos, 'productos').where((p) => libre(p) >= 1).toList();
     final clientes = _lista(widget.datos, 'clientes');
     final hay = _cant.values.any((v) => v > 0);
     return Scaffold(
@@ -89,13 +93,13 @@ class _NuevaVentaState extends State<NuevaVenta> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('${p['nombre']}'),
-            subtitle: Text('${dinero((p['precioConIgv'] as num).toDouble())} · stock ${p['stock']}'),
+            subtitle: Text('${dinero((p['precioConIgv'] as num).toDouble())} · quedan ${libre(p).floor()}'),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(tooltip: 'Quitar', icon: const Icon(Icons.remove_circle_outline),
                   onPressed: (_cant[p['id']] ?? 0) > 0 ? () => setState(() => _cant[p['id']] = _cant[p['id']]! - 1) : null),
               SizedBox(width: 28, child: Text('${_cant[p['id']] ?? 0}', textAlign: TextAlign.center)),
               IconButton(tooltip: 'Agregar', icon: const Icon(Icons.add_circle_outline),
-                  onPressed: (_cant[p['id']] ?? 0) < (p['stock'] as num) ? () => setState(() => _cant[p['id']] = (_cant[p['id']] ?? 0) + 1) : null),
+                  onPressed: (_cant[p['id']] ?? 0) < libre(p).floor() ? () => setState(() => _cant[p['id']] = (_cant[p['id']] ?? 0) + 1) : null),
             ]),
           ),
         const SizedBox(height: 16),
@@ -1077,6 +1081,23 @@ class _MisPedidosState extends State<MisPedidos> {
             trailing: Text(dinero(((i['precio'] as num?) ?? 0).toDouble() * ((i['cantidad'] as num?) ?? 0).toDouble()))),
         ListTile(dense: true, contentPadding: EdgeInsets.zero, title: const Text('Total', style: TextStyle(fontWeight: FontWeight.w700)),
             trailing: Text(dinero(((p['total'] as num?) ?? 0).toDouble()), style: const TextStyle(fontWeight: FontWeight.w700))),
+        // Factura de SUNAT que subió la oficina: el cliente la descarga sin pedirla.
+        if (p['factura'] is Map) Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: FilledButton.tonalIcon(
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: Text('Factura SUNAT ${(p['factura'] as Map)['numero']}'),
+            onPressed: () async {
+              final aviso = ScaffoldMessenger.of(context);
+              try {
+                final b = await Api.instancia.facturaPedido('${p['codigo']}');
+                await Printing.sharePdf(bytes: b, filename: 'factura-${(p['factura'] as Map)['numero']}.pdf');
+              } catch (e) {
+                aviso.showSnackBar(SnackBar(content: Text(_mensaje(e))));
+              }
+            },
+          ),
+        ),
         // CLI-07: la boleta, factura o nota de pedido emitida al despachar se descarga o comparte en PDF.
         if (p['comprobante'] is Map) Padding(
           padding: const EdgeInsets.only(top: 4),
@@ -1085,6 +1106,11 @@ class _MisPedidosState extends State<MisPedidos> {
             label: Text('Descargar ${'${(p['comprobante'] as Map)['nombre']}'.toLowerCase()} ${(p['comprobante'] as Map)['numero']}'),
             onPressed: () => _descargar(p),
           ),
+        ),
+        if (Api.instancia.puede('reclamos.crear')) Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: TextButton.icon(icon: const Icon(Icons.support_agent_outlined), label: const Text('¿Algo salió mal? Hacer un reclamo'),
+              onPressed: () { Navigator.pop(ctx); Navigator.push(context, MaterialPageRoute(builder: (_) => Reclamos(pedido: '${p['codigo']}'))); }),
         ),
         const SizedBox(height: 12),
         Row(children: [

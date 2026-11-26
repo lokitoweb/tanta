@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { q, tx, uno, num, type Cliente } from '../db.js';
 import { autenticar, exigir, error, proyectarCostos } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
-import { emitirEvento } from './sistema.js';
+import { emitirEvento, guardarPdf } from './sistema.js';
 import { avisar } from './notificaciones.js';
 
 import { presentacionesDe, congelarReceta } from './operaciones.js';
@@ -69,7 +69,7 @@ export async function fechaEntregaSugerida(horasMinimas = 0): Promise<string> {
 }
 
 type ItemPedido = { productoId: string; cantidad: number; presentacion?: string; promocionId?: string };
-type LineaPedido = ItemPedido & { unidades: number; precioUnidad: number; importe: number; nombre: string };
+type LineaPedido = ItemPedido & { unidades: number; precioUnidad: number; importe: number; nombre: string; precioLista?: number };
 
 /** Valida productos, presentaciones y promociones contra la base y calcula el precio de cada línea. El cliente nunca fija el precio. */
 async function armarLineas(c: Cliente, items: ItemPedido[]) {
@@ -87,13 +87,13 @@ async function armarLineas(c: Cliente, items: ItemPedido[]) {
       if (items.some((x) => x.productoId === i.productoId && x !== i)) throw Object.assign(new Error(`${p.nombre} va una sola vez: con promoción o sin ella.`), { status: 422 });
       const promo = (await c.query<{ precio_con_igv: string }>('SELECT precio_con_igv FROM core.promocion WHERE id = $1 AND producto_id = $2 AND activa AND $3::date BETWEEN desde AND hasta', [i.promocionId, i.productoId, hoy])).rows[0];
       if (!promo) throw Object.assign(new Error(`La promoción de ${p.nombre} ya no está vigente.`), { status: 409 });
-      lineas.push({ ...i, nombre: p.nombre, presentacion: undefined, unidades: i.cantidad, precioUnidad: num(promo.precio_con_igv), importe: num(promo.precio_con_igv) * i.cantidad });
+      lineas.push({ ...i, nombre: p.nombre, presentacion: undefined, unidades: i.cantidad, precioUnidad: num(promo.precio_con_igv), importe: num(promo.precio_con_igv) * i.cantidad, precioLista: num(p.precio_con_igv) });
     } else if (!i.presentacion) {
-      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad, precioUnidad: num(p.precio_con_igv), importe: num(p.precio_con_igv) * i.cantidad });
+      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad, precioUnidad: num(p.precio_con_igv), importe: num(p.precio_con_igv) * i.cantidad, precioLista: num(p.precio_con_igv) });
     } else {
       const x = pres.get(`${i.productoId}|${i.presentacion}`);
       if (!x) throw Object.assign(new Error(`${p.nombre} no se vende en la presentación ${i.presentacion}.`), { status: 422 });
-      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, importe: x.precio * i.cantidad });
+      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, importe: x.precio * i.cantidad, precioLista: x.precio / x.equivalencia });
     }
   }
   return { lineas, total: lineas.reduce((s, i) => s + i.importe, 0), horas: Math.max(0, ...prods.rows.map((x) => Number(x.anticipacion_horas))) };
@@ -110,11 +110,12 @@ const TOMADAS = `coalesce((SELECT sum(d.cantidad) FROM core.pedido_detalle d JOI
 async function reservarPromos(c: Cliente, lineas: LineaPedido[]): Promise<Array<{ id: string; titulo: string }>> {
   const agotadas: Array<{ id: string; titulo: string }> = [];
   for (const l of lineas.filter((x) => x.promocionId).sort((a, b) => a.productoId.localeCompare(b.productoId))) {
-    const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.productoId])).rows[0];
+    await c.query('SELECT 1 FROM core.producto WHERE id = $1 FOR UPDATE', [l.productoId]);
     // La fila de la promoción se bloquea: dos clientes no pueden tomar la última unidad a la vez.
     const pr = (await c.query<{ titulo: string; cantidad: number | null; tomadas: string }>(
       `SELECT titulo, cantidad, ${TOMADAS} tomadas FROM core.promocion WHERE id = $1 FOR UPDATE`, [l.promocionId])).rows[0];
-    const libre = num(p.stock) - num(p.reservado);
+    // Libre = stock − apartado − vencido (el pan vencido no se ofrece: Almacén lo retira).
+    const libre = num((await c.query<{ n: string }>('SELECT core.stock_libre($1) n', [l.productoId])).rows[0].n);
     const disponible = pr.cantidad == null ? libre : Math.min(libre, pr.cantidad - num(pr.tomadas));
     if (disponible + 1e-6 < l.unidades) {
       throw Object.assign(new Error(disponible < 1 ? `La promoción «${pr.titulo}» ya se agotó.` : `Solo quedan ${Math.floor(disponible)} de ${l.nombre} en promoción.`), { status: 409 });
@@ -147,28 +148,57 @@ export async function liberarPromos(c: Cliente, pedidoId: string) {
     AND id IN (SELECT promocion_id FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NOT NULL)`, [pedidoId]);
 }
 
-/** RN-29 / APT-04: un pedido listo reserva su stock (lo de promoción ya está reservado). Sin stock: error, o false si no es estricto. */
-export async function reservarListo(c: Cliente, pedidoId: string, estricto = false): Promise<boolean> {
+/**
+ * RN-29 / APT-04: un pedido listo aparta su pan (lo de promoción ya está apartado, salvo `todas`: al volver de un despacho
+ * anulado, que liberó todo). Solo cuenta el pan que se puede vender (sin lo vencido). Sin stock: error, o false si no es estricto.
+ */
+export async function reservarListo(c: Cliente, pedidoId: string, estricto = false, todas = false): Promise<boolean> {
   const lineas = (await c.query<{ producto_id: string; producto: string; cantidad: string }>(
-    'SELECT producto_id, producto, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 AND promocion_id IS NULL GROUP BY producto_id, producto ORDER BY producto_id', [pedidoId])).rows;
-  const stock = new Map<string, number>();
+    `SELECT producto_id, producto, sum(cantidad) cantidad FROM core.pedido_detalle WHERE pedido_id = $1 AND ($2 OR promocion_id IS NULL)
+     GROUP BY producto_id, producto ORDER BY producto_id`, [pedidoId, todas])).rows;
   for (const l of lineas) {
-    const p = (await c.query<{ stock: string; reservado: string }>('SELECT stock, reservado FROM core.producto WHERE id = $1 FOR UPDATE', [l.producto_id])).rows[0];
-    const disponible = num(p.stock) - num(p.reservado);
-    stock.set(l.producto_id, disponible);
+    await c.query('SELECT 1 FROM core.producto WHERE id = $1 FOR UPDATE', [l.producto_id]);
+    const disponible = num((await c.query<{ n: string }>('SELECT core.stock_libre($1) n', [l.producto_id])).rows[0].n);
     if (disponible + 1e-6 < num(l.cantidad)) {
       if (!estricto) return false;
-      throw Object.assign(new Error(`No hay stock para reservar ${l.producto}: disponible ${disponible.toFixed(0)}, pedido ${num(l.cantidad).toFixed(0)}.`), { status: 409 });
+      throw Object.assign(new Error(`No alcanza el pan de ${l.producto} para completar este pedido desde el almacén: hay ${Math.floor(disponible)} libres y el pedido lleva ${num(l.cantidad).toFixed(0)}. `
+        + 'Un pedido de producción pasa a Listo solo al grabar la producción en la Hoja de producción.'), { status: 409 });
     }
   }
   for (const l of lineas) await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [l.producto_id, l.cantidad]);
   return true;
 }
 
+/** Parámetros administrables (Seguridad → Parámetros). */
+export const parametro = async (clave: string) => (await uno<{ valor: string }>('SELECT valor FROM core.parametro WHERE clave = $1', [clave]))?.valor;
+export const parametroSi = async (clave: string) => (await parametro(clave)) === 'true';
+
+/** La principal (registro o ficha que mantiene la empresa) va primero y no se borra desde la app; luego las guardadas. */
+export const direccionesDe = (cli: string) => q<{ id: string | null; direccion: string; referencia: string; principal: boolean }>(
+  `SELECT id, direccion, referencia, principal FROM (
+     SELECT NULL::text id, direccion, '' referencia, true principal, NULL::timestamptz creado_en FROM core.cliente WHERE id = $1 AND length(trim(direccion)) >= 5
+     UNION ALL SELECT id::text, direccion, coalesce(referencia, ''), false, creado_en FROM core.direccion_cliente WHERE cliente_id = $1) d
+   ORDER BY principal DESC, creado_en`, [cli]);
+export const maxDirecciones = async () => {
+  const v = Number(await parametro('cliente_max_direcciones'));
+  return Number.isInteger(v) && v >= 1 ? v : 4;
+};
+
+/** La dirección de un pedido se elige de las registradas del cliente; no se escribe a mano. */
+async function exigirDireccionDelCliente(clienteId: string, direccion: string, esCliente: boolean) {
+  if (!direccion) return;
+  const suyas = (await direccionesDe(clienteId)).map((x) => x.direccion.trim().toLowerCase());
+  if (!suyas.includes(direccion.trim().toLowerCase())) {
+    throw Object.assign(new Error(esCliente ? 'Elige una de tus direcciones de entrega (agrégala en Mi perfil si no está).'
+      : 'Elige una de las direcciones del cliente (agrégala en Maestros → Clientes si no está).'), { status: 422 });
+  }
+}
+
 async function guardarLineas(c: Cliente, pedidoId: string, lineas: LineaPedido[]) {
   for (const i of lineas) {
-    await c.query(`INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv, presentacion_codigo, cantidad_presentacion, promocion_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [pedidoId, i.productoId, i.nombre, i.unidades, i.precioUnidad.toFixed(4), i.presentacion ?? null, i.presentacion ? i.cantidad : null, i.promocionId ?? null]);
+    await c.query(`INSERT INTO core.pedido_detalle (pedido_id, producto_id, producto, cantidad, precio_con_igv, presentacion_codigo, cantidad_presentacion, promocion_id, precio_lista)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [pedidoId, i.productoId, i.nombre, i.unidades, i.precioUnidad.toFixed(4), i.presentacion ?? null, i.presentacion ? i.cantidad : null, i.promocionId ?? null,
+        i.precioLista === undefined ? null : i.precioLista.toFixed(4)]);
   }
 }
 
@@ -213,10 +243,11 @@ export async function rutasFlujo(app: FastifyInstance) {
           `SELECT codigo, nombre, requiere_ruc FROM core.tipo_comprobante_venta WHERE activo AND ($1::text IS NULL OR codigo = $1) ORDER BY orden, codigo LIMIT 1`, [d.comprobanteTipo ?? null])).rows[0];
         if (!comp) throw Object.assign(new Error('Ese tipo de comprobante no existe o está inactivo.'), { status: 422 });
         if (comp.requiere_ruc && cli.doc_tipo !== 'RUC') throw Object.assign(new Error(`La ${comp.nombre.toLowerCase()} requiere un cliente con RUC: elige otro comprobante o actualiza el documento.`), { status: 422 });
-        // El cliente envía a una de sus direcciones (máximo en Parámetros); sin ninguna registrada, a la que escriba.
-        if (yo?.cliente_id && d.direccion) {
-          const suyas = (await direccionesDe(clienteId)).map((x) => x.direccion.trim().toLowerCase());
-          if (suyas.length && !suyas.includes(d.direccion.toLowerCase())) throw Object.assign(new Error('Elige una de tus direcciones de entrega (o agrégala en tu perfil).'), { status: 422 });
+        // La dirección se elige de las del cliente (no se escribe): las agrega él en su perfil o el personal en su ficha.
+        await exigirDireccionDelCliente(clienteId, d.direccion, Boolean(yo?.cliente_id));
+        // Las ofertas las vende el vendedor (venta de stock); el cliente solo ve el aviso, salvo que Parámetros lo permita.
+        if (yo?.cliente_id && d.items.some((i) => i.promocionId) && !(await parametroSi('ofertas_pedido_cliente'))) {
+          throw Object.assign(new Error('Las ofertas se piden a tu vendedor: llámalo o escríbele y él te la separa.'), { status: 409 });
         }
         const { lineas, horas } = await armarLineas(c, d.items);
         const agotadas = await reservarPromos(c, lineas);
@@ -264,6 +295,125 @@ export async function rutasFlujo(app: FastifyInstance) {
     }
   });
 
+  /* ------------------------------------------------------- venta de stock */
+  // Lo que el vendedor puede ofrecer: pan hecho, sin lo apartado ni lo vencido, con lo que vence hoy y su oferta vigente.
+  app.get('/ventas-stock/productos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'ventas.stock')) return;
+    const filas = await q<Record<string, string>>(`
+      SELECT p.id, p.codigo, p.nombre, p.precio_con_igv, p.stock, p.reservado, p.imagen_id, core.producto_vencido(p.id) vencido, core.stock_libre(p.id) libre,
+             (SELECT coalesce(sum(l.saldo), 0) FROM core.lote_producto l WHERE l.producto_id = p.id AND l.saldo > 0 AND l.vence_en = core.hoy_lima()) vence_hoy,
+             (SELECT min(l.vence_en)::text FROM core.lote_producto l WHERE l.producto_id = p.id AND l.saldo > 0 AND l.vence_en >= core.hoy_lima()) proximo_vence,
+             (SELECT json_build_object('id', x.id, 'titulo', x.titulo, 'precio', x.precio_con_igv) FROM core.promocion x
+               WHERE x.producto_id = p.id AND x.activa AND core.hoy_lima() BETWEEN x.desde AND x.hasta ORDER BY x.hasta LIMIT 1) promocion
+      FROM core.producto p WHERE p.estado = 'ACTIVO' AND p.insumo_id IS NULL AND p.stock > 0 ORDER BY p.nombre`);
+    return {
+      descuentoMaximo: num(await parametro('venta_stock_descuento_maximo') ?? '0'),
+      productos: filas.map((f) => ({ id: f.id, codigo: f.codigo, nombre: f.nombre, precio: num(f.precio_con_igv), stock: num(f.stock), apartado: num(f.reservado),
+        vencido: num(f.vencido), libre: Math.floor(num(f.libre)), venceHoy: num(f.vence_hoy), proximoVence: f.proximo_vence, imagenId: f.imagen_id,
+        promocion: f.promocion ? { ...(f.promocion as unknown as Record<string, unknown>), precio: num((f.promocion as unknown as { precio: string }).precio) } : null })),
+    };
+  });
+
+  const VentaStock = z.object({
+    clienteId: z.string().uuid(),
+    items: z.array(z.object({ productoId: z.string().uuid(), cantidad: z.number().int('La cantidad va en unidades enteras.').positive().max(10_000),
+      precio: z.number().min(0).max(100_000), promocionId: z.string().uuid().optional() })).min(1).max(50)
+      .refine((xs) => new Set(xs.map((x) => x.productoId)).size === xs.length, 'Cada producto va una sola vez.'),
+    fechaEntrega: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    horaEntrega: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).or(z.literal('')).default(''),
+    tipoEntrega: z.enum(['RECOJO', 'DELIVERY']).optional(),
+    direccion: z.string().trim().max(200).default(''),
+    comprobanteTipo: z.string().trim().toUpperCase().max(20).optional(),
+    observaciones: z.string().trim().max(500).default(''),
+    // Precio por debajo del tope de Parámetros: aprobación vigente del Gerente (Ventas → Aprobaciones).
+    aprobacionId: z.string().uuid().optional(),
+  }).refine((d) => d.tipoEntrega !== 'DELIVERY' || d.direccion.length >= 5, { message: 'Elige la dirección de entrega.', path: ['direccion'] });
+
+  // El vendedor vende pan ya producido: se aparta al registrar, no pasa por producción y nace Listo para despacho.
+  // Sale del almacén al despachar, como todo pedido.
+  app.post('/pedidos/stock', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'ventas.stock')) return;
+    const p = VentaStock.safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Venta inválida.'));
+    const d = p.data;
+    if (d.fechaEntrega && d.fechaEntrega < hoyLima()) return reply.code(422).send(error(422, 'FECHA_PASADA', 'La fecha de entrega no puede ser anterior a hoy.'));
+    const tope = num(await parametro('venta_stock_descuento_maximo') ?? '0');
+    try {
+      const r = await tx(async (c) => {
+        const cli = (await c.query<{ nombre: string; estado: string; doc_tipo: string }>('SELECT nombre, estado, doc_tipo FROM core.cliente WHERE id = $1 FOR UPDATE', [d.clienteId])).rows[0];
+        if (!cli || cli.estado !== 'ACTIVO') throw Object.assign(new Error('El cliente no existe o está inactivo.'), { status: 422 });
+        const comp = (await c.query<{ codigo: string; nombre: string; requiere_ruc: boolean }>(
+          'SELECT codigo, nombre, requiere_ruc FROM core.tipo_comprobante_venta WHERE activo AND ($1::text IS NULL OR codigo = $1) ORDER BY orden, codigo LIMIT 1', [d.comprobanteTipo ?? null])).rows[0];
+        if (!comp) throw Object.assign(new Error('Ese tipo de comprobante no existe o está inactivo.'), { status: 422 });
+        if (comp.requiere_ruc && cli.doc_tipo !== 'RUC') throw Object.assign(new Error(`La ${comp.nombre.toLowerCase()} requiere un cliente con RUC.`), { status: 422 });
+        await exigirDireccionDelCliente(d.clienteId, d.direccion, false);
+
+        const lineas: LineaPedido[] = [];
+        const agotadas: Array<{ id: string; titulo: string }> = [];
+        let mayorRebaja = 0;
+        // En orden de id: dos vendedores a la vez bloquean igual y no se cruzan (sin deadlocks).
+        for (const i of [...d.items].sort((a, b) => a.productoId.localeCompare(b.productoId))) {
+          const pr = (await c.query<{ nombre: string; precio_con_igv: string }>(
+            "SELECT nombre, precio_con_igv FROM core.producto WHERE id = $1 AND estado = 'ACTIVO' AND insumo_id IS NULL FOR UPDATE", [i.productoId])).rows[0];
+          if (!pr) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
+          let libre = num((await c.query<{ n: string }>('SELECT core.stock_libre($1) n', [i.productoId])).rows[0].n);
+          let base = num(pr.precio_con_igv);
+          if (i.promocionId) {
+            const promo = (await c.query<{ titulo: string; precio_con_igv: string; cantidad: number | null; tomadas: string }>(
+              `SELECT titulo, precio_con_igv, cantidad, ${TOMADAS} tomadas FROM core.promocion WHERE id = $1 AND producto_id = $2 AND activa AND core.hoy_lima() BETWEEN desde AND hasta FOR UPDATE`,
+              [i.promocionId, i.productoId])).rows[0];
+            if (!promo) throw Object.assign(new Error(`La promoción de ${pr.nombre} ya no está vigente.`), { status: 409 });
+            if (promo.cantidad != null) libre = Math.min(libre, promo.cantidad - num(promo.tomadas));
+            base = num(promo.precio_con_igv);
+            if (libre - i.cantidad < 1 - 1e-6) agotadas.push({ id: i.promocionId, titulo: promo.titulo });
+          }
+          if (libre + 1e-6 < i.cantidad) {
+            throw Object.assign(new Error(libre < 1 ? `Ya no queda ${pr.nombre} para vender.` : `Solo quedan ${Math.floor(libre)} de ${pr.nombre}.`), { status: 409 });
+          }
+          if (base > 0) mayorRebaja = Math.max(mayorRebaja, 1 - i.precio / base);
+          await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [i.productoId, i.cantidad]);
+          lineas.push({ productoId: i.productoId, cantidad: i.cantidad, promocionId: i.promocionId, nombre: pr.nombre, unidades: i.cantidad,
+            precioUnidad: i.precio, importe: i.precio * i.cantidad, precioLista: num(pr.precio_con_igv) });
+        }
+        let aprobacion: string | null = null;
+        if (mayorRebaja > tope + 1e-6) {
+          aprobacion = (await c.query<{ id: string }>(`SELECT id FROM core.descuento_aprobacion
+            WHERE id = $1 AND estado = 'APROBADA' AND solicitado_por = $2 AND porcentaje + 0.000001 >= $3 AND expira_en > now() AND (cliente_id IS NULL OR cliente_id = $4) FOR UPDATE`,
+            [d.aprobacionId ?? null, req.usuario!.id, mayorRebaja, d.clienteId])).rows[0]?.id ?? null;
+          if (!aprobacion) {
+            throw Object.assign(new Error(`Bajaste el precio ${Math.ceil(mayorRebaja * 100)} % y sin aprobación se puede hasta ${Math.round(tope * 100)} %: pide la aprobación del Gerente.`),
+              { status: 422, codigo: 'REQUIERE_APROBACION', rebaja: Number(mayorRebaja.toFixed(4)) });
+          }
+        }
+        const fechaEntrega = d.fechaEntrega ?? hoyLima();
+        const direccion = d.direccion || (await direccionesDe(d.clienteId))[0]?.direccion || '';
+        const tipoEntrega = d.tipoEntrega ?? (direccion ? 'DELIVERY' : 'RECOJO');
+        const total = lineas.reduce((s, l) => s + l.importe, 0);
+        const cod = (await c.query<{ n: string }>(`SELECT 'PED-' || to_char(now(),'YYYY') || '-' || lpad(nextval('core.pedido_correlativo_seq')::text, 6, '0') n`)).rows[0].n;
+        const ped = (await c.query<{ id: string }>(
+          `INSERT INTO core.pedido (codigo, cliente_id, cliente, vendedor, estado, total, fecha_entrega, hora_entrega, observaciones, creado_por, tipo_entrega, direccion, confirmado_en, comprobante_tipo, es_oferta)
+           VALUES ($1,$2,$3,$4,'LISTO',$5,$6,$7,$8,$9,$10,$11, now(), $12, true) RETURNING id`,
+          [cod, d.clienteId, cli.nombre, req.usuario!.nombre, total.toFixed(4), fechaEntrega, d.horaEntrega, d.observaciones, req.usuario!.id,
+            tipoEntrega, tipoEntrega === 'DELIVERY' ? direccion : '', comp.codigo])).rows[0];
+        await guardarLineas(c, ped.id, lineas);
+        for (const a of agotadas) await c.query('UPDATE core.promocion SET agotada_en = now() WHERE id = $1 AND agotada_en IS NULL', [a.id]);
+        if (aprobacion) await c.query("UPDATE core.descuento_aprobacion SET estado = 'USADA', pedido_id = $2 WHERE id = $1", [aprobacion, ped.id]);
+        return { id: ped.id, codigo: cod, total: Number(total.toFixed(2)), estado: 'LISTO', fechaEntrega, comprobanteTipo: comp.codigo, esOferta: true, agotadas,
+          rebaja: Number(mayorRebaja.toFixed(4)), aprobacion, lineas: lineas.map((l) => ({ producto: l.nombre, cantidad: l.unidades, precio: l.precioUnidad, lista: l.precioLista })) };
+      });
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'PEDIDO_STOCK_CREADO', entidad: 'pedido', entidadId: r.codigo,
+        detalle: { total: r.total, lineas: r.lineas, rebajaMaxima: r.rebaja, aprobacion: r.aprobacion ?? undefined }, ip: req.ip });
+      void emitirEvento('pedido.estado', { codigo: r.codigo, de: null, a: 'LISTO' });
+      avisarAgotadas(r.agotadas);
+      const { agotadas: _a, ...cuerpo } = r;
+      return reply.code(201).send(cuerpo);
+    } catch (e) {
+      const err = e as Error & { status?: number; codigo?: string; rebaja?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send({ ...error(err.status, err.codigo ?? 'VENTA_STOCK_INVALIDA', err.message), ...(err.rebaja ? { rebaja: err.rebaja } : {}) });
+    }
+  });
+
   /** Mis pedidos (cliente) o todos (quien tiene pedidos.ver), con su detalle: historial y "repetir pedido". */
   app.get('/pedidos', { preHandler: autenticar }, async (req, reply) => {
     const yo = await uno<{ cliente_id: string | null }>('SELECT cliente_id FROM core.usuario WHERE id = $1', [req.usuario!.id]);
@@ -273,6 +423,8 @@ export async function rutasFlujo(app: FastifyInstance) {
              (SELECT v.codigo FROM core.venta v WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' LIMIT 1) AS venta, p.total, p.fecha_entrega::text fecha_entrega, p.hora_entrega, p.observaciones, p.creado_en::text creado_en,
              p.tipo_entrega AS "tipoEntrega", p.direccion, (SELECT ve.placa FROM core.vehiculo ve WHERE ve.id = p.vehiculo_id) vehiculo, p.motivo, p.entregado_en::text AS "entregadoEn", p.entrega_obs AS "entregaObs",
              p.observacion_vendedor AS "observacion", p.observado_en::text AS "observadoEn", p.comprobante_tipo AS "comprobanteTipo", p.es_oferta AS "esOferta",
+             -- Factura de SUNAT subida en PDF: el cliente la descarga desde el detalle del pedido.
+             CASE WHEN p.factura_id IS NULL THEN NULL ELSE json_build_object('numero', p.factura_numero, 'url', '/pedidos/' || p.codigo || '/factura', 'subidaEn', p.factura_subida_en) END AS factura,
              -- El comprobante emitido al despachar, para descargarlo (sin costos: solo lo que el cliente pagó).
              (SELECT json_build_object('tipo', v.comprobante_tipo, 'nombre', coalesce(t.nombre, v.comprobante_tipo), 'numero', v.serie || '-' || lpad(v.correlativo::text, 8, '0'),
                 'fecha', v.creado_en, 'base', v.base, 'igv', v.igv, 'total', v.total_con_igv, 'vendedor', v.vendedor,
@@ -281,13 +433,13 @@ export async function rutasFlujo(app: FastifyInstance) {
               WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' AND v.serie IS NOT NULL LIMIT 1) AS comprobante,
              (SELECT sum(x.saldo) FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA') AS "porCobrar",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
-               'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion, 'promocionId', d.promocion_id) ORDER BY d.id)
+               'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion, 'promocionId', d.promocion_id, 'precioLista', d.precio_lista) ORDER BY d.id)
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
       FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
       WHERE ($1::uuid IS NULL OR p.cliente_id = $1)
       GROUP BY p.id ORDER BY p.creado_en DESC LIMIT 200`, [yo?.cliente_id ?? null]);
     return filas.map((f) => ({ ...f, total: num(f.total), porCobrar: f.porCobrar === null ? null : num(f.porCobrar), items: (f.items as unknown as Array<Record<string, unknown>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), despachado: num(i.despachado as string),
-      cantidadPresentacion: i.cantidadPresentacion === null ? null : num(i.cantidadPresentacion as string) })) }));
+      cantidadPresentacion: i.cantidadPresentacion === null ? null : num(i.cantidadPresentacion as string), precioLista: i.precioLista == null ? null : num(i.precioLista as string) })) }));
   });
 
   // PED-07: el cliente cancela su pedido, con motivo, solo antes de que pase a producción.
@@ -364,16 +516,6 @@ export async function rutasFlujo(app: FastifyInstance) {
   });
 
   /* ------------------------------------------------- direcciones (cliente) */
-  /** La principal (registro o ficha que mantiene la empresa) va primero y no se borra desde la app; luego las guardadas. */
-  const direccionesDe = (cli: string) => q<{ id: string | null; direccion: string; referencia: string; principal: boolean }>(
-    `SELECT id, direccion, referencia, principal FROM (
-       SELECT NULL::text id, direccion, '' referencia, true principal, NULL::timestamptz creado_en FROM core.cliente WHERE id = $1 AND length(trim(direccion)) >= 5
-       UNION ALL SELECT id::text, direccion, coalesce(referencia, ''), false, creado_en FROM core.direccion_cliente WHERE cliente_id = $1) d
-     ORDER BY principal DESC, creado_en`, [cli]);
-  const maxDirecciones = async () => {
-    const v = Number((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'cliente_max_direcciones'"))?.valor);
-    return Number.isInteger(v) && v >= 1 ? v : 4;
-  };
   const clienteDe = async (usuarioId: string) => (await uno<{ cliente_id: string | null }>('SELECT cliente_id FROM core.usuario WHERE id = $1', [usuarioId]))?.cliente_id ?? null;
 
   app.get('/mis-direcciones', { preHandler: autenticar }, async (req, reply) => {
@@ -419,6 +561,74 @@ export async function rutasFlujo(app: FastifyInstance) {
     const r = await q('DELETE FROM core.direccion_cliente WHERE id = $1 AND cliente_id = $2 RETURNING id', [id, cli]);
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
     return { ok: true };
+  });
+
+  /* ------------------------------------- direcciones de un cliente (personal) */
+  // Maestros → Clientes: varias direcciones por cliente (la misma lista que el cliente ve y edita en su perfil).
+  const clienteValido = async (id: string) => z.string().uuid().safeParse(id).success && !!(await uno('SELECT 1 FROM core.cliente WHERE id = $1', [id]));
+  app.get('/clientes/:id/direcciones', { preHandler: autenticar }, async (req, reply) => {
+    if (!req.usuario!.permisos.has('clientes.gestionar') && !req.usuario!.permisos.has('pedidos.crear')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Sin permiso.'));
+    const { id } = req.params as { id: string };
+    if (!(await clienteValido(id))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
+    return { direcciones: await direccionesDe(id), maxDirecciones: await maxDirecciones() };
+  });
+  app.post('/clientes/:id/direcciones', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'clientes.gestionar')) return;
+    const { id } = req.params as { id: string };
+    if (!(await clienteValido(id))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
+    const p = z.object({ direccion: z.string().trim().min(5).max(200), referencia: z.string().trim().max(120).default('') }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Escribe la dirección completa.'));
+    const [actuales, max] = [await direccionesDe(id), await maxDirecciones()];
+    if (actuales.length >= max) return reply.code(409).send(error(409, 'LIMITE', `El cliente puede tener hasta ${max} direcciones (Parámetros → cliente_max_direcciones).`));
+    if (actuales.some((x) => x.direccion.trim().toLowerCase() === p.data.direccion.toLowerCase())) return reply.code(409).send(error(409, 'REPETIDA', 'Esa dirección ya está registrada.'));
+    const r = await uno('INSERT INTO core.direccion_cliente (cliente_id, direccion, referencia) VALUES ($1,$2,$3) RETURNING id, direccion, referencia', [id, p.data.direccion, p.data.referencia]);
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CLIENTE_DIRECCION_AGREGADA', entidad: 'cliente', entidadId: id, detalle: p.data, ip: req.ip });
+    return reply.code(201).send(r);
+  });
+  app.delete('/clientes/:id/direcciones/:dir', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'clientes.gestionar')) return;
+    const { id, dir } = req.params as { id: string; dir: string };
+    if (!z.string().uuid().safeParse(id).success || !z.string().uuid().safeParse(dir).success) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
+    const r = await q<{ direccion: string }>('DELETE FROM core.direccion_cliente WHERE id = $1 AND cliente_id = $2 RETURNING direccion', [dir, id]);
+    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
+    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CLIENTE_DIRECCION_QUITADA', entidad: 'cliente', entidadId: id, detalle: r[0], ip: req.ip });
+    return { ok: true };
+  });
+
+  /* ------------------------------------------------- factura de SUNAT (PDF) */
+  // La oficina genera la factura en SUNAT y la sube al pedido; el cliente la descarga en la app o en la web.
+  app.post('/pedidos/:codigo/factura', { preHandler: autenticar, bodyLimit: 15_000_000 }, async (req, reply) => {
+    if (!exigir(req, reply, 'comprobantes.subir')) return;
+    const { codigo } = req.params as { codigo: string };
+    const p = z.object({ archivo: z.string().min(20).max(14_500_000), numero: z.string().trim().toUpperCase().min(3, 'Escribe el número de la factura (F001-123).').max(30) }).safeParse(req.body);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Adjunta el PDF.'));
+    const ped = await uno<{ id: string; estado: string; cliente_id: string; factura_id: string | null }>('SELECT id, estado, cliente_id, factura_id FROM core.pedido WHERE codigo = $1', [codigo]);
+    if (!ped) return reply.code(404).send(error(404, 'PEDIDO_NO_EXISTE', 'El pedido no existe.'));
+    if (['CANCELADO', 'RECHAZADO'].includes(ped.estado)) return reply.code(409).send(error(409, 'PEDIDO_ANULADO', 'El pedido está anulado: no lleva factura.'));
+    try {
+      const archivo = await guardarPdf(p.data.archivo, req.usuario!.id, num(await parametro('factura_max_mb') ?? '3'));
+      await q('UPDATE core.pedido SET factura_id = $2, factura_numero = $3, factura_subida_en = now(), factura_subida_por = $4 WHERE id = $1', [ped.id, archivo, p.data.numero, req.usuario!.id]);
+      await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: ped.factura_id ? 'FACTURA_REEMPLAZADA' : 'FACTURA_SUBIDA', entidad: 'pedido', entidadId: codigo,
+        detalle: { numero: p.data.numero, anterior: ped.factura_id ?? undefined }, ip: req.ip });
+      avisar([{ clienteId: ped.cliente_id }], { tipo: 'pedido', titulo: `Factura ${p.data.numero}`, cuerpo: `Ya puedes descargar la factura de tu pedido ${codigo}.`, ruta: `/pedidos/${codigo}` });
+      void emitirEvento('pedido.factura', { codigo });
+      return { codigo, factura: { numero: p.data.numero, url: `/pedidos/${codigo}/factura` } };
+    } catch (e) {
+      const err = e as Error & { status?: number; codigo?: string };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, err.codigo ?? 'FACTURA_INVALIDA', err.message));
+    }
+  });
+
+  // Descarga: el cliente dueño del pedido o el personal con pedidos.ver. A los demás, como si no existiera.
+  app.get('/pedidos/:codigo/factura', { preHandler: autenticar }, async (req, reply) => {
+    const { codigo } = req.params as { codigo: string };
+    const yo = await clienteDe(req.usuario!.id);
+    const f = await uno<{ datos: Buffer; numero: string; cliente_id: string }>(`SELECT a.datos, p.factura_numero numero, p.cliente_id FROM core.pedido p JOIN core.archivo a ON a.id = p.factura_id
+      WHERE p.codigo = $1 AND a.mime = 'application/pdf'`, [codigo]);
+    if (!f || (yo ? f.cliente_id !== yo : !req.usuario!.permisos.has('pedidos.ver'))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Factura no encontrada.'));
+    return reply.header('Content-Type', 'application/pdf').header('Cache-Control', 'private, no-store').header('X-Content-Type-Options', 'nosniff')
+      .header('Content-Disposition', `attachment; filename="factura-${f.numero.replace(/[^A-Z0-9-]/g, '')}.pdf"`).send(f.datos);
   });
 
   /* ------------------------------------------------------------ producción */

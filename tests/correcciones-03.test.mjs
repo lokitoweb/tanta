@@ -82,6 +82,9 @@ test('Ficha del cliente: contacto, documento, celular y hasta N direcciones (la 
 
 test('Comprobante: el cliente elige boleta o factura; la factura exige RUC; se emite con su serie y se descarga', async () => {
   const cli = await login('mfernandez'), ven = await login('cmedina');
+  // El ingeniero pidió quitar la boleta (067 la desactiva); la prueba la reactiva para cubrir el mecanismo y la deja como estaba.
+  sql(`UPDATE core.tipo_comprobante_venta SET activo = true WHERE codigo = 'BOLETA'`);
+  after(() => sql(`UPDATE core.tipo_comprobante_venta SET activo = false WHERE codigo = 'BOLETA'`));
   sql(`UPDATE core.cliente SET doc_tipo = 'DNI', doc_numero = '45678912' WHERE id = '${cliId}'`);
   const fac = await api(cli, 'POST', '/pedidos', { items: [{ productoId: prod, cantidad: 1 }], comprobanteTipo: 'FACTURA' });
   assert.equal(fac.s, 422, 'factura sin RUC');

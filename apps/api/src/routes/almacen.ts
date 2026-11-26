@@ -331,6 +331,80 @@ export async function rutasLotes(app: FastifyInstance) {
   });
 }
 
+/**
+ * Pan por lote (respuesta del ingeniero): cuánto queda de cada producción, cuántos días lleva y cuándo vence.
+ * Lo vencido no se vende ni se aparta; Almacén lo retira con «Retirar vencidos» (merma por vencimiento) y el stock se actualiza.
+ */
+export async function rutasLotesProducto(app: FastifyInstance) {
+  app.get('/lotes-producto', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'inventario.ver')) return;
+    const p = z.object({ productoId: z.string().uuid().optional(), dias: z.coerce.number().int().min(0).max(365).optional() }).safeParse(req.query);
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Filtro inválido.'));
+    const filas = await q<Record<string, string>>(`
+      SELECT l.id, p.id producto_id, p.codigo, p.nombre producto, l.lote, l.vence_en::text vence, l.cantidad_inicial, l.saldo, l.creado_en::date::text ingreso,
+             core.hoy_lima() - (l.creado_en AT TIME ZONE 'America/Lima')::date dias_en_almacen,
+             CASE WHEN l.vence_en IS NULL THEN NULL ELSE l.vence_en - core.hoy_lima() END dias
+      FROM core.lote_producto l JOIN core.producto p ON p.id = l.producto_id
+      WHERE l.saldo > 0 AND ($1::uuid IS NULL OR l.producto_id = $1) AND ($2::int IS NULL OR l.vence_en <= core.hoy_lima() + $2::int)
+      ORDER BY l.vence_en NULLS LAST, l.id LIMIT 1000`, [p.data.productoId ?? null, p.data.dias ?? null]);
+    return filas.map((f) => {
+      const dias = f.dias === null ? null : num(f.dias);
+      return { id: num(f.id), productoId: f.producto_id, codigo: f.codigo, producto: f.producto, lote: f.lote, vence: f.vence, ingreso: f.ingreso,
+        diasEnAlmacen: num(f.dias_en_almacen), cantidadInicial: num(f.cantidad_inicial), saldo: num(f.saldo), dias,
+        estado: dias === null ? 'SIN_VENCIMIENTO' : dias < 0 ? 'VENCIDO' : dias === 0 ? 'VENCE_HOY' : 'VIGENTE' };
+    });
+  });
+
+  // Retira todo lo vencido (de los productos elegidos o de todos): una merma VENCIMIENTO por producto, al costo del pan.
+  app.post('/lotes-producto/retirar-vencidos', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'inventario.mover')) return;
+    const p = z.object({ productoIds: z.array(z.string().uuid()).max(500).optional(), motivo: z.string().trim().max(200).default('') }).safeParse(req.body ?? {});
+    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Elige los productos a retirar.'));
+    return responder(reply, 'RETIRO_INVALIDO', async () => {
+      const retirados = await tx(async (c) => {
+        const prods = (await c.query<{ id: string; nombre: string; stock: string; costo_unitario: string; vencido: string }>(`
+          SELECT p.id, p.nombre, p.stock, p.costo_unitario, core.producto_vencido(p.id) vencido FROM core.producto p
+          WHERE ($1::uuid[] IS NULL OR p.id = ANY($1)) AND core.producto_vencido(p.id) > 0 ORDER BY p.id FOR UPDATE`, [p.data.productoIds ?? null])).rows;
+        const hechos: Array<{ producto: string; cantidad: number }> = [];
+        for (const x of prods) {
+          // No se retira más de lo que figura en stock (lotes y stock siempre cuadran; esto es solo un seguro).
+          const cant = Math.min(num(x.vencido), num(x.stock));
+          if (cant <= 0) continue;
+          const saldo = num(x.stock) - cant, costo = num(x.costo_unitario);
+          await c.query(`INSERT INTO core.movimiento_inventario
+              (tipo,item_tipo,producto_id,documento,cantidad,costo_unitario,valor,saldo_cantidad,saldo_valor,cpp,registrado_por,motivo_tipo)
+            VALUES ('MERMA','PRODUCTO',$1,$2,$3,$4,$5,$6,$7,$4,$8,'VENCIMIENTO')`,
+            [x.id, (p.data.motivo || 'Retiro de pan vencido').slice(0, 200), (-cant).toFixed(6), costo.toFixed(6), (-cant * costo).toFixed(4), saldo.toFixed(6), (saldo * costo).toFixed(4), req.usuario!.id]);
+          await c.query('UPDATE core.producto SET stock = $2 WHERE id = $1', [x.id, saldo.toFixed(6)]);
+          hechos.push({ producto: x.nombre, cantidad: Number(cant.toFixed(3)) });
+        }
+        return hechos;
+      });
+      if (!retirados.length) throw fallo(409, 'No hay pan vencido por retirar.');
+      invalidar('cat:');
+      await auditar({ ...actor(req), accion: 'PAN_VENCIDO_RETIRADO', entidad: 'producto', detalle: { retirados } });
+      void emitirEvento('inventario.movimiento', { retirados });
+      return { retirados, unidades: retirados.reduce((s, r) => s + r.cantidad, 0) };
+    });
+  });
+}
+
+/** Pan: avisa una vez por lote que vence (o venció) y sigue en el almacén, para que Almacén lo retire a tiempo. */
+async function alertasVencimientoPan(): Promise<number> {
+  const lotes = await tx(async (c) => (await c.query<{ producto: string; lote: string; vence: string; saldo: string; dias: number }>(`
+    UPDATE core.lote_producto l SET alerta_en = now() FROM core.producto p
+    WHERE l.id IN (SELECT id FROM core.lote_producto WHERE alerta_en IS NULL AND saldo > 0 AND vence_en IS NOT NULL
+                     AND vence_en <= core.hoy_lima() + coalesce((SELECT valor::int FROM core.parametro WHERE clave = 'dias_alerta_vencimiento_pan'), 1)
+                   ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED) AND p.id = l.producto_id
+    RETURNING p.nombre producto, l.lote, l.vence_en::text vence, l.saldo, (l.vence_en - core.hoy_lima()) dias`)).rows);
+  for (const l of lotes) {
+    const cuando = l.dias < 0 ? `venció hace ${-l.dias} día(s): retíralo` : l.dias === 0 ? 'vence hoy' : `vence en ${l.dias} día(s)`;
+    await notificar([{ permiso: 'alertas.stock' }, { permiso: 'ventas.stock' }], { tipo: 'stock', titulo: 'Pan por vencer', ruta: '/almacen/vencimientos',
+      cuerpo: `${l.producto} · lote ${l.lote}: ${cuando} (${l.vence}); quedan ${Math.floor(num(l.saldo))} unidades` });
+  }
+  return lotes.length;
+}
+
 /** AIN-11: avisa una vez por lote cuando entra en la ventana de vencimiento (parámetro dias_alerta_vencimiento). */
 export async function despacharAlertasVencimiento(): Promise<number> {
   const lotes = await tx(async (c) => (await c.query<{ insumo: string; unidad: string; lote: string; vence: string; saldo: string; dias: number }>(`
@@ -344,5 +418,5 @@ export async function despacharAlertasVencimiento(): Promise<number> {
     await notificar([{ permiso: 'alertas.stock' }], { tipo: 'stock', titulo: 'Lote por vencer', ruta: '/almacen',
       cuerpo: `${l.insumo} · lote ${l.lote}: ${cuando} (${l.vence}); quedan ${num(l.saldo).toFixed(2)} ${l.unidad.toLowerCase()}` });
   }
-  return lotes.length;
+  return lotes.length + await alertasVencimientoPan();
 }

@@ -19,6 +19,8 @@ export interface Producto {
   /** SKU #1: presentación de venta y su equivalencia en unidades (precioConIgv es por unidad). */
   presentacionCodigo?: string; presentacionNombre?: string; presentacionEquivalencia?: number;
   pesoMasaG?: number | null; pesoFinalG?: number | null; unidadesLote?: number | null; horasHornoLote?: number; vidaUtilDias?: number | null;
+  /** Pan que se puede vender o apartar: stock − apartado − vencido. */
+  disponible?: number; reservado?: number; vencido?: number;
 }
 export interface PresentacionProducto { presentacion: string; nombre: string; equivalencia: number; sku: string; precioConIgv: number; activo: boolean }
 export interface Insumo {
@@ -37,6 +39,8 @@ export interface Dia { fecha: string; ventasNetas: number; costo: number; utilid
 export interface Op {
   codigo: string; producto: string; cantidad: number; estado: string;
   entrega: string; responsable: string; avance: number; mermaEsperada: number;
+  /** Hoja de producción (LOT …) a la que pertenece: se cierra solo con «Grabar producción» de esa hoja. */
+  hoja?: string | null;
 }
 export interface Pedido {
   codigo: string; cliente: string; estado: string; total: number;

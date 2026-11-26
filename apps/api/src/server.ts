@@ -13,7 +13,7 @@ import { rutasSistema } from './routes/sistema.js';
 import { rutasMaestros } from './routes/maestros.js';
 import { rutasReportes } from './routes/reportes.js';
 import { rutasCobranza, despacharAlertasCobranza } from './routes/cobranza.js';
-import { rutasAlmacen, rutasAlmacenes, rutasLotes, despacharAlertasStock, despacharAlertasVencimiento } from './routes/almacen.js';
+import { rutasAlmacen, rutasAlmacenes, rutasLotes, rutasLotesProducto, despacharAlertasStock, despacharAlertasVencimiento } from './routes/almacen.js';
 import { rutasNotificaciones, despacharAvisosPedido } from './routes/notificaciones.js';
 import { rutasHojas } from './routes/hojas.js';
 import { rutasDespacho } from './routes/despacho.js';
@@ -22,6 +22,7 @@ import { rutasPagos, rutasPagosCostos, despacharAvisosPago } from './routes/pago
 import { rutasCajaGrande } from './routes/cajaGrande.js';
 import { rutasCatalogos } from './routes/catalogos.js';
 import { rutasFlujo } from './routes/flujo.js';
+import { rutasReclamos } from './routes/reclamos.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
 const ORIGENES = (process.env.CORS_ORIGINS ??
@@ -143,6 +144,8 @@ export async function construir() {
     await api.register(rutasAlmacen);
     await api.register(rutasAlmacenes);
     await api.register(rutasLotes);
+    await api.register(rutasLotesProducto);
+    await api.register(rutasReclamos);
     await api.register(rutasNotificaciones);
     await api.register(rutasHojas);
     await api.register(rutasDespacho);

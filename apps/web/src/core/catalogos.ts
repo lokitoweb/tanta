@@ -14,10 +14,13 @@ export interface TipoGasto { codigo: string; nombre: string; activo: boolean; or
 /** Caja grande: efectivo (caja fuerte), cuenta bancaria o billetera (Yape, Plin). */
 export interface CuentaCaja { codigo: string; nombre: string; tipo: 'EFECTIVO' | 'BANCO' | 'BILLETERA'; banco: string | null; numero: string | null; activo: boolean; orden: number }
 export interface ComprobanteVenta { codigo: string; nombre: string; requiereRuc: boolean; activo: boolean; orden: number }
+/** Turnos de la hoja de producción (mañana, noche…) y motivos de reclamo: listas simples administrables. */
+export interface ValorSimple { codigo: string; nombre: string; activo: boolean; orden: number }
 export interface Catalogos { tiposGasto: TipoGasto[]; mediosPago: MedioPago[]; tiposDocumento: TipoDocumento[]; tiposInsumo: TipoInsumo[]; unidades: Unidad[];
-  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[]; comprobantesVenta: ComprobanteVenta[]; cuentasCaja: CuentaCaja[] }
+  presentacionesCompra: PresentacionCompra[]; presentacionesVenta: PresentacionVenta[]; bancos: Banco[]; comprobantesVenta: ComprobanteVenta[]; cuentasCaja: CuentaCaja[];
+  turnosProduccion: ValorSimple[]; tiposReclamo: ValorSimple[] }
 
-const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [], comprobantesVenta: [], cuentasCaja: [] };
+const vacio: Catalogos = { tiposGasto: [], mediosPago: [], tiposDocumento: [], tiposInsumo: [], unidades: [], presentacionesCompra: [], presentacionesVenta: [], bancos: [], comprobantesVenta: [], cuentasCaja: [], turnosProduccion: [], tiposReclamo: [] };
 let cache: Promise<Catalogos> | null = null;
 
 /** Recarga los catálogos (tras editarlos en Maestros → Catálogos). */

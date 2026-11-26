@@ -179,9 +179,10 @@ export function Produccion() {
                   <span className="op__resp" title={op.responsable}><i>{iniciales}</i>{op.responsable}</span>
                   <div className="op__accion">
                     {op.estado === 'PENDIENTE' && puedeEjecutar && <Boton size="sm" variant="primary" disabled={ocupado} onClick={() => void iniciar(op)}>Iniciar</Boton>}
-                    {op.estado === 'EN_PROCESO' && puedeEjecutar && <Boton size="sm" variant="primary" disabled={ocupado}
+                    {op.hoja && op.estado !== 'TERMINADA' && <Insignia tono="warn">Hoja {op.hoja}</Insignia>}
+                    {op.estado === 'EN_PROCESO' && puedeEjecutar && !op.hoja && <Boton size="sm" variant="primary" disabled={ocupado}
                       onClick={() => setCerrar({ op, buenas: String(op.cantidad), merma: '0', motivoTipo: 'QUEMADO', motivo: '', horasHombre: '', horasHorno: '' })}>Cerrar</Boton>}
-                    {op.estado !== 'TERMINADA' && puedePlanificar && <button type="button" className="op__anular" title="Anular orden" aria-label={`Anular ${op.codigo}`} onClick={() => setAnular({ op, motivo: '' })}>×</button>}
+                    {op.estado !== 'TERMINADA' && puedePlanificar && !op.hoja && <button type="button" className="op__anular" title="Anular orden" aria-label={`Anular ${op.codigo}`} onClick={() => setAnular({ op, motivo: '' })}>×</button>}
                     {op.estado === 'TERMINADA' && <Insignia tono="ok" punto>En stock</Insignia>}
                   </div>
                 </li>

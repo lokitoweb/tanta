@@ -57,8 +57,8 @@ async function insumosDe(filas: Fila[], verCostos: boolean) {
 }
 
 async function detalleHoja(codigo: string, verCostos: boolean) {
-  const h = await uno<Record<string, string>>(`SELECT h.id, h.codigo, h.fecha::text, h.estado, h.creado_en::text, h.cerrada_en::text, u.nombre cerrada_por
-    FROM core.hoja_produccion h LEFT JOIN core.usuario u ON u.id = h.cerrada_por WHERE h.codigo = $1`, [codigo]);
+  const h = await uno<Record<string, string>>(`SELECT h.id, h.codigo, h.fecha::text, h.estado, h.creado_en::text, h.cerrada_en::text, u.nombre cerrada_por, h.turno, t.nombre turno_nombre
+    FROM core.hoja_produccion h LEFT JOIN core.usuario u ON u.id = h.cerrada_por LEFT JOIN core.turno_produccion t ON t.codigo = h.turno WHERE h.codigo = $1`, [codigo]);
   if (!h) return null;
   const { clientes, filas } = await matriz('p.hoja_id = $1', [h.id]);
   const ops = await q<Record<string, string>>(`SELECT o.codigo, o.producto_id, o.producto, o.cantidad, o.cantidad_producida, o.costo_total, p.precio_con_igv
@@ -80,7 +80,7 @@ async function detalleHoja(codigo: string, verCostos: boolean) {
   const n = (x: string) => num(x);
   return {
     tolerancia: num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'tolerancia_produccion'"))?.valor ?? '0.10'),
-    codigo: h.codigo, fecha: h.fecha, estado: h.estado, creadoEn: h.creado_en, cerradaEn: h.cerrada_en, cerradaPor: h.cerrada_por, clientes, filas, resumen,
+    codigo: h.codigo, fecha: h.fecha, estado: h.estado, turno: h.turno, turnoNombre: h.turno_nombre, creadoEn: h.creado_en, cerradaEn: h.cerrada_en, cerradaPor: h.cerrada_por, clientes, filas, resumen,
     insumosUsados: usados.map((u) => ({ insumo: u.insumo, unidad: u.unidad, cantidad: n(u.cantidad), ...(verCostos ? { costo: n(u.costo) } : {}) })),
     insumosPorComprar: porComprar.map((p) => ({ insumo: p.insumo, unidad: p.unidad, stock: n(p.stock), minimo: n(p.minimo), falta: n(p.falta) })),
   };
@@ -105,11 +105,14 @@ export async function rutasHojas(app: FastifyInstance) {
   // Historial: toda hoja, en curso o cerrada.
   app.get('/produccion/hojas', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'produccion.ver')) return;
-    const filas = await q<Record<string, string>>(`SELECT h.codigo, h.fecha::text, h.estado, h.cerrada_en::text,
+    // Turno opcional: el reporte de producción por turno (mañana, noche…) sale de este mismo listado.
+    const t = z.object({ turno: z.string().trim().toUpperCase().max(20).optional() }).safeParse(req.query);
+    const filas = await q<Record<string, string>>(`SELECT h.codigo, h.fecha::text, h.estado, h.cerrada_en::text, h.turno, t.nombre turno_nombre,
         (SELECT count(*) FROM core.orden_produccion o WHERE o.hoja_id = h.id) productos,
         (SELECT coalesce(sum(o.cantidad_producida), 0) FROM core.orden_produccion o WHERE o.hoja_id = h.id) unidades
-      FROM core.hoja_produccion h ORDER BY h.creado_en DESC LIMIT 200`);
-    return filas.map((f) => ({ codigo: f.codigo, fecha: f.fecha, estado: f.estado, cerradaEn: f.cerrada_en, productos: num(f.productos), unidades: num(f.unidades) }));
+      FROM core.hoja_produccion h LEFT JOIN core.turno_produccion t ON t.codigo = h.turno
+      WHERE ($1::text IS NULL OR h.turno = $1) ORDER BY h.creado_en DESC LIMIT 200`, [t.success && t.data.turno ? t.data.turno : null]);
+    return filas.map((f) => ({ codigo: f.codigo, fecha: f.fecha, estado: f.estado, turno: f.turno, turnoNombre: f.turno_nombre, cerradaEn: f.cerrada_en, productos: num(f.productos), unidades: num(f.unidades) }));
   });
 
   app.get('/produccion/hojas/:codigo', { preHandler: autenticar }, async (req, reply) => {
@@ -121,17 +124,21 @@ export async function rutasHojas(app: FastifyInstance) {
   // Cerrar pedidos: pasan a producción, nace el lote y una OP por producto (sin requisición: se descarga al cerrar).
   app.post('/produccion/hoja/cerrar-pedidos', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'produccion.planificar')) return;
-    const p = z.object({ fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Elige la fecha de entrega.') }).safeParse(req.body);
+    const p = z.object({ fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Elige la fecha de entrega.'), turno: z.string().trim().toUpperCase().max(20).optional() }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Fecha inválida.'));
     try {
       const codigo = await tx(async (c) => {
+        // Turno del catálogo (Maestros → Catálogos → Turnos de producción): obligatorio mientras haya alguno activo.
+        const turnos = (await c.query<{ codigo: string }>('SELECT codigo FROM core.turno_produccion WHERE activo')).rows.map((x) => x.codigo);
+        if (turnos.length && !p.data.turno) throw fallo(422, 'Elige el turno de esta producción.');
+        if (p.data.turno && !turnos.includes(p.data.turno)) throw fallo(422, 'Ese turno no existe o está inactivo.');
         const pedidos = (await c.query<{ id: string }>(`SELECT p.id FROM core.pedido p WHERE p.estado = 'CONFIRMADO' AND p.fecha_entrega = $1::date
           AND EXISTS (SELECT 1 FROM core.pedido_detalle d WHERE d.pedido_id = p.id AND d.promocion_id IS NULL) ORDER BY p.id FOR UPDATE`, [p.data.fecha])).rows.map((x) => x.id);
         if (!pedidos.length) throw fallo(409, 'No hay pedidos confirmados para esa fecha.');
         const lineas = (await c.query<{ producto_id: string; cantidad: string }>(`SELECT producto_id, sum(cantidad) cantidad FROM core.pedido_detalle
           WHERE pedido_id = ANY($1::uuid[]) AND promocion_id IS NULL GROUP BY producto_id ORDER BY producto_id`, [pedidos])).rows;
         const cod = (await c.query<{ n: string }>(`SELECT 'LOT ' || nextval('core.hoja_produccion_seq') n`)).rows[0].n;
-        const hojaId = (await c.query<{ id: string }>('INSERT INTO core.hoja_produccion (codigo, fecha, creado_por) VALUES ($1,$2,$3) RETURNING id', [cod, p.data.fecha, req.usuario!.id])).rows[0].id;
+        const hojaId = (await c.query<{ id: string }>('INSERT INTO core.hoja_produccion (codigo, fecha, creado_por, turno) VALUES ($1,$2,$3,$4) RETURNING id', [cod, p.data.fecha, req.usuario!.id, p.data.turno ?? null])).rows[0].id;
         for (const l of lineas) {
           const rec = (await c.query<{ id: string; producto: string; merma_estandar: string }>(`SELECT r.id, r.producto, r.merma_estandar FROM core.receta r WHERE r.producto_id = $1 AND r.estado = 'VIGENTE'`, [l.producto_id])).rows[0];
           const calc = rec ? await calcularOrden(l.producto_id, num(l.cantidad), 'PROPORCIONAL') : null;

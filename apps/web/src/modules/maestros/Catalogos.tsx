@@ -11,6 +11,7 @@ const PESTANAS = [
   ['tipos-insumo', 'Tipos de insumo', 'tiposInsumo'], ['unidades', 'Unidades', 'unidades'],
   ['presentaciones-compra', 'Presentaciones de compra', 'presentacionesCompra'], ['presentaciones-venta', 'Presentaciones de venta', 'presentacionesVenta'],
   ['tipos-gasto', 'Tipos de gasto', 'tiposGasto'], ['comprobantes-venta', 'Comprobantes de venta', 'comprobantesVenta'], ['cuentas-caja', 'Cuentas de caja', 'cuentasCaja'], ['bancos', 'Bancos', 'bancos'],
+  ['turnos-produccion', 'Turnos de producción', 'turnosProduccion'], ['tipos-reclamo', 'Motivos de reclamo', 'tiposReclamo'],
 ] as const;
 type Ruta = typeof PESTANAS[number][0];
 
@@ -82,6 +83,18 @@ const DEF: Record<Ruta, { descripcion: string; nuevo: Reg; columnas: ColRep[]; c
   },
   bancos: {
     descripcion: 'Bancos para las cuentas de los proveedores.',
+    nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, ...comunes],
+  },
+  'turnos-produccion': {
+    descripcion: 'Turnos de la hoja de producción (mañana, noche…). Se elige al cerrar los pedidos y da el reporte de producciones por turno.',
+    nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
+    columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'activo', label: 'Activo' }],
+    campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60, placeholder: 'Mañana' }, ...comunes],
+  },
+  'tipos-reclamo': {
+    descripcion: 'Motivos con que el cliente registra un reclamo desde la app (producto en mal estado, faltó producto, demora…).',
     nuevo: { codigo: '', nombre: '', orden: 10, activo: true },
     columnas: [{ key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'activo', label: 'Activo' }],
     campos: [{ key: 'nombre', label: 'Nombre', requerido: true, ancho: true, max: 60 }, ...comunes],

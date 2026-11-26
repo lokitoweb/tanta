@@ -35,3 +35,7 @@ List<Map<String, dynamic>> tiposDocumento() {
   final l = _lista('tiposDocumento');
   return l.isEmpty ? [{'codigo': 'FACTURA', 'nombre': 'Factura', 'creditoFiscal': true}] : l;
 }
+
+/// Turnos de la hoja de producción (mañana, noche…) y motivos de reclamo: catálogos administrables.
+List<Map<String, dynamic>> turnosProduccion() => _lista('turnosProduccion');
+List<Map<String, dynamic>> tiposReclamo() => _lista('tiposReclamo');

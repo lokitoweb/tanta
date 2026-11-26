@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/api.dart';
+import '../core/catalogos.dart';
 import '../core/tokens.dart';
 import '../ui/comunes.dart';
 
@@ -96,9 +97,18 @@ class _HojaProduccionState extends State<HojaProduccion> {
 
   Future<void> _cerrarPedidos() async {
     final h = _hoja!;
+    // Turno (Maestros → Catálogos → Turnos de producción): mañana, noche…
+    final turnos = turnosProduccion();
+    String? turno = turnos.isEmpty ? null : '${turnos.first['codigo']}';
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('¿Cerrar pedidos?'),
-      content: Text('Los pedidos del ${_dma('${h['fecha']}')} pasan a producción y se crea el lote.'),
+      content: StatefulBuilder(builder: (ctx, set) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Los pedidos del ${_dma('${h['fecha']}')} pasan a producción y se crea el lote.'),
+        if (turnos.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, children: [for (final t in turnos) ChoiceChip(label: Text('Turno ${'${t['nombre']}'.toLowerCase()}'), selected: turno == t['codigo'], onSelected: (_) => set(() => turno = '${t['codigo']}'))]),
+        ],
+      ])),
       actions: [
         AccionesDialogo(
           secundaria: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
@@ -110,7 +120,7 @@ class _HojaProduccionState extends State<HojaProduccion> {
     final aviso = ScaffoldMessenger.of(context);
     setState(() => _ocupado = true);
     try {
-      final r = await Api.instancia.cerrarPedidosHoja('${h['fecha']}');
+      final r = await Api.instancia.cerrarPedidosHoja('${h['fecha']}', turno: turno);
       await _cargar();
       aviso.showSnackBar(SnackBar(content: Text('${r['codigo']}: pedidos en producción'), backgroundColor: TantaColors.stateOk));
     } on ApiException catch (e) {

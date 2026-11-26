@@ -6,7 +6,8 @@ import { Icon } from '@/ui/icons';
 import { NuevoPedido } from '@/modules/ventas/NuevoPedido';
 import { api, urlApi } from '@/core/api';
 
-interface Promo { id: string; productoId: string; producto: string; titulo: string; precioConIgv: number; precioNormal: number; hasta: string; disponible: number }
+/** pedible = false (Parámetros → ofertas_pedido_cliente): el cliente solo ve el aviso y la pide a su vendedor. */
+interface Promo { id: string; productoId: string; producto: string; titulo: string; precioConIgv: number; precioNormal: number; hasta: string; disponible: number; pedible?: boolean }
 
 export function Catalogo() {
   const { dataset, puede, refrescarDatos } = useApp();
@@ -52,7 +53,8 @@ export function Catalogo() {
               <div><Insignia tono="ok">Promoción</Insignia><h3>{x.titulo}</h3>
                 <p>{x.producto} · <s>{money(x.precioNormal)}</s> <strong>{money(x.precioConIgv)}</strong></p>
                 <small>Quedan {x.disponible} · hasta el {x.hasta.split('-').reverse().join('/')}</small></div>
-              <button className="prod__add" disabled={(enPromo[x.id] ?? 0) >= x.disponible} onClick={() => sumarPromo(x)} aria-label={`Agregar ${x.titulo}`}><Icon name="plus" size={16} /></button>
+              {x.pedible ? <button className="prod__add" disabled={(enPromo[x.id] ?? 0) >= x.disponible} onClick={() => sumarPromo(x)} aria-label={`Agregar ${x.titulo}`}><Icon name="plus" size={16} /></button>
+                : <small className="t-muted">Pídesela a tu vendedor</small>}
             </article>
           ))}
         </section>
