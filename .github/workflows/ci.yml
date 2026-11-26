@@ -125,3 +125,27 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
+  # El servidor despliega la rama "production", no main (infra/deploy.sh, cada 2 minutos).
+  # Solo avanza cuando las pruebas de un push a main pasan: un commit roto nunca llega a producción.
+  produccion:
+    name: Habilitar despliegue
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [calidad, movil]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Mover production a este commit (solo hacia adelante)
+        run: |
+          git fetch origin production || true
+          if git rev-parse --verify -q origin/production >/dev/null \
+             && ! git merge-base --is-ancestor origin/production "$GITHUB_SHA"; then
+            echo "::notice::production ya está en un commit más nuevo; no se retrocede."
+            exit 0
+          fi
+          git push origin "$GITHUB_SHA:refs/heads/production"
+          echo "::notice::production → ${GITHUB_SHA::7}: el servidor lo despliega en máximo 2 minutos."
