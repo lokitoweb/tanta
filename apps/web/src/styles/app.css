@@ -1690,27 +1690,31 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .kpi:nth-child(3), .card:nth-child(3) { animation-delay: 100ms; }
 .kpi:nth-child(4), .card:nth-child(4) { animation-delay: 150ms; }
 
-/* Menú lateral claro: íconos de color, la opción activa encendida en una pastilla. */
-.sidebar { background: var(--tanta-surface-menu); border-right: 1px solid var(--tanta-border-subtle); }
-.sidebar__brand, .sidebar__foot { border-color: var(--tanta-border-subtle); }
+/* Menú lateral Espresso: íconos en tono suave del propio menú; la opción activa se enciende en miel. */
+.sidebar { background: var(--tanta-surface-menu); border-right: 1px solid rgba(255, 255, 255, 0.06); }
+.sidebar__brand, .sidebar__foot { border-color: rgba(255, 255, 255, 0.07); }
 .sidebar__fijar { color: var(--tanta-text-menu-muted); }
-.sidebar__fijar:hover, .sidebar__fijar[aria-pressed="true"] { background: #FFFFFF; color: var(--tanta-primario); }
-.sidebar__nav { scrollbar-color: var(--tanta-border-default) transparent; }
-.sidebar__nav::-webkit-scrollbar-thumb { background: var(--tanta-border-default); }
+.sidebar__fijar:hover, .sidebar__fijar[aria-pressed="true"] { background: rgba(255, 255, 255, 0.08); color: #FFFFFF; }
+.sidebar__nav { scrollbar-color: rgba(255, 255, 255, 0.14) transparent; }
+.sidebar__nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }
 .navgroup__title { color: var(--tanta-text-menu-muted); }
-:is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .navgroup + .navgroup { border-top-color: var(--tanta-border-default); }
-.navitem { color: var(--tanta-text-menu); border-radius: 10px; transition: background 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
-.navitem svg { color: var(--tanta-primario); opacity: 0.85; transition: color 160ms ease, opacity 160ms ease, transform 160ms ease; }
-.navitem:hover { background: #FFFFFF; color: var(--tanta-text-primary); box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08); }
-.navitem:hover svg { opacity: 1; transform: scale(1.08); }
-.navitem.is-active { background: var(--tanta-primario-suave); color: var(--tanta-primario-texto); font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tanta-primario) 22%, transparent); }
-.navitem.is-active svg { color: var(--tanta-primario); opacity: 1; }
+:is(.shell:not(.shell--fijo) .sidebar:not(:hover):not(:focus-within), .shell--cerrado:not(.shell--fijo) .sidebar) .navgroup + .navgroup { border-top-color: rgba(255, 255, 255, 0.08); }
+.navitem { color: var(--tanta-text-menu); border-radius: 10px; transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease; }
+.navitem svg { color: var(--tanta-text-menu-icono); transition: color 160ms ease, transform 160ms ease; }
+.navitem:hover { background: rgba(255, 255, 255, 0.06); color: #FFFFFF; }
+.navitem:hover svg { color: #F5EDE4; transform: scale(1.08); }
+.navitem.is-active {
+  background: color-mix(in srgb, var(--tanta-acento) 16%, transparent);
+  color: #FFFFFF; font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--tanta-acento);
+}
+.navitem.is-active svg { color: color-mix(in srgb, var(--tanta-acento) 85%, #FFFFFF); }
 .navitem.is-active::before { display: none; }
-.perfil:hover { background: #FFFFFF; }
-.perfil__nombre { color: var(--tanta-text-primary); }
+.perfil:hover { background: rgba(255, 255, 255, 0.05); }
+.perfil__nombre { color: #FFFFFF; }
 .perfil__rol, .perfil__btn { color: var(--tanta-text-menu-muted); }
-.perfil__btn:hover { background: #FFFFFF; color: var(--tanta-primario); }
-.sidebar :where(a, button):focus-visible { outline-color: var(--tanta-primario); }
+.perfil__btn:hover { background: rgba(255, 255, 255, 0.08); color: #FFFFFF; }
+.sidebar :where(a, button):focus-visible { outline-color: var(--tanta-acento); }
 
 @media (prefers-reduced-motion: reduce) {
   .kpi, .card { animation: none; }
