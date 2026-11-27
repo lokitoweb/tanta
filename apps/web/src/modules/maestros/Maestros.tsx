@@ -411,9 +411,10 @@ export function Insumos() {
         ]}
         columnas={[
           // Columnas pedidas por el ingeniero: cómo se compra (presentación = equivalencia en su unidad) y a cuánto.
-          // El stock y su valor se consultan en Almacén.
+          // Stock actual junto al mínimo, para ver de un vistazo qué falta comprar.
           { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'tipo', label: 'Tipo' }, { key: 'presentacion', label: 'Presentación' },
           { key: 'cantPresentacion', label: 'Equivalencia', tipo: 'num' }, { key: 'unidad', label: 'En' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
+          { key: 'stock', label: 'Stock', tipo: 'num' },
           ...(verCosto ? [{ key: 'precioConIgv', label: 'Precio', tipo: 'dinero' } as ColRep, { key: 'precioUnit', label: 'Precio unit.', tipo: 'dinero' } as ColRep] : []),
           { key: 'manejaStock', label: 'Maneja stock' }, { key: 'estadoTxt', label: 'Estado' },
         ]}
