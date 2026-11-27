@@ -86,6 +86,7 @@ const PERMISOS: Array<[string, string, string]> = [
   ['conteo.aprobar', 'Almacén', 'Aprobar las diferencias del conteo físico'],
   // 067: venta de stock, factura de SUNAT y reclamos (mismas filas que la migración: el seed reinicia estas tablas).
   ['ventas.stock', 'Ventas', 'Registrar ventas de stock: pan ya producido, con precio por producto, directo a despacho'],
+  ['pedidos.ver_todos', 'Ventas', 'Ver pedidos y clientes de todos los vendedores (sin esto, cada vendedor ve solo su cartera)'],
   ['comprobantes.subir', 'Ventas', 'Subir la factura de SUNAT (PDF) a un pedido para que el cliente la descargue'],
   ['reclamos.ver', 'Reclamos', 'Ver los reclamos de los clientes y su seguimiento'],
   ['reclamos.gestionar', 'Reclamos', 'Atender reclamos: responder, cambiar su estado y resolverlos'],
@@ -255,6 +256,8 @@ async function main() {
         await c.query('INSERT INTO core.rol_permiso (rol_id, permiso_id) VALUES ($1,$2)', [id, p]);
       }
     }
+    // Cartera por vendedor (migración 072): todos ven todo salvo Vendedor y Cliente.
+    await c.query("INSERT INTO core.rol_permiso (rol_id, permiso_id) SELECT id, 'pedidos.ver_todos' FROM core.rol WHERE id NOT IN ('VENDEDOR','CLIENTE')");
 
     // -------------------------------------------------------- navegación
     for (const [id, grupo, etiqueta, ruta, icono, permiso, orden, grupoOrden] of NAV) {
