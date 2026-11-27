@@ -111,7 +111,7 @@ export function Produccion() {
       <Encabezado titulo="Tablero de producción" descripcion="Pedidos consolidados por fecha de entrega → órdenes de producción con requerimiento de insumos"
         acciones={<>
           <Boton icono="report" onClick={() => setPresu({ productoId: productosConReceta[0]?.id ?? '', cantidad: '', merma: '', res: null })}>Presupuesto</Boton>
-          {puedePlanificar && <Boton variant="primary" icono="plus" size="lg" onClick={() => setNueva({ productoId: productosConReceta[0]?.id ?? '', cantidad: '', entrega: manana(), criterio: 'LOTES_COMPLETOS' })}>Nueva orden</Boton>}
+          {puedePlanificar && <Boton variant="primary" icono="plus" size="lg" onClick={() => setNueva({ productoId: productosConReceta[0]?.id ?? '', cantidad: '', entrega: manana(), criterio: 'PROPORCIONAL' })}>Nueva orden</Boton>}
         </>} />
 
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
@@ -137,7 +137,7 @@ export function Produccion() {
                 <td className="t-right">{c.pedidos}</td><td className="t-right">{num2(c.pedido)}</td><td className="t-right">{num2(c.planificado)}</td>
                 <td className="t-right t-muted">{num2(c.stock)}</td>
                 <td className="t-right">{c.porPlanificar > 0 ? <strong>{num2(c.porPlanificar)}</strong> : <Insignia tono="ok">Cubierto</Insignia>}</td>
-                <td className="t-right">{puedePlanificar && c.porPlanificar > 0 && <Boton size="sm" onClick={() => setNueva({ productoId: c.productoId, cantidad: String(c.porPlanificar), entrega: c.fecha < hoy() ? hoy() : c.fecha, criterio: 'LOTES_COMPLETOS' })}>Planificar</Boton>}</td>
+                <td className="t-right">{puedePlanificar && c.porPlanificar > 0 && <Boton size="sm" onClick={() => setNueva({ productoId: c.productoId, cantidad: String(c.porPlanificar), entrega: c.fecha < hoy() ? hoy() : c.fecha, criterio: 'PROPORCIONAL' })}>Planificar</Boton>}</td>
               </tr>))}</tbody>
           </table></div>
         )}
@@ -209,8 +209,8 @@ export function Produccion() {
               <input className="field__input" type="date" min={hoy()} value={nueva.entrega} onChange={(e) => setNueva({ ...nueva, entrega: e.target.value })} /></label>
             <label className="field field--ancho"><span className="field__label">Criterio de preparación</span>
               <select className="field__input" value={nueva.criterio} onChange={(e) => setNueva({ ...nueva, criterio: e.target.value as 'PROPORCIONAL' })}>
-                <option value="LOTES_COMPLETOS">Lotes completos (se redondea hacia arriba)</option>
-                <option value="PROPORCIONAL">Proporcional (lotes fraccionados)</option>
+                <option value="PROPORCIONAL">Proporcional: sale exacto lo que pides (puede ser media masa)</option>
+                <option value="LOTES_COMPLETOS">Lotes completos: se redondea a masas enteras (puede sobrar pan)</option>
               </select></label>
             {req && (
               <div className="field--ancho">

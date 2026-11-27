@@ -241,7 +241,7 @@ class _NuevaOrdenState extends State<NuevaOrden> {
   String? _producto;
   final _cantidad = TextEditingController();
   DateTime _entrega = DateTime.now().add(const Duration(days: 1));
-  String _criterio = 'LOTES_COMPLETOS';
+  String _criterio = 'PROPORCIONAL';
   bool _enviando = false;
 
   Future<void> _crear() async {
@@ -284,9 +284,17 @@ class _NuevaOrdenState extends State<NuevaOrden> {
         TextField(controller: _cantidad, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Cantidad a producir')),
         const SizedBox(height: 12),
         SegmentedButton<String>(
-          segments: const [ButtonSegment(value: 'LOTES_COMPLETOS', label: Text('Lotes completos')), ButtonSegment(value: 'PROPORCIONAL', label: Text('Proporcional'))],
+          segments: const [ButtonSegment(value: 'PROPORCIONAL', label: Text('Proporcional')), ButtonSegment(value: 'LOTES_COMPLETOS', label: Text('Lotes completos'))],
           selected: {_criterio},
           onSelectionChanged: (v) => setState(() => _criterio = v.first),
+        ),
+        const SizedBox(height: 6),
+        // Cada receta rinde una cantidad fija por lote (masa); así se entiende qué pasa cuando no se completa.
+        Text(
+          _criterio == 'PROPORCIONAL'
+              ? 'Sale exacto lo que pides: si un lote da 100 panes y pides 150, se prepara 1.5 lotes y se piden los insumos para 150.'
+              : 'Se redondea a masas enteras: si un lote da 100 panes y pides 150, se preparan 2 lotes (200 panes) y se piden sus insumos.',
+          style: const TextStyle(fontSize: 12, color: TantaColors.textMuted),
         ),
         const SizedBox(height: 12),
         ListTile(
