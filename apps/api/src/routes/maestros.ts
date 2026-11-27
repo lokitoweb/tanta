@@ -6,6 +6,7 @@ import { auditar } from '../auditoria.js';
 import { guardarImagen } from './sistema.js';
 import { invalidar } from '../cache.js';
 import { preciosCliente } from '../precios.js';
+import { clienteVisible, vendedorDe } from '../cartera.js';
 
 /**
  * Maestros administrables (PDF §3.3): categorías, productos, insumos, recetas,
@@ -650,7 +651,7 @@ export async function rutasMaestros(app: FastifyInstance) {
              c.email, c.direccion, c.lista_precio, c.dias_credito, c.limite_credito, c.estado, c.condicion_pago, coalesce(c.vendedor_id::text, '') vendedor_id,
              coalesce((SELECT sum(saldo) FROM core.cuenta_por_cobrar x WHERE x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')), 0) saldo,
              EXISTS (SELECT 1 FROM core.usuario u WHERE u.cliente_id = c.id) usa_app
-      FROM core.cliente c ORDER BY c.nombre`);
+      FROM core.cliente c WHERE ${clienteVisible('c', '$1')} ORDER BY c.nombre`, [vendedorDe(req.usuario!)]);
     return filas.map((f) => ({
       id: f.id, codigo: f.codigo, nombre: f.nombre, contacto: f.contacto, docTipo: f.doc_tipo, docNumero: f.doc_numero, telefono: f.telefono, email: f.email,
       direccion: f.direccion, listaPrecio: f.lista_precio, diasCredito: num(f.dias_credito), limiteCredito: num(f.limite_credito),
@@ -667,6 +668,9 @@ export async function rutasMaestros(app: FastifyInstance) {
       return reply.code(422).send(error(422, 'LISTA_INEXISTENTE', 'La lista de precios no existe o está inactiva.'));
     }
     const cond = d.condicionPago ?? (d.diasCredito > 0 || d.limiteCredito > 0 ? 'CREDITO' : 'CONTADO');
+    // El cliente que crea un vendedor queda en su cartera.
+    const vendedor = vendedorDe(req.usuario!);
+    if (vendedor) d.vendedorId = vendedor;
     const f = await uno<{ id: string; codigo: string }>(
       `INSERT INTO core.cliente (codigo, nombre, doc_tipo, doc_numero, telefono, email, direccion, lista_precio, dias_credito, limite_credito, estado, condicion_pago, vendedor_id, contacto)
        VALUES ('CLI-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.cliente WHERE codigo ~ '^CLI-[0-9]+$')::text, 4, '0'),
@@ -687,6 +691,8 @@ export async function rutasMaestros(app: FastifyInstance) {
       return reply.code(422).send(error(422, 'LISTA_INEXISTENTE', 'La lista de precios no existe o está inactiva.'));
     }
     const cond = d.condicionPago ?? (d.diasCredito > 0 || d.limiteCredito > 0 ? 'CREDITO' : 'CONTADO');
+    // Solo quien ve todas las carteras (Gerencia/Administración) cambia el vendedor asignado.
+    if (vendedorDe(req.usuario!)) d.vendedorId = (await uno<{ v: string | null }>('SELECT vendedor_id::text v FROM core.cliente WHERE id::text = $1', [id]))?.v ?? '';
     const r = await q(`UPDATE core.cliente SET nombre=$2, doc_tipo=$3, doc_numero=NULLIF($4,''), telefono=NULLIF($5,''), email=$6, direccion=$7,
                          lista_precio=$8, dias_credito=$9, limite_credito=$10, estado=$11,
                          condicion_pago=$12, vendedor_id=NULLIF($13,'')::uuid, contacto=$14 WHERE id=$1 RETURNING id`,

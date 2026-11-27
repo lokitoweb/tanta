@@ -8,6 +8,7 @@ import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
 import { moverCaja, cuentaEfectivo } from './cajaGrande.js';
 import { guardarImagen } from './sistema.js';
+import { enCartera } from '../cartera.js';
 
 /**
  * Cobranza y ventas del INF-TEC-001 (M07/M08): recibo aplicado a varios documentos (RN-34),
@@ -447,6 +448,7 @@ export async function rutasCobranza(app: FastifyInstance) {
     const clienteId = yo?.cliente_id ?? (pedido.success ? pedido.data.clienteId : undefined);
     if (!clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige el cliente.'));
     if (!yo?.cliente_id && !req.usuario!.permisos.has('cobranza.ver')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso cobranza.ver.'));
+    if (!yo?.cliente_id && !(await enCartera(req.usuario!, 'cliente', clienteId))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe o no es de tu cartera.'));
     const cli = await uno<Record<string, string>>('SELECT nombre, doc_tipo, doc_numero, condicion_pago, limite_credito, dias_credito FROM core.cliente WHERE id = $1', [clienteId]);
     if (!cli) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
     const documentos = await q<Record<string, string>>(`

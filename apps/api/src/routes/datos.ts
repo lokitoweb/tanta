@@ -3,6 +3,7 @@ import { q, uno, num } from '../db.js';
 import { autenticar, exigir } from '../seguridad.js';
 import { recordar } from '../cache.js';
 import { preciosCliente, escalar } from '../precios.js';
+import { pedidoVisible, vendedorDe } from '../cartera.js';
 
 /**
  * GET /datos — el panel completo del rol, agregado en PostgreSQL.
@@ -144,13 +145,13 @@ export async function rutasDatos(app: FastifyInstance) {
         FROM core.pedido ORDER BY creado_en DESC LIMIT 40`)),
 
       agg('6', () => q<Record<string, string>>(`
-        SELECT c.id, c.nombre, c.doc_tipo, c.lista_precio, c.limite_credito,
+        SELECT c.id, c.nombre, c.doc_tipo, c.lista_precio, c.limite_credito, c.vendedor_id,
                coalesce(sum(x.saldo),0) AS saldo,
                coalesce(sum(CASE WHEN x.vence_en < current_date THEN x.saldo ELSE 0 END),0) AS vencido,
                coalesce(avg(CASE WHEN x.saldo > 0 THEN current_date - x.vence_en END),0) AS dias_promedio
         FROM core.cliente c
         LEFT JOIN core.cuenta_por_cobrar x ON x.cliente_id = c.id AND x.estado IN ('PENDIENTE','PARCIAL')
-        GROUP BY c.id, c.nombre, c.doc_tipo, c.lista_precio, c.limite_credito
+        GROUP BY c.id, c.nombre, c.doc_tipo, c.lista_precio, c.limite_credito, c.vendedor_id
         ORDER BY saldo DESC`)),
 
       agg('7', () => q<Record<string, string>>(`
@@ -340,6 +341,7 @@ export async function rutasDatos(app: FastifyInstance) {
         id: cl.id, nombre: cl.nombre, docTipo: cl.doc_tipo, listaPrecio: cl.lista_precio,
         limiteCredito: num(cl.limite_credito), saldo: num(cl.saldo), vencido: num(cl.vencido),
         diasPromedio: Math.max(0, Math.round(num(cl.dias_promedio))),
+        vendedorId: cl.vendedor_id ?? null,
       })),
       movimientos: movimientos.slice().reverse().map((m) => ({
         fecha: m.fecha.slice(0, 16).replace('T', ' '),
@@ -411,6 +413,16 @@ export async function rutasDatos(app: FastifyInstance) {
       p.clientes = puede('cobranza.ver') ? (p.clientes as Array<{ saldo: number }>).filter((c) => c.saldo > 0) : [];
     }
     if (!puede('pedidos.ver')) p.pedidos = [];
+    // Cartera por vendedor: sin «pedidos.ver_todos» solo sus clientes (y los sin vendedor) y sus pedidos.
+    const vendedor = vendedorDe(u);
+    if (vendedor) {
+      p.clientes = (p.clientes as Array<{ vendedorId: string | null }>).filter((c) => !c.vendedorId || c.vendedorId === vendedor);
+      if (puede('pedidos.ver')) {
+        p.pedidos = (await q<Record<string, string>>(`SELECT p.codigo, p.cliente, p.estado, p.total, p.fecha_entrega::text AS fecha_entrega, p.vendedor
+          FROM core.pedido p JOIN core.cliente c ON c.id = p.cliente_id WHERE ${pedidoVisible('p', 'c', '$1')} ORDER BY p.creado_en DESC LIMIT 40`, [vendedor]))
+          .map((pe) => ({ codigo: pe.codigo, cliente: pe.cliente, estado: pe.estado, total: num(pe.total), fechaEntrega: pe.fecha_entrega, vendedor: pe.vendedor }));
+      }
+    }
     if (!puede('produccion.ver')) p.ops = [];
     if (!puede('recetas.ver')) p.recetas = [];
     if (!puede('inventario.ver')) {

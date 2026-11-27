@@ -11,6 +11,7 @@ import { LineaPago, emitirRecibo, detalleRecibo } from './cobranza.js';
 import { falloImagen, ImagenProducto } from './maestros.js';
 import { preciosCliente, escalar } from '../precios.js';
 import { liberarPromos, reservarListo } from './flujo.js';
+import { clienteVisible, enCartera, vendedorDe } from '../cartera.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
 async function conIdempotencia<T>(
@@ -864,8 +865,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
        FROM core.cuenta_por_cobrar x
        JOIN core.cliente c ON c.id = x.cliente_id
        LEFT JOIN core.venta v ON v.id = x.venta_id
-       WHERE x.estado IN ('PENDIENTE','PARCIAL') AND x.saldo > 0
-       ORDER BY x.vence_en`,
+       WHERE x.estado IN ('PENDIENTE','PARCIAL') AND x.saldo > 0 AND ${clienteVisible('c', '$1')}
+       ORDER BY x.vence_en`, [vendedorDe(req.usuario!)],
     );
     return reply.send(filas.map((f) => ({
       id: f.id,
@@ -927,7 +928,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     for (const codigo of [...new Set(p.data.codigos)]) {
       const r = await tx(async (c) => {
         const ped = (await c.query<{ id: string; estado: string; cliente: string }>('SELECT id, estado, cliente FROM core.pedido WHERE codigo = $1 FOR UPDATE', [codigo])).rows[0];
-        if (!ped) return { error: 'No existe.' };
+        if (!ped || !(await enCartera(req.usuario!, 'pedido', codigo))) return { error: 'No existe.' };
         if (!TRANSICIONES[ped.estado]?.includes('CANCELADO')) return { error: `Está ${ped.estado.replace('_', ' ').toLowerCase()}: ya no se cancela.` };
         await c.query("UPDATE core.pedido SET estado = 'CANCELADO', motivo = $2 WHERE id = $1", [ped.id, p.data.motivo]);
         await liberarAlAnular(c, ped.id, ped.estado);

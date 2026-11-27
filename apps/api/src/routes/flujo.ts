@@ -8,6 +8,7 @@ import { avisar } from './notificaciones.js';
 
 import { presentacionesDe, congelarReceta } from './operaciones.js';
 import { preciosCliente, escalar } from '../precios.js';
+import { enCartera, pedidoVisible, vendedorDe } from '../cartera.js';
 
 /**
  * Flujo operativo del PDF (Fig. 2): el cliente registra su pedido → Producción consolida y
@@ -240,6 +241,7 @@ export async function rutasFlujo(app: FastifyInstance) {
     const yo = await uno<{ cliente_id: string | null }>('SELECT cliente_id FROM core.usuario WHERE id = $1', [req.usuario!.id]);
     const clienteId = yo?.cliente_id ?? d.clienteId;
     if (!clienteId) return reply.code(422).send(error(422, 'SIN_CLIENTE', 'Elige el cliente del pedido.'));
+    if (!yo?.cliente_id && !(await enCartera(req.usuario!, 'cliente', clienteId))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe o no es de tu cartera.'));
     const fechaPedida = yo?.cliente_id ? undefined : d.fechaEntrega;
     if (fechaPedida && fechaPedida < hoyLima()) return reply.code(422).send(error(422, 'FECHA_PASADA', 'La fecha de entrega no puede ser anterior a hoy.'));
 
@@ -447,9 +449,9 @@ export async function rutasFlujo(app: FastifyInstance) {
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
                'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion, 'promocionId', d.promocion_id, 'precioLista', d.precio_lista) ORDER BY d.id)
                       FILTER (WHERE d.id IS NOT NULL), '[]') items
-      FROM core.pedido p LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
-      WHERE ($1::uuid IS NULL OR p.cliente_id = $1)
-      GROUP BY p.id ORDER BY p.creado_en DESC LIMIT 200`, [yo?.cliente_id ?? null]);
+      FROM core.pedido p JOIN core.cliente cl ON cl.id = p.cliente_id LEFT JOIN core.pedido_detalle d ON d.pedido_id = p.id
+      WHERE ($1::uuid IS NULL OR p.cliente_id = $1) AND ${pedidoVisible('p', 'cl', '$2')}
+      GROUP BY p.id ORDER BY p.creado_en DESC LIMIT 200`, [yo?.cliente_id ?? null, yo?.cliente_id ? null : vendedorDe(req.usuario!)]);
     return filas.map((f) => ({ ...f, total: num(f.total), porCobrar: f.porCobrar === null ? null : num(f.porCobrar), items: (f.items as unknown as Array<Record<string, unknown>>).map((i) => ({ ...i, cantidad: num(i.cantidad), precio: num(i.precio), despachado: num(i.despachado as string),
       cantidadPresentacion: i.cantidadPresentacion === null ? null : num(i.cantidadPresentacion as string), precioLista: i.precioLista == null ? null : num(i.precioLista as string) })) }));
   });

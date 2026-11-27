@@ -23,6 +23,7 @@ import { rutasCajaGrande } from './routes/cajaGrande.js';
 import { rutasCatalogos } from './routes/catalogos.js';
 import { rutasFlujo } from './routes/flujo.js';
 import { rutasReclamos } from './routes/reclamos.js';
+import { protegerCartera } from './cartera.js';
 
 const PUERTO = Number(process.env.PORT ?? 3001);
 const ORIGENES = (process.env.CORS_ORIGINS ??
@@ -133,6 +134,8 @@ export async function construir() {
       };
     });
 
+    // Antes de las rutas: cada /pedidos/:codigo y /clientes/:id respeta la cartera del vendedor.
+    protegerCartera(api);
     await api.register(rutasAuth);
     await api.register(rutasDatos);
     await api.register(rutasOperaciones);

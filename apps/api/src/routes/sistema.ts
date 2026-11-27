@@ -702,6 +702,8 @@ export async function rutasSistema(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Datos del dispositivo inválidos.'));
     const d = p.data;
+    // Si en este teléfono entró antes otra cuenta (p. ej. un cliente), deja de recibir sus avisos.
+    await q('DELETE FROM core.dispositivo WHERE usuario_id <> $1 AND (instalacion = $2 OR token_push = $3)', [req.usuario!.id, d.instalacion, d.tokenPush ?? null]);
     await q(`INSERT INTO core.dispositivo (usuario_id, instalacion, plataforma, version_app, token_push)
              VALUES ($1,$2,$3,$4,$5)
              ON CONFLICT (usuario_id, instalacion) DO UPDATE SET plataforma = EXCLUDED.plataforma,

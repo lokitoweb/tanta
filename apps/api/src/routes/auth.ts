@@ -447,7 +447,12 @@ export async function rutasAuth(app: FastifyInstance) {
 
   app.post('/auth/logout', { preHandler: autenticar }, async (req, reply) => {
     const enCookie = (req as { cookies?: Record<string, string> }).cookies?.[COOKIE];
-    const enCuerpo = (req.body as { refreshToken?: string } | undefined)?.refreshToken;
+    const cuerpo = req.body as { refreshToken?: string; instalacion?: string } | undefined;
+    const enCuerpo = cuerpo?.refreshToken;
+    // Al salir, ese teléfono deja de recibir los avisos de esta cuenta.
+    if (typeof cuerpo?.instalacion === 'string' && cuerpo.instalacion.length <= 64) {
+      await q('DELETE FROM core.dispositivo WHERE usuario_id = $1 AND instalacion = $2', [req.usuario!.id, cuerpo.instalacion]);
+    }
     const token = enCookie ?? enCuerpo;
     if (token) {
       await q('UPDATE core.refresh_token SET revocado_en = now() WHERE token_hash = $1', [sha256(token)]);

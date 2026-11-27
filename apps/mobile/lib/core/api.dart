@@ -101,7 +101,7 @@ class Api {
     if (_acceso != null && refresco != null) {
       try {
         await http.post(Uri.parse('$base/auth/logout'), headers: {..._cabeceras(conCuerpo: true), 'Content-Type': 'application/json'},
-            body: jsonEncode({'refreshToken': refresco})).timeout(const Duration(seconds: 5));
+            body: jsonEncode({'refreshToken': refresco, 'instalacion': await instalacion()})).timeout(const Duration(seconds: 5));
       } catch (_) {/* sin red: igual se sale; el refresco caduca solo */}
     }
     await cerrarSesion();
