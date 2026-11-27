@@ -59,7 +59,10 @@ export async function rutasCajaGrande(app: FastifyInstance) {
         m.creado_en::text creado_en, u.nombre usuario, m.motivo_anulacion
       FROM core.movimiento_caja m JOIN core.cuenta_caja k ON k.codigo = m.cuenta JOIN core.usuario u ON u.id = m.usuario_id
       WHERE ($1::text IS NULL OR m.cuenta = $1) ORDER BY m.creado_en DESC, m.codigo DESC LIMIT $2`, [p.data.cuenta ?? null, p.data.limite]);
+    // Rendiciones de vendedores que caja aún no recibe: no entran a caja grande hasta que alguien las recibe en Cobranza.
+    const pend = (await q<{ n: string; total: string }>(`SELECT count(*) n, coalesce(sum(total), 0) total FROM core.rendicion_cobranza WHERE estado = 'PENDIENTE'`))[0];
     return {
+      porRecibir: { cantidad: num(pend.n), total: num(pend.total) },
       cuentas: cuentas.map((k) => ({ codigo: k.codigo, nombre: k.nombre, tipo: k.tipo, banco: k.banco_nombre, numero: k.numero, activo: Boolean(k.activo), saldo: num(k.saldo) })),
       total: dos(cuentas.filter((k) => k.activo).reduce((t, k) => t + num(k.saldo), 0)),
       movimientos: movimientos.map((m) => ({ codigo: m.codigo, cuenta: m.cuenta, cuentaNombre: m.cuenta_nombre, tipo: m.tipo, monto: num(m.monto), concepto: m.concepto,

@@ -39,7 +39,10 @@ before(async () => {
 });
 
 test('permisos: el Gerente ve la caja grande pero no la mueve; el Vendedor no la ve', async () => {
-  assert.equal((await api(ger, 'GET', '/caja-grande')).s, 200);
+  const vista = await api(ger, 'GET', '/caja-grande');
+  assert.equal(vista.s, 200);
+  // Rendiciones por recibir: caja grande avisa cuánto falta recibir en Cobranza.
+  assert.equal(typeof vista.b.porRecibir.cantidad, 'number');
   assert.equal((await api(ger, 'POST', '/caja-grande/movimientos', { tipo: 'SALDO_INICIAL', cuenta: CTA, monto: 10 })).s, 403);
   assert.equal((await api(ven, 'GET', '/caja-grande')).s, 403);
 });

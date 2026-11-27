@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
 import { money } from '@/core/format';
@@ -8,7 +9,7 @@ import { Boton, Encabezado, Insignia, Kpi, Tarjeta, TablaEsqueleto, Vacio } from
 
 interface Cuenta { codigo: string; nombre: string; tipo: 'EFECTIVO' | 'BANCO' | 'BILLETERA'; banco: string | null; numero: string | null; activo: boolean; saldo: number }
 interface Movimiento { codigo: string; cuenta: string; cuentaNombre: string; tipo: string; monto: number; concepto: string; referencia: string | null; estado: string; fecha: string; usuario: string; motivoAnulacion: string | null }
-interface Datos { cuentas: Cuenta[]; total: number; movimientos: Movimiento[] }
+interface Datos { cuentas: Cuenta[]; total: number; movimientos: Movimiento[]; porRecibir?: { cantidad: number; total: number } }
 type Form = { tipo: 'DEPOSITO' | 'SALDO_INICIAL' | 'AJUSTE'; cuenta: string; cuentaDestino: string; monto: string; signo: 1 | -1; concepto: string; nroOperacion: string };
 
 const TIPO: Record<string, string> = {
@@ -31,6 +32,7 @@ export function CajaGrande() {
   const [cargaError, setCargaError] = useState<string | null>(null);
   const [form, setForm] = useState<Form | null>(null);
   const [anular, setAnular] = useState<{ codigo: string; motivo: string } | null>(null);
+  const navegar = useNavigate();
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
@@ -97,6 +99,13 @@ export function CajaGrande() {
           </button>
         ))}
       </div>
+      {!!datos?.porRecibir?.cantidad && (
+        <div className="aviso aviso--info" role="status"><span className="aviso__icono">!</span><div>
+          <p>{datos.porRecibir.cantidad === 1 ? 'Hay 1 rendición' : `Hay ${datos.porRecibir.cantidad} rendiciones`} de vendedores por recibir ({money(datos.porRecibir.total)}).
+            Entra a caja grande cuando se recibe en Cobranza → Cierre del día y caja.</p>
+          <Boton size="sm" onClick={() => navegar('/ventas/cobranza')}>Ir a recibir</Boton>
+        </div></div>
+      )}
       {gestiona && activas.some((k) => sinMovimientos(k.codigo)) && (
         <div className="aviso aviso--info" role="status"><span className="aviso__icono">i</span><div>
           <p>Hay cuentas sin saldo inicial. Registra cuánto dinero tiene hoy cada una para empezar a llevar la caja grande.</p>
