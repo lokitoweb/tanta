@@ -257,7 +257,7 @@ async function main() {
       }
     }
     // Cartera por vendedor (migración 072): todos ven todo salvo Vendedor y Cliente.
-    await c.query("INSERT INTO core.rol_permiso (rol_id, permiso_id) SELECT id, 'pedidos.ver_todos' FROM core.rol WHERE id NOT IN ('VENDEDOR','CLIENTE')");
+    await c.query("INSERT INTO core.rol_permiso (rol_id, permiso_id) SELECT id, 'pedidos.ver_todos' FROM core.rol WHERE id NOT IN ('VENDEDOR','CLIENTE') ON CONFLICT DO NOTHING");
 
     // -------------------------------------------------------- navegación
     for (const [id, grupo, etiqueta, ruta, icono, permiso, orden, grupoOrden] of NAV) {
