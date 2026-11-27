@@ -46,13 +46,13 @@ export function Requisiciones() {
 
   return (
     <>
-      <Encabezado titulo="Requisiciones de producción" descripcion="Cada orden de producción pide sus insumos aquí. El stock baja cuando confirmas la entrega, no cuando se crea la orden." />
+      <Encabezado titulo="Requisiciones de producción" descripcion="Pedido de insumos que Producción hace a Almacén. Solo lo generan las órdenes creadas con «Nueva orden»: el stock baja cuando Almacén confirma la entrega. Las órdenes de la Hoja de producción no pasan por aquí: sus insumos se descuentan solos al cerrar la producción (se ven en el kárdex como «Consumo OP»)." />
       {aviso && <div className={`aviso aviso--${aviso.tono}`} role="status"><span className="aviso__icono">{aviso.tono === 'ok' ? '✓' : '!'}</span><div><p>{aviso.texto}</p></div></div>}
       <Segmentado valor={vista} onChange={setVista} opciones={[{ id: 'PENDIENTES', etiqueta: 'Por atender' }, { id: 'TODAS', etiqueta: 'Todas' }]} />
       <Tarjeta padding="none">
         {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={reintentar} />
           : lista === null ? <TablaEsqueleto />
-          : lista.length === 0 ? <Vacio titulo="Sin requisiciones por atender" detalle="Aparecen cuando Producción crea una orden." icono="clipboard" />
+          : lista.length === 0 ? <Vacio titulo="Sin requisiciones por atender" detalle="Aparecen cuando Producción crea una orden con «Nueva orden». Las de la Hoja de producción no generan requisición." icono="clipboard" />
             : (
               <div className="table-wrap"><table className="table">
                 <thead><tr><th>Requisición</th><th>Orden</th><th>Producto</th><th className="t-right">Lotes</th><th>Entrega</th><th className="t-right">Insumos</th><th className="t-right">Estado</th></tr></thead>
