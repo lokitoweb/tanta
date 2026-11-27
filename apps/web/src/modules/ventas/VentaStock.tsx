@@ -46,11 +46,18 @@ export function VentaStock({ onCerrar }: { onCerrar: (codigo?: string) => void }
 
   const cargarAprobaciones = () => api<Aprobacion[]>('/descuentos/solicitudes').then(setAprobaciones).catch(() => {});
   useEffect(() => {
-    api<{ descuentoMaximo: number; productos: Disponible[] }>('/ventas-stock/productos').then(setDatos).catch((e) => setError(e.message));
     api<{ clientes: Array<{ id: string; nombre: string }> }>('/reportes-filtros').then((r) => { setClientes(r.clientes); setClienteId(r.clientes[0]?.id ?? ''); }).catch((e) => setError(e.message));
     void cargarAprobaciones();
   }, []);
   useEffect(() => { if (!comprobante && comprobantesVenta[0]) setComprobante(comprobantesVenta[0].codigo); }, [comprobantesVenta, comprobante]);
+  // Precios según la lista del cliente elegido: al cambiar de cliente, las líneas sin oferta toman su precio.
+  useEffect(() => {
+    if (!clienteId) return;
+    api<{ descuentoMaximo: number; productos: Disponible[] }>(`/ventas-stock/productos?clienteId=${clienteId}`).then((r) => {
+      setDatos(r);
+      setLineas((ls) => ls.map((l) => { const p = r.productos.find((x) => x.id === l.productoId); return l.promocionId || !p ? l : { ...l, precio: String(p.precio) }; }));
+    }).catch((e) => setError(e.message));
+  }, [clienteId]);
   useEffect(() => {
     if (!clienteId) return;
     api<{ direcciones: Direccion[] }>(`/clientes/${clienteId}/direcciones`).then((r) => { setDirecciones(r.direcciones); setDireccion(r.direcciones[0]?.direccion ?? ''); }).catch(() => setDirecciones([]));

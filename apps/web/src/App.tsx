@@ -10,6 +10,7 @@ import { Conteos } from '@/modules/almacen/Conteos';
 import { Deudas } from '@/modules/almacen/Deudas';
 import { PagosCostos } from '@/modules/almacen/PagosCostos';
 import { Catalogos } from '@/modules/maestros/Catalogos';
+import { ListasPrecio } from '@/modules/maestros/ListasPrecio';
 import { CajaChica } from '@/modules/ventas/CajaChica';
 import { CajaGrande } from '@/modules/ventas/CajaGrande';
 import { Auditoria } from '@/modules/sistema/Auditoria';
@@ -64,6 +65,7 @@ export function App() {
         <Route path="/caja-grande" element={<Gate permiso="caja.grande.ver" siNo={<SinAcceso />}><CajaGrande /></Gate>} />
         <Route path="/almacen/conteos" element={<Gate permiso="inventario.ver" siNo={<SinAcceso />}><Conteos /></Gate>} />
         <Route path="/maestros/catalogos" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Catalogos /></Gate>} />
+        <Route path="/maestros/listas-precio" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><ListasPrecio /></Gate>} />
         <Route path="/maestros/almacenes" element={<Gate permiso="maestros.editar" siNo={<SinAcceso />}><Almacenes /></Gate>} />
         <Route path="/maestros/proveedores" element={<Gate permiso="proveedores.gestionar" siNo={<SinAcceso />}><Proveedores /></Gate>} />
 

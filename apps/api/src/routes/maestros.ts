@@ -5,6 +5,7 @@ import { autenticar, exigir, error } from '../seguridad.js';
 import { auditar } from '../auditoria.js';
 import { guardarImagen } from './sistema.js';
 import { invalidar } from '../cache.js';
+import { preciosCliente } from '../precios.js';
 
 /**
  * Maestros administrables (PDF §3.3): categorías, productos, insumos, recetas,
@@ -635,7 +636,7 @@ export async function rutasMaestros(app: FastifyInstance) {
   const Cliente = z.object({
     nombre: texto(2, 160), contacto: z.string().trim().max(120).default(''), docTipo: z.enum(['DNI', 'RUC', 'CE']), docNumero: z.string().trim().regex(/^[0-9A-Za-z]{0,15}$/, 'Solo letras y números'),
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido'), email: z.union([z.literal(''), z.string().trim().email().max(160)]),
-    direccion: z.string().trim().max(200), listaPrecio: z.enum(['MINORISTA', 'MAYORISTA', 'CORPORATIVO']),
+    direccion: z.string().trim().max(200), listaPrecio: z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{2,40}$/, 'Elige una lista de precios'),
     diasCredito: z.number().int().min(0).max(120), limiteCredito: dinero, estado: z.enum(['ACTIVO', 'INACTIVO']).default('ACTIVO'),
     // COB-03 / MAE-08: si no se indica, es al crédito quien tiene plazo o línea.
     condicionPago: z.enum(['CONTADO', 'CREDITO']).optional(), vendedorId: z.union([z.literal(''), z.string().uuid()]).default(''),
@@ -662,6 +663,9 @@ export async function rutasMaestros(app: FastifyInstance) {
     const p = Cliente.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
     const d = p.data;
+    if (!(await uno('SELECT 1 FROM core.lista_precio WHERE codigo = $1 AND activa', [d.listaPrecio]))) {
+      return reply.code(422).send(error(422, 'LISTA_INEXISTENTE', 'La lista de precios no existe o está inactiva.'));
+    }
     const cond = d.condicionPago ?? (d.diasCredito > 0 || d.limiteCredito > 0 ? 'CREDITO' : 'CONTADO');
     const f = await uno<{ id: string; codigo: string }>(
       `INSERT INTO core.cliente (codigo, nombre, doc_tipo, doc_numero, telefono, email, direccion, lista_precio, dias_credito, limite_credito, estado, condicion_pago, vendedor_id, contacto)
@@ -678,6 +682,10 @@ export async function rutasMaestros(app: FastifyInstance) {
     const p = Cliente.safeParse(req.body);
     if (!p.success) return invalido(reply, p.error);
     const d = p.data;
+    // Un cliente que ya está en una lista inactiva puede guardarse sin cambiarla.
+    if (!(await uno('SELECT 1 FROM core.lista_precio l WHERE l.codigo = $1 AND (l.activa OR EXISTS (SELECT 1 FROM core.cliente c WHERE c.id::text = $2 AND c.lista_precio = l.codigo))', [d.listaPrecio, id]))) {
+      return reply.code(422).send(error(422, 'LISTA_INEXISTENTE', 'La lista de precios no existe o está inactiva.'));
+    }
     const cond = d.condicionPago ?? (d.diasCredito > 0 || d.limiteCredito > 0 ? 'CREDITO' : 'CONTADO');
     const r = await q(`UPDATE core.cliente SET nombre=$2, doc_tipo=$3, doc_numero=NULLIF($4,''), telefono=NULLIF($5,''), email=$6, direccion=$7,
                          lista_precio=$8, dias_credito=$9, limite_credito=$10, estado=$11,
@@ -686,6 +694,115 @@ export async function rutasMaestros(app: FastifyInstance) {
     if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
     await auditar({ ...actor(req), accion: 'CLIENTE_EDITADO', entidad: 'cliente', entidadId: id, detalle: { nombre: d.nombre, limiteCredito: d.limiteCredito, estado: d.estado }, ip: req.ip });
     return { id, ...d };
+  });
+
+  /* ------------------------------------------------------ listas de precios */
+  // Cada lista tiene su nombre y un precio por producto; los clientes se asignan en su ficha.
+  // Lo que no está en la lista se cobra al precio del catálogo; la oferta vale para todos.
+  // Personal que vende o arma pedidos (no un usuario Cliente: él ve sus precios en el catálogo y nada más).
+  const puedeVerListas = (req: FastifyRequest) => req.usuario?.rol !== 'CLIENTE' && ['maestros.editar', 'clientes.gestionar', 'pedidos.crear', 'pedidos.gestionar', 'ventas.stock', 'ventas.registrar']
+    .some((x) => req.usuario?.permisos.has(x));
+
+  app.get('/listas-precio', { preHandler: autenticar }, async (req, reply) => {
+    if (!puedeVerListas(req)) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso para ver las listas de precios.'));
+    const filas = await q<Record<string, string>>(`
+      SELECT l.codigo, l.nombre, l.descripcion, l.activa, l.orden,
+             (SELECT count(*) FROM core.lista_precio_item i WHERE i.lista_codigo = l.codigo) productos,
+             (SELECT count(*) FROM core.cliente c WHERE c.lista_precio = l.codigo) clientes
+      FROM core.lista_precio l ORDER BY l.orden, l.nombre`);
+    return filas.map((f) => ({ codigo: f.codigo, nombre: f.nombre, descripcion: f.descripcion, activa: Boolean(f.activa), orden: Number(f.orden),
+      productos: Number(f.productos), clientes: Number(f.clientes) }));
+  });
+
+  app.get('/listas-precio/:codigo', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const { codigo } = req.params as { codigo: string };
+    const l = await uno<Record<string, string>>('SELECT codigo, nombre, descripcion, activa, orden FROM core.lista_precio WHERE codigo = $1', [codigo]);
+    if (!l) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La lista no existe.'));
+    const precios = await q<{ producto_id: string; precio_con_igv: string }>('SELECT producto_id, precio_con_igv FROM core.lista_precio_item WHERE lista_codigo = $1', [codigo]);
+    const clientes = await q<{ id: string; nombre: string }>('SELECT id, nombre FROM core.cliente WHERE lista_precio = $1 ORDER BY nombre', [codigo]);
+    return { codigo: l.codigo, nombre: l.nombre, descripcion: l.descripcion, activa: Boolean(l.activa), orden: Number(l.orden),
+      precios: precios.map((x) => ({ productoId: x.producto_id, precio: num(x.precio_con_igv) })), clientes };
+  });
+
+  const Lista = z.object({
+    nombre: texto(2, 60), descripcion: z.string().trim().max(200).default(''), activa: z.boolean().default(true), orden: z.number().int().min(0).max(999).default(10),
+    precios: z.array(z.object({ productoId: z.string().uuid(), precio: z.number().positive().max(100_000) })).max(2000)
+      .refine((xs) => new Set(xs.map((x) => x.productoId)).size === xs.length, 'Cada producto va una sola vez.').default([]),
+  });
+  /** Guarda los precios de la lista: reemplaza los anteriores (lo que se quita vuelve al precio del catálogo). */
+  const guardarPrecios = async (c: import('pg').PoolClient, codigo: string, precios: Array<{ productoId: string; precio: number }>) => {
+    await c.query('DELETE FROM core.lista_precio_item WHERE lista_codigo = $1', [codigo]);
+    if (!precios.length) return;
+    const r = await c.query(`INSERT INTO core.lista_precio_item (lista_codigo, producto_id, precio_con_igv)
+      SELECT $1, x.p, x.v FROM unnest($2::uuid[], $3::numeric[]) AS x(p, v)
+      JOIN core.producto p ON p.id = x.p AND p.insumo_id IS NULL`, [codigo, precios.map((x) => x.productoId), precios.map((x) => x.precio.toFixed(4))]);
+    if (r.rowCount !== precios.length) throw Object.assign(new Error('Hay un producto que no existe o no se vende.'), { status: 422 });
+  };
+
+  app.post('/listas-precio', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const p = Lista.safeParse(req.body);
+    if (!p.success) return invalido(reply, p.error);
+    const d = p.data;
+    // El código nace del nombre (sin tildes ni espacios) y no cambia: es lo que guarda la ficha del cliente.
+    const base = d.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 34) || 'LISTA';
+    if (await uno('SELECT 1 FROM core.lista_precio WHERE lower(nombre) = lower($1)', [d.nombre])) {
+      return reply.code(409).send(error(409, 'LISTA_DUPLICADA', 'Ya existe una lista con ese nombre.'));
+    }
+    try {
+      const codigo = await tx(async (c) => {
+        let codigo = base.length >= 2 ? base : `${base}_1`;
+        for (let k = 2; (await c.query('SELECT 1 FROM core.lista_precio WHERE codigo = $1', [codigo])).rowCount; k++) codigo = `${base}_${k}`;
+        await c.query('INSERT INTO core.lista_precio (codigo, nombre, descripcion, activa, orden) VALUES ($1,$2,$3,$4,$5)', [codigo, d.nombre, d.descripcion, d.activa, d.orden]);
+        await guardarPrecios(c, codigo, d.precios);
+        return codigo;
+      });
+      await auditar({ ...actor(req), accion: 'LISTA_PRECIO_CREADA', entidad: 'lista_precio', entidadId: codigo, detalle: { nombre: d.nombre, productos: d.precios.length }, ip: req.ip });
+      return reply.code(201).send({ codigo, ...d });
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'LISTA_INVALIDA', err.message));
+    }
+  });
+
+  app.put('/listas-precio/:codigo', { preHandler: autenticar }, async (req, reply) => {
+    if (!exigir(req, reply, 'maestros.editar')) return;
+    const { codigo } = req.params as { codigo: string };
+    const p = Lista.safeParse(req.body);
+    if (!p.success) return invalido(reply, p.error);
+    const d = p.data;
+    if (await uno('SELECT 1 FROM core.lista_precio WHERE lower(nombre) = lower($1) AND codigo <> $2', [d.nombre, codigo])) {
+      return reply.code(409).send(error(409, 'LISTA_DUPLICADA', 'Ya existe una lista con ese nombre.'));
+    }
+    try {
+      const antes = await tx(async (c) => {
+        const a = (await c.query<{ nombre: string; n: string }>(`SELECT nombre, (SELECT count(*) FROM core.lista_precio_item WHERE lista_codigo = $1) n
+          FROM core.lista_precio WHERE codigo = $1 FOR UPDATE`, [codigo])).rows[0];
+        if (!a) throw Object.assign(new Error('La lista no existe.'), { status: 404 });
+        await c.query('UPDATE core.lista_precio SET nombre = $2, descripcion = $3, activa = $4, orden = $5 WHERE codigo = $1', [codigo, d.nombre, d.descripcion, d.activa, d.orden]);
+        await guardarPrecios(c, codigo, d.precios);
+        return a;
+      });
+      await auditar({ ...actor(req), accion: 'LISTA_PRECIO_EDITADA', entidad: 'lista_precio', entidadId: codigo,
+        detalle: { antes: { nombre: antes.nombre, productos: Number(antes.n) }, despues: { nombre: d.nombre, activa: d.activa, productos: d.precios.length } }, ip: req.ip });
+      return { codigo, ...d };
+    } catch (e) {
+      const err = e as Error & { status?: number };
+      if (!err.status) throw e;
+      return reply.code(err.status).send(error(err.status, 'LISTA_INVALIDA', err.message));
+    }
+  });
+
+  // Precios del cliente elegido, para que la pantalla de venta o pedido muestre lo mismo que cobra el servidor.
+  app.get('/clientes/:id/precios', { preHandler: autenticar }, async (req, reply) => {
+    if (!puedeVerListas(req)) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso para ver precios de clientes.'));
+    const { id } = req.params as { id: string };
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
+    const c = await uno<{ lista: string; nombre: string | null }>('SELECT c.lista_precio lista, l.nombre FROM core.cliente c LEFT JOIN core.lista_precio l ON l.codigo = c.lista_precio WHERE c.id = $1', [id]);
+    if (!c) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
+    return { lista: c.lista, nombre: c.nombre ?? c.lista, precios: Object.fromEntries(await preciosCliente(id)) };
   });
 
   /* ---------------------------------------------------- costos indirectos */

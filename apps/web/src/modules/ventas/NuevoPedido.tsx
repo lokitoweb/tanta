@@ -18,9 +18,20 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
   inicial?: ItemPedido[]; elegirCliente: boolean; onCerrar: (codigo?: string) => void;
 }) {
   const { dataset } = useApp();
-  const productos = dataset.productos.filter((p) => p.estado === 'ACTIVO' && !p.insumoId); // los intermedios no se venden
   const [clientes, setClientes] = useState<Array<{ id: string; nombre: string }>>([]);
   const [clienteId, setClienteId] = useState('');
+  // Precios de la lista del cliente elegido (el cliente que pide desde su cuenta ya los recibe en su catálogo).
+  const [lista, setLista] = useState<{ nombre: string; precios: Record<string, number> } | null>(null);
+  useEffect(() => {
+    if (!elegirCliente || !clienteId) { setLista(null); return; }
+    api<{ nombre: string; precios: Record<string, number> }>(`/clientes/${clienteId}/precios`).then(setLista).catch(() => setLista(null));
+  }, [elegirCliente, clienteId]);
+  const productos = dataset.productos.filter((p) => p.estado === 'ACTIVO' && !p.insumoId) // los intermedios no se venden
+    .map((p) => {
+      const u = lista?.precios[p.id];
+      if (u === undefined || !(p.precioConIgv > 0)) return p;
+      return { ...p, precioConIgv: u, presentaciones: p.presentaciones?.map((x) => ({ ...x, precioConIgv: Math.round(x.precioConIgv * (u / p.precioConIgv) * 100) / 100 })) };
+    });
   const [items, setItems] = useState<Array<{ productoId: string; cantidad: string; presentacion: string; promocionId?: string; nombre?: string; precio?: number }>>(
     inicial.length ? inicial.map((i) => ({ productoId: i.productoId, cantidad: String(i.cantidad), presentacion: i.presentacion ?? '', promocionId: i.promocionId, nombre: i.nombre, precio: i.precio })) : [{ productoId: productos[0]?.id ?? '', cantidad: '1', presentacion: '' }]);
   const [fecha, setFecha] = useState('');
@@ -81,7 +92,8 @@ export function NuevoPedido({ inicial = [], elegirCliente, onCerrar }: {
       <div className="form form--2col form--dialogo">
         {elegirCliente && (
           <label className="field field--ancho"><span className="field__label">Cliente</span>
-            <select className="field__input" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>
+            <select className="field__input" value={clienteId} onChange={(e) => setClienteId(e.target.value)}>{clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select>
+            {lista && <span className="field__ayuda">Lista de precios: {lista.nombre}</span>}</label>
         )}
         <div className="field--ancho editor-receta">
           <div className="editor-receta__cab"><span>Producto y presentación</span><span>Cantidad</span><span /></div>

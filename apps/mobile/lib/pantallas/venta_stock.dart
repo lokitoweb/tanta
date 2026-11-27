@@ -10,7 +10,7 @@ double _n(Object? v) => (v as num?)?.toDouble() ?? 0;
 
 class _Linea {
   _Linea(this.p, this.precio) : promocionId = (p['promocion'] as Map?)?['id'] as String?;
-  final Map<String, dynamic> p;
+  Map<String, dynamic> p;
   final String? promocionId;
   int cantidad = 1;
   final TextEditingController precio;
@@ -69,9 +69,20 @@ class _VentaStockState extends State<VentaStock> {
 
   Future<void> _cargar() async {
     try {
-      final s = await Api.instancia.productosStock();
+      final s = await Api.instancia.productosStock(clienteId: _cliente);
       final a = await Api.instancia.solicitudesDescuento();
-      if (mounted) setState(() { _stock = s; _aprobaciones = a.cast<Map<String, dynamic>>(); _error = null; });
+      if (!mounted) return;
+      setState(() {
+        _stock = s; _aprobaciones = a.cast<Map<String, dynamic>>(); _error = null;
+        // Precios de la lista del cliente: las líneas sin oferta toman el precio nuevo.
+        final prods = ((s['productos'] as List?) ?? const []).cast<Map<String, dynamic>>();
+        for (final l in _lineas) {
+          final p = prods.where((x) => x['id'] == l.p['id']).firstOrNull;
+          if (p == null) continue;
+          l.p = p;
+          if (l.promocionId == null) l.precio.text = _n(p['precio']).toStringAsFixed(2);
+        }
+      });
     } catch (e) {
       if (mounted) setState(() => _error = _mensaje(e));
     }
@@ -80,6 +91,7 @@ class _VentaStockState extends State<VentaStock> {
   Future<void> _elegirCliente(String? id) async {
     setState(() { _cliente = id; _direcciones = []; _direccion = ''; });
     if (id == null) return;
+    _cargar();
     try {
       final r = await Api.instancia.direccionesCliente(id);
       final l = ((r['direcciones'] as List?) ?? const []).cast<Map<String, dynamic>>();

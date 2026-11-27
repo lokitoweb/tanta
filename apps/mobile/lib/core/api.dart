@@ -624,7 +624,9 @@ class Api {
       await _post('/produccion/hoja/cerrar-pedidos', {'fecha': fecha, if (turno != null) 'turno': turno}) as Map<String, dynamic>;
 
   // Venta de stock: pan ya producido, precio por producto; rebajarlo pide la aprobación del Gerente.
-  Future<Map<String, dynamic>> productosStock() async => await _get('/ventas-stock/productos') as Map<String, dynamic>;
+  /// Con cliente, cada precio es el de su lista de precios (o el del catálogo si la lista no lo tiene).
+  Future<Map<String, dynamic>> productosStock({String? clienteId}) async =>
+      await _get(clienteId == null ? '/ventas-stock/productos' : '/ventas-stock/productos?clienteId=${Uri.encodeComponent(clienteId)}') as Map<String, dynamic>;
   Future<Map<String, dynamic>> crearVentaStock(Map<String, dynamic> datos) async => await _post('/pedidos/stock', datos, idempotente: true) as Map<String, dynamic>;
   Future<List<dynamic>> solicitudesDescuento() async => await _get('/descuentos/solicitudes') as List<dynamic>;
   Future<void> pedirAprobacion({required double porcentaje, required String motivo, String? clienteId, bool paraStock = false}) async =>

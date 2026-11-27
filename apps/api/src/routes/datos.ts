@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { q, uno, num } from '../db.js';
 import { autenticar, exigir } from '../seguridad.js';
 import { recordar } from '../cache.js';
+import { preciosCliente, escalar } from '../precios.js';
 
 /**
  * GET /datos — el panel completo del rol, agregado en PostgreSQL.
@@ -457,6 +458,16 @@ export async function rutasDatos(app: FastifyInstance) {
       p.miSaldo = num(deuda?.saldo);
       p.misDeudas = Number(deuda?.n ?? 0);
       p.misPedidosTotal = Number(deuda?.pedidos ?? 0);
+      // Su catálogo (web y app) muestra los precios de su lista: lo mismo que cobra el servidor.
+      const lista = await preciosCliente(vinculo.cliente_id);
+      if (lista.size) {
+        p.productos = (p.productos as Array<Record<string, unknown>>).map((x) => {
+          const catalogo = x.precioConIgv as number, unidad = lista.get(x.id as string);
+          if (unidad === undefined) return x;
+          return { ...x, precioConIgv: unidad, precioNeto: catalogo > 0 ? (x.precioNeto as number) * unidad / catalogo : 0,
+            presentaciones: (x.presentaciones as Array<Record<string, unknown>>).map((y) => ({ ...y, precioConIgv: escalar(y.precioConIgv as number, catalogo, unidad) })) };
+        });
+      }
     }
 
     return reply.send(p);

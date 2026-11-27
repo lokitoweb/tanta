@@ -7,6 +7,7 @@ import { emitirEvento, guardarPdf } from './sistema.js';
 import { avisar } from './notificaciones.js';
 
 import { presentacionesDe, congelarReceta } from './operaciones.js';
+import { preciosCliente, escalar } from '../precios.js';
 
 /**
  * Flujo operativo del PDF (Fig. 2): el cliente registra su pedido → Producción consolida y
@@ -71,29 +72,35 @@ export async function fechaEntregaSugerida(horasMinimas = 0): Promise<string> {
 type ItemPedido = { productoId: string; cantidad: number; presentacion?: string; promocionId?: string };
 type LineaPedido = ItemPedido & { unidades: number; precioUnidad: number; importe: number; nombre: string; precioLista?: number };
 
-/** Valida productos, presentaciones y promociones contra la base y calcula el precio de cada línea. El cliente nunca fija el precio. */
-async function armarLineas(c: Cliente, items: ItemPedido[]) {
+/**
+ * Valida productos, presentaciones y promociones contra la base y calcula el precio de cada línea. El cliente nunca fija el precio.
+ * Precio: el de la lista del cliente (o el del catálogo); la oferta vale para todos y manda sobre la lista.
+ */
+async function armarLineas(c: Cliente, items: ItemPedido[], clienteId: string) {
   const ids = [...new Set(items.map((i) => i.productoId))];
   const prods = await c.query<{ id: string; nombre: string; precio_con_igv: string; anticipacion_horas: number }>(
     "SELECT id, nombre, precio_con_igv, anticipacion_horas FROM core.producto WHERE id = ANY($1::uuid[]) AND estado = 'ACTIVO' AND insumo_id IS NULL", [ids]);
   if (prods.rowCount !== ids.length) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
   const mapa = new Map(prods.rows.map((x) => [x.id, x]));
   const pres = await presentacionesDe(c, items);
+  const lista = await preciosCliente(clienteId, c);
   const hoy = hoyMasDias(0).slice(0, 10);
   const lineas: LineaPedido[] = [];
   for (const i of items) {
     const p = mapa.get(i.productoId)!;
+    const catalogo = num(p.precio_con_igv), unidad = lista.get(i.productoId) ?? catalogo;
     if (i.promocionId) {
       if (items.some((x) => x.productoId === i.productoId && x !== i)) throw Object.assign(new Error(`${p.nombre} va una sola vez: con promoción o sin ella.`), { status: 422 });
       const promo = (await c.query<{ precio_con_igv: string }>('SELECT precio_con_igv FROM core.promocion WHERE id = $1 AND producto_id = $2 AND activa AND $3::date BETWEEN desde AND hasta', [i.promocionId, i.productoId, hoy])).rows[0];
       if (!promo) throw Object.assign(new Error(`La promoción de ${p.nombre} ya no está vigente.`), { status: 409 });
-      lineas.push({ ...i, nombre: p.nombre, presentacion: undefined, unidades: i.cantidad, precioUnidad: num(promo.precio_con_igv), importe: num(promo.precio_con_igv) * i.cantidad, precioLista: num(p.precio_con_igv) });
+      lineas.push({ ...i, nombre: p.nombre, presentacion: undefined, unidades: i.cantidad, precioUnidad: num(promo.precio_con_igv), importe: num(promo.precio_con_igv) * i.cantidad, precioLista: unidad });
     } else if (!i.presentacion) {
-      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad, precioUnidad: num(p.precio_con_igv), importe: num(p.precio_con_igv) * i.cantidad, precioLista: num(p.precio_con_igv) });
+      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad, precioUnidad: unidad, importe: unidad * i.cantidad, precioLista: unidad });
     } else {
       const x = pres.get(`${i.productoId}|${i.presentacion}`);
       if (!x) throw Object.assign(new Error(`${p.nombre} no se vende en la presentación ${i.presentacion}.`), { status: 422 });
-      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad * x.equivalencia, precioUnidad: x.precio / x.equivalencia, importe: x.precio * i.cantidad, precioLista: x.precio / x.equivalencia });
+      const paquete = escalar(x.precio, catalogo, lista.get(i.productoId));
+      lineas.push({ ...i, nombre: p.nombre, unidades: i.cantidad * x.equivalencia, precioUnidad: paquete / x.equivalencia, importe: paquete * i.cantidad, precioLista: paquete / x.equivalencia });
     }
   }
   return { lineas, total: lineas.reduce((s, i) => s + i.importe, 0), horas: Math.max(0, ...prods.rows.map((x) => Number(x.anticipacion_horas))) };
@@ -249,7 +256,7 @@ export async function rutasFlujo(app: FastifyInstance) {
         if (yo?.cliente_id && d.items.some((i) => i.promocionId) && !(await parametroSi('ofertas_pedido_cliente'))) {
           throw Object.assign(new Error('Las ofertas se piden a tu vendedor: llámalo o escríbele y él te la separa.'), { status: 409 });
         }
-        const { lineas, horas } = await armarLineas(c, d.items);
+        const { lineas, horas } = await armarLineas(c, d.items, clienteId);
         const agotadas = await reservarPromos(c, lineas);
         // Oferta y pedido regular van separados: la oferta sale del stock (sin producción) y se cobra aparte.
         const regulares = lineas.filter((l) => !l.promocionId), ofertas = lineas.filter((l) => l.promocionId);
@@ -299,6 +306,8 @@ export async function rutasFlujo(app: FastifyInstance) {
   // Lo que el vendedor puede ofrecer: pan hecho, sin lo apartado ni lo vencido, con lo que vence hoy y su oferta vigente.
   app.get('/ventas-stock/productos', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'ventas.stock')) return;
+    const { clienteId } = req.query as { clienteId?: string };
+    const lista = await preciosCliente(clienteId && /^[0-9a-f-]{36}$/i.test(clienteId) ? clienteId : null);
     const filas = await q<Record<string, string>>(`
       SELECT p.id, p.codigo, p.nombre, p.precio_con_igv, p.stock, p.reservado, p.imagen_id, core.producto_vencido(p.id) vencido, core.stock_libre(p.id) libre,
              (SELECT coalesce(sum(l.saldo), 0) FROM core.lote_producto l WHERE l.producto_id = p.id AND l.saldo > 0 AND l.vence_en = core.hoy_lima()) vence_hoy,
@@ -308,7 +317,7 @@ export async function rutasFlujo(app: FastifyInstance) {
       FROM core.producto p WHERE p.estado = 'ACTIVO' AND p.insumo_id IS NULL AND p.stock > 0 ORDER BY p.nombre`);
     return {
       descuentoMaximo: num(await parametro('venta_stock_descuento_maximo') ?? '0'),
-      productos: filas.map((f) => ({ id: f.id, codigo: f.codigo, nombre: f.nombre, precio: num(f.precio_con_igv), stock: num(f.stock), apartado: num(f.reservado),
+      productos: filas.map((f) => ({ id: f.id, codigo: f.codigo, nombre: f.nombre, precio: lista.get(f.id) ?? num(f.precio_con_igv), precioCatalogo: num(f.precio_con_igv), stock: num(f.stock), apartado: num(f.reservado),
         vencido: num(f.vencido), libre: Math.floor(num(f.libre)), venceHoy: num(f.vence_hoy), proximoVence: f.proximo_vence, imagenId: f.imagen_id,
         promocion: f.promocion ? { ...(f.promocion as unknown as Record<string, unknown>), precio: num((f.promocion as unknown as { precio: string }).precio) } : null })),
     };
@@ -350,6 +359,7 @@ export async function rutasFlujo(app: FastifyInstance) {
 
         const lineas: LineaPedido[] = [];
         const agotadas: Array<{ id: string; titulo: string }> = [];
+        const lista = await preciosCliente(d.clienteId, c);
         let mayorRebaja = 0;
         // En orden de id: dos vendedores a la vez bloquean igual y no se cruzan (sin deadlocks).
         for (const i of [...d.items].sort((a, b) => a.productoId.localeCompare(b.productoId))) {
@@ -357,7 +367,8 @@ export async function rutasFlujo(app: FastifyInstance) {
             "SELECT nombre, precio_con_igv FROM core.producto WHERE id = $1 AND estado = 'ACTIVO' AND insumo_id IS NULL FOR UPDATE", [i.productoId])).rows[0];
           if (!pr) throw Object.assign(new Error('Hay un producto inexistente o inactivo.'), { status: 422 });
           let libre = num((await c.query<{ n: string }>('SELECT core.stock_libre($1) n', [i.productoId])).rows[0].n);
-          let base = num(pr.precio_con_igv);
+          const deLista = lista.get(i.productoId) ?? num(pr.precio_con_igv);
+          let base = deLista;
           if (i.promocionId) {
             const promo = (await c.query<{ titulo: string; precio_con_igv: string; cantidad: number | null; tomadas: string }>(
               `SELECT titulo, precio_con_igv, cantidad, ${TOMADAS} tomadas FROM core.promocion WHERE id = $1 AND producto_id = $2 AND activa AND core.hoy_lima() BETWEEN desde AND hasta FOR UPDATE`,
@@ -373,7 +384,7 @@ export async function rutasFlujo(app: FastifyInstance) {
           if (base > 0) mayorRebaja = Math.max(mayorRebaja, 1 - i.precio / base);
           await c.query('UPDATE core.producto SET reservado = reservado + $2 WHERE id = $1', [i.productoId, i.cantidad]);
           lineas.push({ productoId: i.productoId, cantidad: i.cantidad, promocionId: i.promocionId, nombre: pr.nombre, unidades: i.cantidad,
-            precioUnidad: i.precio, importe: i.precio * i.cantidad, precioLista: num(pr.precio_con_igv) });
+            precioUnidad: i.precio, importe: i.precio * i.cantidad, precioLista: deLista });
         }
         let aprobacion: string | null = null;
         if (mayorRebaja > tope + 1e-6) {
@@ -498,7 +509,7 @@ export async function rutasFlujo(app: FastifyInstance) {
         const antes = (await c.query('SELECT producto, cantidad FROM core.pedido_detalle WHERE pedido_id = $1 ORDER BY id', [ped.id])).rows;
         await liberarPromos(c, ped.id);
         await c.query('DELETE FROM core.pedido_detalle WHERE pedido_id = $1', [ped.id]);
-        const { lineas, total } = await armarLineas(c, p.data.items);
+        const { lineas, total } = await armarLineas(c, p.data.items, ped.cliente_id);
         await reservarPromos(c, lineas);
         await guardarLineas(c, ped.id, lineas);
         await c.query('UPDATE core.pedido SET total = $2, observacion_vendedor = NULL, observado_en = NULL, observado_por = NULL WHERE id = $1', [ped.id, total.toFixed(4)]);

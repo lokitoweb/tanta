@@ -9,6 +9,7 @@ import { avisar } from './notificaciones.js';
 import { medioPago, exigirOperacion } from './catalogos.js';
 import { LineaPago, emitirRecibo, detalleRecibo } from './cobranza.js';
 import { falloImagen, ImagenProducto } from './maestros.js';
+import { preciosCliente, escalar } from '../precios.js';
 import { liberarPromos, reservarListo } from './flujo.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
@@ -448,6 +449,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
           const mapa = new Map(prods.rows.map((r) => [r.id, r]));
           // Presentaciones de venta (Excel): precio propio, equivalencia en unidades y empaque que se descarga solo.
           const pres = await presentacionesDe(c, items);
+          // Precio de la lista del cliente (venta con cliente o despacho de su pedido); sin cliente, el del catálogo.
+          const lista = await preciosCliente(clienteId, c);
           const conUnidades = items.map((it) => {
             if (!it.presentacion) return { ...it, unidades: it.cantidad, precioUnidad: null as number | null, pres: null as Pres | null };
             const x = pres.get(`${it.productoId}|${it.presentacion}`);
@@ -524,8 +527,10 @@ export async function rutasOperaciones(app: FastifyInstance) {
             if (!prod) throw Object.assign(new Error('El producto no existe o está anulado: no se vende.'), { status: 404 });
             // Precio por unidad: el de la presentación ÷ su equivalencia, o el del producto.
             const promo = precioPromo.get(it.productoId);
-            const precioUnidad = promo ?? it.precioUnidad ?? Number(prod.precio_con_igv);
-            const precioLinea = it.pres && promo === undefined ? it.pres.precio * it.cantidad : precioUnidad * it.unidades;
+            const catalogo = Number(prod.precio_con_igv), deLista = lista.get(it.productoId);
+            const paquete = it.pres ? escalar(it.pres.precio, catalogo, deLista) : null;
+            const precioUnidad = promo ?? (paquete !== null ? paquete / it.pres!.equivalencia : deLista ?? catalogo);
+            const precioLinea = paquete !== null && promo === undefined ? paquete * it.cantidad : precioUnidad * it.unidades;
 
             const netoLinea = Number(((precioLinea * (1 - descuentoPct)) / (1 + igv)).toFixed(4));
             totalConIgv += precioLinea * (1 - descuentoPct);

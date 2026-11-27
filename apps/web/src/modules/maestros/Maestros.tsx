@@ -31,6 +31,8 @@ const aviso = (tono: 'ok' | 'danger', texto: string) => <div className={`aviso a
 /* ---------------------------------------------------------------- Clientes */
 export function Clientes() {
   const vendedores = useOpciones('/vendedores', (r) => String(r.nombre));
+  // Listas administrables (Maestros → Listas de precios): cada una con sus precios por producto.
+  const listas = useOpciones('/listas-precio', (r) => String(r.nombre) + (r.activa ? '' : ' (inactiva)'), (r) => String(r.codigo));
   const [dirs, setDirs] = useState<{ id: string; nombre: string } | null>(null);
   return (
     <>
@@ -52,7 +54,7 @@ export function Clientes() {
         { key: 'docNumero', label: 'Número', max: 15, ayuda: 'DNI 8 dígitos · RUC 11 dígitos' },
         { key: 'telefono', label: 'Teléfono', tipo: 'tel', max: 30 }, { key: 'email', label: 'Correo', tipo: 'email' },
         { key: 'direccion', label: 'Dirección principal de entrega', ancho: true, max: 200, ayuda: 'Más direcciones: botón «Direcciones» de la fila' },
-        { key: 'listaPrecio', label: 'Lista de precios', tipo: 'select', opciones: ['MINORISTA', 'MAYORISTA', 'CORPORATIVO'].map((v) => ({ valor: v, texto: v[0] + v.slice(1).toLowerCase() })) },
+        { key: 'listaPrecio', label: 'Lista de precios', tipo: 'select', opciones: listas, ayuda: 'Se crean y ponen sus precios en Maestros → Listas de precios' },
         { key: 'condicionPago', label: 'Condición de pago', tipo: 'select', opciones: [{ valor: 'CONTADO', texto: 'Contado' }, { valor: 'CREDITO', texto: 'Crédito (puede comprar a plazo)' }] },
         { key: 'diasCredito', label: 'Días de crédito', tipo: 'numero' }, { key: 'limiteCredito', label: 'Límite de crédito (S/)', tipo: 'numero' },
         { key: 'vendedorId', label: 'Vendedor asignado', tipo: 'select', opciones: [{ valor: '', texto: 'Sin asignar' }, ...vendedores] },
