@@ -156,6 +156,8 @@ export function Productos() {
   const columnas: ColRep[] = [
     { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Nombre' }, { key: 'categoria', label: 'Categoría' },
     { key: 'precioUnidad', label: 'Precio unidad', tipo: 'dinero' }, { key: 'presentacionesTxt', label: 'Otras presentaciones' },
+    // Stock actual (almacén) y lo que queda libre para vender: sin lo apartado para pedidos ni lo vencido.
+    { key: 'stock', label: 'Stock actual', tipo: 'num' }, { key: 'disponible', label: 'Libre para vender', tipo: 'num' },
     ...(verCosto ? [{ key: 'costoUnitario', label: 'Costo', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }] as ColRep[] : []),
     { key: 'estado', label: 'Estado' },
   ];
@@ -171,7 +173,7 @@ export function Productos() {
     <>
       {msg && aviso(msg.tono, msg.texto)}
       <Crud titulo="Productos" nombreExport="productos" deps={dataset.productos}
-        descripcion="Datos de cada pan, sus presentaciones de venta (SKU) y su precio. «Ajustar precio» muestra cómo se forma el costo antes de cambiarlo."
+        descripcion="Datos de cada pan, sus presentaciones de venta (SKU), su precio y su stock actual. «Ajustar precio» muestra cómo se forma el costo antes de cambiarlo. El stock sube al cerrar producción y se corrige con Almacén → Conteo físico (lo aprueba el Gerente)."
         cargar={async () => dataset.productos.map((p) => ({
           ...p, categoria: dataset.categorias.find((c) => c.id === p.categoriaId)?.nombre,
           presentacionesTxt: (p.presentaciones ?? []).map((x) => `${x.nombre} ${money(x.precioConIgv)}`).join(' · '),

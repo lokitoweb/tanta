@@ -30,6 +30,9 @@ class _NuevaVentaState extends State<NuevaVenta> {
   // El primer medio habilitado: si el admin desactiva uno, el desplegable no queda con un valor inexistente.
   String _forma = '${mediosPago('enVentas').first['codigo']}';
   String? _cliente;
+  // Precios de la lista del cliente elegido: los mismos que cobra el servidor.
+  Map<String, double> _precios = {};
+  double _precio(Map p) => _precios['${p['id']}'] ?? ((p['precioConIgv'] as num?)?.toDouble() ?? 0);
   final _descuento = TextEditingController(text: '0');
   final _referencia = TextEditingController();
   bool _enviando = false;
@@ -39,7 +42,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
   double get _total {
     final d = (double.tryParse(_descuento.text.replaceAll(',', '.')) ?? 0) / 100;
     return _lista(widget.datos, 'productos').fold<double>(0,
-        (s, p) => s + (_cant[p['id']] ?? 0) * ((p['precioConIgv'] as num?)?.toDouble() ?? 0)) * (1 - d);
+        (s, p) => s + (_cant[p['id']] ?? 0) * _precio(p)) * (1 - d);
   }
 
   Future<void> _registrar() async {
@@ -93,7 +96,7 @@ class _NuevaVentaState extends State<NuevaVenta> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text('${p['nombre']}'),
-            subtitle: Text('${dinero((p['precioConIgv'] as num).toDouble())} · quedan ${libre(p).floor()}'),
+            subtitle: Text('${dinero(_precio(p))} · quedan ${libre(p).floor()}'),
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(tooltip: 'Quitar', icon: const Icon(Icons.remove_circle_outline),
                   onPressed: (_cant[p['id']] ?? 0) > 0 ? () => setState(() => _cant[p['id']] = _cant[p['id']]! - 1) : null),
@@ -122,7 +125,14 @@ class _NuevaVentaState extends State<NuevaVenta> {
             const DropdownMenuItem<String?>(value: null, child: Text('Público general')),
             for (final c in clientes) DropdownMenuItem<String?>(value: '${c['id']}', child: Text('${c['nombre']}')),
           ],
-          onChanged: (v) => setState(() => _cliente = v),
+          onChanged: (v) async {
+            setState(() { _cliente = v; _precios = {}; });
+            if (v == null) return;
+            try {
+              final p = await Api.instancia.preciosCliente(v);
+              if (mounted && _cliente == v) setState(() => _precios = p);
+            } catch (_) {}
+          },
         ),
         const SizedBox(height: 12),
         TextField(controller: _descuento, keyboardType: const TextInputType.numberWithOptions(decimal: true),

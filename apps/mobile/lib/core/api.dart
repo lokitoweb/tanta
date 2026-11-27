@@ -632,6 +632,11 @@ class Api {
   Future<void> pedirAprobacion({required double porcentaje, required String motivo, String? clienteId, bool paraStock = false}) async =>
       await _post('/descuentos/solicitudes', {'porcentaje': porcentaje, 'motivo': motivo, if (clienteId != null) 'clienteId': clienteId, 'paraStock': paraStock});
   Future<void> resolverAprobacion(String id, bool aprobar) async => await _post('/descuentos/solicitudes/$id/resolver', {'aprobar': aprobar});
+  /// Precios de la lista del cliente (producto → precio con IGV); lo que no está, al precio del catálogo.
+  Future<Map<String, double>> preciosCliente(String clienteId) async {
+    final r = await _get('/clientes/${Uri.encodeComponent(clienteId)}/precios') as Map<String, dynamic>;
+    return {for (final e in ((r['precios'] as Map?) ?? const {}).entries) '${e.key}': (e.value as num).toDouble()};
+  }
   Future<Map<String, dynamic>> direccionesCliente(String clienteId) async => await _get('/clientes/$clienteId/direcciones') as Map<String, dynamic>;
 
   /// Factura de SUNAT (PDF) subida al pedido: solo su cliente o el personal la descargan.
