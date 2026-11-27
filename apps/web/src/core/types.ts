@@ -28,7 +28,7 @@ export interface Insumo {
   minimo: number; proveedor: string; estado: string; valorizado: number;
   /** Compra de insumos: presentación, contenido en unidad base, unidad de inventario y factor (F2). */
   presentacion?: string; contenido?: number | null; unidadInventario?: string; factor?: number;
-  activo?: boolean; tipo?: string; manejaStock?: boolean; presentacionCodigo?: string; costoFormulas?: number; costoManual?: boolean;
+  activo?: boolean; tipo?: string; manejaStock?: boolean; consumoEntero?: boolean; presentacionCodigo?: string; costoFormulas?: number; costoManual?: boolean;
   precioCompra?: number | null; cantPresentacion?: number | null; equivKg?: number;
 }
 export interface Categoria {

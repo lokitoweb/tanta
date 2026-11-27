@@ -301,6 +301,8 @@ export async function rutasMaestros(app: FastifyInstance) {
     presentacionCodigo: z.string().trim().toUpperCase().max(20).nullable().default(null).transform((v) => v || null),
     // «Maneja stock = N»: insumos menores (p. ej. agua) que no se cuentan: sin alertas de mínimo ni bloqueo por falta de stock.
     manejaStock: z.boolean().default(true),
+    // Se usa entero (huevos): al producir menos de un lote no se fracciona. Sin dato: sí, si se lleva por UNIDAD.
+    consumoEntero: z.boolean().nullable().default(null),
   });
   type DatosInsumo = z.infer<typeof Insumo>;
   /** Presentación de compra del catálogo: su nombre queda en el insumo y su equivalencia es el contenido por defecto. */
@@ -343,11 +345,11 @@ export async function rutasMaestros(app: FastifyInstance) {
   /** Alta de un insumo ya validado (formulario e importación comparten la misma escritura). */
   const insertarInsumo = (d: DatosInsumo, u: { densidad: number; unidadInventario: string; factor: number }) => uno<{ id: string; codigo: string }>(
     `INSERT INTO core.insumo (codigo, nombre, unidad, minimo, proveedor, cpp, stock, tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, unidad_inventario,
-                              maneja_stock, presentacion_codigo)
+                              maneja_stock, presentacion_codigo, consumo_entero)
      VALUES (coalesce(NULLIF($13,''), 'INS-' || lpad((SELECT coalesce(max(substring(codigo from 5)::int), 0) + 1 FROM core.insumo WHERE codigo ~ '^INS-[0-9]+$')::text, 3, '0')),
-             $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11, $14, $15) RETURNING id, codigo`,
+             $1, $2, $3, $4, coalesce($9::numeric / $12::numeric, 0), 0, $5, $6, $7, $8, $10, $11, $14, $15, coalesce($16::boolean, $11 = 'UNIDAD')) RETURNING id, codigo`,
     [d.nombre, d.unidad, d.minimo, d.proveedor, d.tipo, d.presentacion, d.precioCompra, d.cantPresentacion, costoReferencia(d),
-      u.densidad, u.unidadInventario, u.factor, d.codigo, d.manejaStock, d.presentacionCodigo]);
+      u.densidad, u.unidadInventario, u.factor, d.codigo, d.manejaStock, d.presentacionCodigo, d.consumoEntero]);
 
   app.post('/insumos', { preHandler: autenticar }, async (req, reply) => {
     if (!editaInsumos(req, reply)) return;
@@ -559,10 +561,10 @@ export async function rutasMaestros(app: FastifyInstance) {
                          cpp = CASE WHEN $12::numeric IS NOT NULL AND NOT EXISTS (SELECT 1 FROM core.movimiento_inventario m WHERE m.insumo_id = $1 AND m.tipo = 'COMPRA')
                                     THEN $12::numeric / $14::numeric ELSE cpp END,
                          estado = CASE WHEN $15 AND stock < $4 THEN 'BAJO_MINIMO' ELSE 'OK' END, actualizado_en = now(),
-                         maneja_stock = $15, presentacion_codigo = $16, codigo = coalesce(NULLIF($17,''), codigo)
+                         maneja_stock = $15, presentacion_codigo = $16, codigo = coalesce(NULLIF($17,''), codigo), consumo_entero = coalesce($18::boolean, consumo_entero)
                        WHERE id=$1 RETURNING id`, [id, p.data.nombre, p.data.unidad, p.data.minimo, p.data.proveedor, p.data.activo,
                          p.data.tipo, p.data.presentacion, p.data.precioCompra, p.data.cantPresentacion, u.densidad, costoReferencia(p.data), u.unidadInventario, u.factor,
-                         p.data.manejaStock, p.data.presentacionCodigo, p.data.codigo]);
+                         p.data.manejaStock, p.data.presentacionCodigo, p.data.codigo, p.data.consumoEntero]);
       await c.query('SELECT core.recalcular_costos()');
       return f.rows;
     });

@@ -393,7 +393,7 @@ export function Insumos() {
           precioUnit: i.precioCompra != null && (i.cantPresentacion ?? 0) > 0 ? Math.round(i.precioCompra * (1 + igv) / i.cantPresentacion! * 10_000) / 10_000 : '',
         } as unknown as Reg))}
         nuevo={{ codigo: '', nombre: '', unidad: 'KG', unidadInventario: 'KG', minimo: 0, proveedor: '', activo: true, tipo: 'OTRO', presentacionCodigo: '', presentacion: '',
-          precioConIgv: '', cantPresentacion: '', equivKg: '', manejaStock: true }}
+          precioConIgv: '', cantPresentacion: '', equivKg: '', manejaStock: true, consumoEntero: false }}
         crear={editaInsumos ? async (d) => { await api('/insumos', { method: 'POST', body: aApi(d) }); await refrescarDatos(); } : undefined}
         acciones={<>
           {verCosto && <Boton icono="report" onClick={() => setInforme(true)}>Informe de variación</Boton>}
@@ -442,6 +442,8 @@ export function Insumos() {
           { key: 'minimo', label: 'Stock mínimo (en la unidad del stock)', tipo: 'numero', ayuda: 'Por debajo se avisa a Almacén y Gerencia' },
           { key: 'proveedor', label: 'Proveedor habitual', tipo: 'select', opciones: [{ valor: '', texto: 'Sin proveedor' }, ...proveedores] },
           { key: 'manejaStock', label: 'Maneja stock (se controla su existencia y avisa al llegar al mínimo)', tipo: 'bool' },
+          { key: 'consumoEntero', label: 'Se usa entero, no se fracciona (p. ej. huevos)', tipo: 'bool',
+            ayuda: 'Al producir menos de un lote se descuenta la unidad completa: si la receta da 0.25 huevo, se descuenta 1' },
           { key: 'activo', label: 'Activo', tipo: 'bool' },
         ]} />
       {costos && <AjustarCostos insumoId={costos} onCerrar={(texto) => { setCostos(null); if (texto) { setMsg({ tono: 'ok', texto }); void refrescarDatos(); } }} />}

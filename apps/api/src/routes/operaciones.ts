@@ -10,7 +10,7 @@ import { medioPago, exigirOperacion } from './catalogos.js';
 import { LineaPago, emitirRecibo, detalleRecibo } from './cobranza.js';
 import { falloImagen, ImagenProducto } from './maestros.js';
 import { preciosCliente, escalar } from '../precios.js';
-import { liberarPromos, reservarListo } from './flujo.js';
+import { liberarPromos, reservarListo, usarEntero } from './flujo.js';
 import { clienteVisible, enCartera, vendedorDe } from '../cartera.js';
 
 /** Idempotencia: la misma clave devuelve la misma respuesta, nunca duplica el efecto. */
@@ -113,13 +113,14 @@ export async function cierreOP(c: Cliente, e: DatosCierre) {
     }
     for (const l of requisicion ? [] : lineas.rows) {
       // Se consume lo que se horneó (buenas + merma) con la misma base por lote que la hoja y el motor.
-      const cantidadUsada = Number(l.cantidad) * (cantidadProducida + unidadesMerma);
-      const ins = await c.query<{ cpp: string; saldo: string }>(
-        `SELECT i.cpp, coalesce((SELECT m.saldo_cantidad FROM core.movimiento_inventario m
+      const ins = await c.query<{ cpp: string; saldo: string; consumo_entero: boolean }>(
+        `SELECT i.cpp, i.consumo_entero, coalesce((SELECT m.saldo_cantidad FROM core.movimiento_inventario m
                                  WHERE m.insumo_id = i.id ORDER BY m.id DESC LIMIT 1), i.stock) AS saldo
          FROM core.insumo i WHERE i.id = $1 FOR UPDATE`,
         [l.insumo_id],
       );
+      // Huevos y demás insumos que se usan enteros: lo que se rompe se usa todo (0.25 → 1).
+      const cantidadUsada = usarEntero(Number(l.cantidad) * (cantidadProducida + unidadesMerma), Boolean(ins.rows[0]?.consumo_entero));
       const cpp = Number(ins.rows[0]?.cpp ?? 0);
       const saldoActual = Number(ins.rows[0]?.saldo ?? 0);
       const nuevoSaldo = saldoActual - cantidadUsada;
@@ -1166,22 +1167,34 @@ export async function rutasOperaciones(app: FastifyInstance) {
     if (!exigir(req, reply, 'inventario.ver')) return;
     const { codigo } = req.params as { codigo: string };
     if (!/^[A-Z0-9-]{1,20}$/.test(codigo)) return reply.code(422).send(error(422, 'CODIGO_INVALIDO', 'Código inválido.'));
+    // Período opcional (fechas de Lima). Sin fechas: los últimos 1000 asientos (la app).
+    const per = z.object({ desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).safeParse(req.query);
+    if (!per.success) return reply.code(422).send(error(422, 'FECHA_INVALIDA', 'Fechas inválidas.'));
+    const desde = per.data.desde ?? null, hasta = per.data.hasta ?? null;
     const filas = await q<Record<string, string>>(
       `SELECT * FROM (
          SELECT m.id, m.creado_en::text AS fecha, m.tipo, m.documento, m.cantidad, m.costo_unitario,
                 m.valor, m.saldo_cantidad, m.saldo_valor, m.cpp, a.nombre AS almacen, m.lote, m.vence_en::text AS vence
          FROM core.movimiento_inventario m LEFT JOIN core.almacen a ON a.id = m.almacen_id
          -- Por id y no por código: así usa los índices de insumo_id / producto_id.
-         WHERE m.insumo_id = (SELECT id FROM core.insumo WHERE codigo = $1)
-            OR m.producto_id = (SELECT id FROM core.producto WHERE codigo = $1)
+         WHERE (m.insumo_id = (SELECT id FROM core.insumo WHERE codigo = $1)
+            OR m.producto_id = (SELECT id FROM core.producto WHERE codigo = $1))
+           AND ($2::date IS NULL OR m.creado_en >= ($2::date::timestamp AT TIME ZONE 'America/Lima'))
+           AND ($3::date IS NULL OR m.creado_en < (($3::date + 1)::timestamp AT TIME ZONE 'America/Lima'))
          ORDER BY m.id DESC LIMIT 1000
        ) x ORDER BY id`,
-      [codigo],
+      [codigo, desde, hasta],
     );
+    // Saldo inicial del período: el saldo del último asiento anterior a «desde».
+    const inicial = desde ? await uno<Record<string, string>>(`SELECT m.saldo_cantidad, m.saldo_valor, m.cpp FROM core.movimiento_inventario m
+       WHERE (m.insumo_id = (SELECT id FROM core.insumo WHERE codigo = $1) OR m.producto_id = (SELECT id FROM core.producto WHERE codigo = $1))
+         AND m.creado_en < ($2::date::timestamp AT TIME ZONE 'America/Lima') ORDER BY m.id DESC LIMIT 1`, [codigo, desde]) : null;
     const valoriza = req.usuario!.permisos.has('costos.ver') || req.usuario!.permisos.has('inventario.mover');
-    return reply.send(filas.map((f) => ({
+    const saldoInicial = inicial ? [{ fecha: `${desde}T00:00`, tipo: 'SALDO_INICIAL', documento: 'Saldo al inicio del período', almacen: '', lote: '', vence: '', cantidad: 0, saldoCantidad: num(inicial.saldo_cantidad),
+      ...(valoriza ? { costoUnitario: 0, valor: 0, saldoValor: num(inicial.saldo_valor), cpp: num(inicial.cpp) } : {}) }] : [];
+    return reply.send([...saldoInicial, ...filas.map((f) => ({
       fecha: f.fecha, tipo: f.tipo, documento: f.documento, almacen: f.almacen ?? '', lote: f.lote ?? '', vence: f.vence ?? '', cantidad: num(f.cantidad), saldoCantidad: num(f.saldo_cantidad),
       ...(valoriza ? { costoUnitario: num(f.costo_unitario), valor: num(f.valor), saldoValor: num(f.saldo_valor), cpp: num(f.cpp) } : {}),
-    })));
+    }))]);
   });
 }

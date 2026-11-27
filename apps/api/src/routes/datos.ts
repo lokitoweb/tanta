@@ -132,7 +132,7 @@ export async function rutasDatos(app: FastifyInstance) {
       recordar('cat:insumos', CATALOGO_MS, () => q<Record<string, string>>(`
         SELECT id, codigo, nombre, unidad, cpp, stock, minimo, proveedor, estado,
                tipo, presentacion, precio_compra, cant_presentacion, equiv_kg, activo, unidad_inventario, core.factor_inventario(id) factor,
-               maneja_stock, presentacion_codigo, costo_formula,
+               maneja_stock, presentacion_codigo, costo_formula, consumo_entero,
                (cpp * stock) AS valorizado
         FROM core.insumo ORDER BY estado DESC, nombre`)),
 
@@ -322,6 +322,7 @@ export async function rutasDatos(app: FastifyInstance) {
           tipo: i.tipo, presentacion: i.presentacion, equivKg: num(i.equiv_kg), activo: Boolean(i.activo),
           unidadInventario: i.unidad_inventario, factor: num(i.factor), contenido: i.cant_presentacion === null ? null : num(i.cant_presentacion),
           manejaStock: i.maneja_stock !== (false as unknown), presentacionCodigo: i.presentacion_codigo ?? '',
+          consumoEntero: Boolean(i.consumo_entero),
         };
         if (!verCosto && !u.permisos.has('inventario.mover')) return base;
         return { ...base, cpp: num(i.cpp), valorizado: num(i.valorizado),

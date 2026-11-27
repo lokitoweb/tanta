@@ -23,6 +23,9 @@ export type Criterio = 'PROPORCIONAL' | 'LOTES_COMPLETOS';
  * Lotes de una orden (RN-18/19): equivalentes = cantidad ÷ unidades esperadas por lote;
  * con "lotes completos" se redondea hacia arriba. Devuelve unidades que se obtendrían y masa.
  */
+/** Consumo de un insumo que se usa entero: 0.25 huevo → 1 (con tolerancia a decimales de la receta). */
+export const usarEntero = (cantidad: number, entero: boolean) => (entero && cantidad > 0 ? Math.ceil(cantidad - 1e-6) : cantidad);
+
 export async function calcularOrden(productoId: string, cantidad: number, criterio: Criterio) {
   const r = await uno<Record<string, string>>(
     `SELECT r.id, r.producto, r.merma_estandar, r.unidades_esperadas, r.masa_lote_kg, r.costo_lote
@@ -32,11 +35,12 @@ export async function calcularOrden(productoId: string, cantidad: number, criter
   const equivalentes = cantidad / porLote;
   const lotes = criterio === 'LOTES_COMPLETOS' ? Math.ceil(equivalentes - 1e-9) : equivalentes;
   const lineas = await q<Record<string, string>>(`
-    SELECT i.id, i.nombre, i.unidad_inventario unidad, i.stock, i.cpp, d.cantidad * core.factor_inventario(i.id) cantidad
+    SELECT i.id, i.nombre, i.unidad_inventario unidad, i.stock, i.cpp, i.consumo_entero, d.cantidad * core.factor_inventario(i.id) cantidad
     FROM core.receta_detalle d JOIN core.insumo i ON i.id = d.insumo_id WHERE d.receta_id = $1 ORDER BY d.orden`, [r.id]);
   // RN-20: consumo = cantidad de receta × lotes · RN-21: saldo = stock − consumo; negativo = FALTA.
   const insumos = lineas.map((l) => {
-    const necesario = num(l.cantidad) * lotes, stock = num(l.stock), saldo = stock - necesario;
+    // Insumo que se usa entero (huevos): no se fracciona, se redondea hacia arriba.
+    const necesario = usarEntero(num(l.cantidad) * lotes, l.consumo_entero as unknown as boolean), stock = num(l.stock), saldo = stock - necesario;
     return {
       insumoId: l.id, insumo: l.nombre, unidad: l.unidad, necesario: Math.round(necesario * 10000) / 10000,
       costo: Math.round(necesario * num(l.cpp) * 100) / 100, stock, saldo: Math.round(saldo * 10000) / 10000,

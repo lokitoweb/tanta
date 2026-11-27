@@ -12,7 +12,11 @@ const TIPOS: Record<string, { label: string; tono: 'ok' | 'danger' | 'warn' | 'i
   APERTURA: { label: 'Apertura', tono: 'neutral' }, COMPRA: { label: 'Compra', tono: 'ok' }, CONSUMO_OP: { label: 'Consumo OP', tono: 'info' },
   INGRESO_PRODUCCION: { label: 'Ingreso producción', tono: 'ok' }, VENTA: { label: 'Venta', tono: 'info' },
   MERMA: { label: 'Merma', tono: 'danger' }, DEVOLUCION: { label: 'Devolución', tono: 'warn' }, AJUSTE: { label: 'Ajuste', tono: 'warn' },
+  SALDO_INICIAL: { label: 'Saldo inicial', tono: 'neutral' },
 };
+
+// Fechas de Lima (UTC−5): período por defecto, el mes en curso.
+const hoyLima = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 /** Kárdex valorizado (A-01) de cualquier insumo o producto. Libro inmutable: ningún asiento se edita. */
 export function Kardex() {
@@ -24,6 +28,8 @@ export function Kardex() {
   const [codigo, setCodigo] = useState(items[0]?.codigo ?? '');
   const [movs, setMovs] = useState<Mov[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [desde, setDesde] = useState(() => hoyLima().slice(0, 8) + '01');
+  const [hasta, setHasta] = useState(hoyLima);
   const item = items.find((i) => i.codigo === codigo);
   const valoriza = puede('costos.ver') || puede('inventario.mover');
 
@@ -31,9 +37,10 @@ export function Kardex() {
     if (!codigo) return;
     setMovs(null);
     setError(null);
-    api<Mov[]>(`/kardex/${encodeURIComponent(codigo)}`).then(setMovs).catch((e) => setError(e.message));
+    const per = new URLSearchParams({ ...(desde ? { desde } : {}), ...(hasta ? { hasta } : {}) });
+    api<Mov[]>(`/kardex/${encodeURIComponent(codigo)}?${per}`).then(setMovs).catch((e) => setError(e.message));
   };
-  useEffect(cargar, [codigo, dataset.movimientos]);
+  useEffect(cargar, [codigo, desde, hasta, dataset.movimientos]);
 
   // Buscador de ítem (escribe nombre o código) y de asientos, con paginación de 50.
   const etiqueta = (i: { nombre: string; codigo: string }) => `${i.nombre} (${i.codigo})`;
@@ -70,6 +77,10 @@ export function Kardex() {
               }} />
             <datalist id="kardex-items">{items.map((i) => <option key={i.codigo} value={etiqueta(i)}>{i.tipo}</option>)}</datalist>
           </label>
+          <label className="filtros__campo"><span>Desde</span>
+            <input type="date" value={desde} max={hasta || undefined} onChange={(e) => setDesde(e.target.value)} /></label>
+          <label className="filtros__campo"><span>Hasta</span>
+            <input type="date" value={hasta} min={desde || undefined} onChange={(e) => setHasta(e.target.value)} /></label>
           {item && <div className="kardex__actual"><span>Viendo</span><b>{item.nombre}</b><Insignia>{item.tipo} · {item.codigo}</Insignia></div>}
         </div>
       </Tarjeta>
@@ -78,16 +89,16 @@ export function Kardex() {
         <Kpi label="Saldo actual" valor={ultimo ? `${num2(ultimo.saldoCantidad)} ${item?.unidad ?? ''}` : '—'} nota="según el último asiento" icono="box" />
         {valoriza && <Kpi label="Valor del saldo" valor={ultimo?.saldoValor !== undefined ? money(ultimo.saldoValor) : '—'} nota="valorizado al CPP" icono="wallet" />}
         {valoriza && <Kpi label="CPP vigente" valor={ultimo?.cpp !== undefined ? money(ultimo.cpp) : '—'} nota={`por ${item?.unidad ?? 'unidad'}`} icono="chart" />}
-        <Kpi label="Asientos" valor={num(movs?.length ?? 0)} nota="inmutables y auditados" icono="ledger" />
+        <Kpi label="Asientos" valor={num(movs?.filter((m) => m.tipo !== 'SALDO_INICIAL').length ?? 0)} nota={desde || hasta ? 'del período elegido' : 'inmutables y auditados'} icono="ledger" />
       </div>
 
       <Tarjeta padding="none">
         {error ? <Vacio titulo="No se pudo cargar" detalle={error} icono="ledger" onReintentar={cargar} />
           : movs === null ? <TablaEsqueleto columnas={6} />
-            : movs.length === 0 ? <Vacio titulo="Sin movimientos" detalle="Nunca ha entrado stock de este ítem: su saldo es 0. Entra con una compra verificada, con «Inventario inicial» (Almacén) o, si es un producto, al cerrar producción." icono="ledger" />
+            : movs.length === 0 ? <Vacio titulo="Sin movimientos" detalle={desde || hasta ? 'No hay asientos en este período ni antes de él: su saldo es 0. Prueba con otras fechas, o entra stock con una compra verificada, «Inventario inicial» (Almacén) o, si es un producto, al cerrar producción.' : 'Nunca ha entrado stock de este ítem: su saldo es 0. Entra con una compra verificada, con «Inventario inicial» (Almacén) o, si es un producto, al cerrar producción.'} icono="ledger" />
               : (
                 <>
-                <div className="tabla__barra"><Buscador valor={filtroMov} onChange={setFiltroMov} placeholder="Buscar por documento, OP, venta o motivo…" /><span className="t-muted">{recientes.length} asientos</span></div>
+                <div className="tabla__barra"><Buscador valor={filtroMov} onChange={setFiltroMov} placeholder="Buscar por documento, OP, venta o motivo…" /><span className="t-muted">{recientes.filter((m) => m.tipo !== 'SALDO_INICIAL').length} asientos</span></div>
                 <div className="table-wrap">
                   {/* Estructura del Excel del cliente (CPP): entrada con su costo, salida, stock, valor del stock y CPP vigente. */}
                   <table className="table table--kardex">

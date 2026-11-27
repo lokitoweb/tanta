@@ -338,6 +338,8 @@ async function main() {
       );
       idInsumo.set(codigo, r.rows[0].id);
     }
+    // Migración 073: lo que se lleva por UNIDAD (huevos) se usa entero.
+    await c.query("UPDATE core.insumo SET consumo_entero = true WHERE unidad_inventario = 'UNIDAD'");
     // MAE-09: los proveedores salen de los insumos de ejemplo y quedan vinculados.
     await c.query(`INSERT INTO core.proveedor (razon_social) SELECT DISTINCT proveedor FROM core.insumo WHERE proveedor <> '' ON CONFLICT DO NOTHING`);
     await c.query('UPDATE core.insumo i SET proveedor_id = p.id FROM core.proveedor p WHERE lower(i.proveedor) = lower(p.razon_social)');
