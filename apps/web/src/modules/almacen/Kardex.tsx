@@ -84,7 +84,7 @@ export function Kardex() {
       <Tarjeta padding="none">
         {error ? <Vacio titulo="No se pudo cargar" detalle={error} icono="ledger" onReintentar={cargar} />
           : movs === null ? <TablaEsqueleto columnas={6} />
-            : movs.length === 0 ? <Vacio titulo="Sin movimientos" detalle="Este ítem aún no tiene asientos en el kárdex." icono="ledger" />
+            : movs.length === 0 ? <Vacio titulo="Sin movimientos" detalle="Nunca ha entrado stock de este ítem: su saldo es 0. Entra con una compra verificada, con «Inventario inicial» (Almacén) o, si es un producto, al cerrar producción." icono="ledger" />
               : (
                 <>
                 <div className="tabla__barra"><Buscador valor={filtroMov} onChange={setFiltroMov} placeholder="Buscar por documento, OP, venta o motivo…" /><span className="t-muted">{recientes.length} asientos</span></div>

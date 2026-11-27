@@ -230,59 +230,126 @@ class _DialogoCierreState extends State<_DialogoCierre> {
   }
 }
 
-/// Almacén: stock de insumos con semáforo de mínimo.
-class Almacen extends StatelessWidget {
+/// Almacén: stock de insumos (semáforo de mínimo) y de productos terminados (stock, apartado y libre).
+class Almacen extends StatefulWidget {
   const Almacen({super.key, required this.datos});
   final Map<String, dynamic> datos;
 
   @override
+  State<Almacen> createState() => _AlmacenState();
+}
+
+class _AlmacenState extends State<Almacen> {
+  bool _productos = false;
+  String _busca = '';
+
+  static double _n(Object? v) => (v as num?)?.toDouble() ?? 0;
+  static String _cant(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+  bool _coincide(Map<String, dynamic> x) =>
+      _busca.isEmpty || '${x['nombre']} ${x['codigo'] ?? ''}'.toLowerCase().contains(_busca.toLowerCase());
+
+  @override
   Widget build(BuildContext context) {
-    final insumos = (datos['insumos'] as List? ?? const []).cast<Map<String, dynamic>>();
+    final insumos = (widget.datos['insumos'] as List? ?? const []).cast<Map<String, dynamic>>();
+    // Productos de venta (no sub-recetas: su stock es el del insumo que producen); los inactivos solo si aún tienen stock.
+    final productos = (widget.datos['productos'] as List? ?? const []).cast<Map<String, dynamic>>()
+        .where((p) => p['insumoId'] == null && (p['estado'] == 'ACTIVO' || _n(p['stock']) > 0)).toList();
     final criticos = insumos.where((i) => i['estado'] == 'BAJO_MINIMO').length;
+    final agotados = productos.where((p) => _n(p['disponible']) <= 0).length;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 32),
       children: [
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('Insumos'), icon: Icon(Icons.inventory_2_outlined)),
+            ButtonSegment(value: true, label: Text('Productos terminados'), icon: Icon(Icons.bakery_dining_outlined)),
+          ],
+          selected: {_productos},
+          onSelectionChanged: (v) => setState(() => _productos = v.first),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            hintText: _productos ? 'Buscar producto…' : 'Buscar insumo…',
+            isDense: true,
+          ),
+          onChanged: (v) => setState(() => _busca = v.trim()),
+        ),
+        const SizedBox(height: 12),
         TituloSeccion('',
-            subtitulo: '$criticos insumos bajo el stock mínimo'),
+            subtitulo: _productos
+                ? '$agotados productos sin stock libre para vender'
+                : '$criticos insumos bajo el stock mínimo'),
         const SizedBox(height: 14),
-        ...insumos.map((i) {
-          final stock = (i['stock'] as num?)?.toDouble() ?? 0;
-          final minimo = (i['minimo'] as num?)?.toDouble() ?? 1;
-          final critico = i['estado'] == 'BAJO_MINIMO';
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Panel(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('${i['nombre']}',
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      ),
-                      Insignia(critico ? 'Reponer' : 'Disponible',
-                          tono: critico ? Tono.danger : Tono.ok, punto: true),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${stock.toStringAsFixed(1)} ${i['unidad']} · mínimo ${minimo.toStringAsFixed(0)}',
-                    style: const TextStyle(fontSize: 12, color: TantaColors.textMuted),
-                  ),
-                  const SizedBox(height: 8),
-                  Progreso(
-                    valor: minimo > 0 ? stock / (minimo * 3) : 1,
-                    color: critico ? TantaColors.stateDanger : TantaColors.stateOk,
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
+        if (_productos) ...productos.where(_coincide).map(_producto) else ...insumos.where(_coincide).map(_insumo),
       ],
+    );
+  }
+
+  Widget _producto(Map<String, dynamic> p) {
+    final stock = _n(p['stock']), reservado = _n(p['reservado']), libre = _n(p['disponible']), vencido = _n(p['vencido']);
+    final u = '${p['unidad'] ?? 'unid'}'.toLowerCase();
+    final extraVencido = vencido > 0 ? ' · vencido ${_cant(vencido)}' : '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Panel(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text('${p['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+                Insignia(libre > 0 ? 'Disponible' : 'Agotado', tono: libre > 0 ? Tono.ok : Tono.danger, punto: true),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Stock ${_cant(stock)} $u · apartado para pedidos ${_cant(reservado)} · libre ${_cant(libre)}$extraVencido',
+              style: const TextStyle(fontSize: 12, color: TantaColors.textMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _insumo(Map<String, dynamic> i) {
+    final stock = _n(i['stock']);
+    final minimo = (i['minimo'] as num?)?.toDouble() ?? 1;
+    final critico = i['estado'] == 'BAJO_MINIMO';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Panel(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('${i['nombre']}',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                ),
+                Insignia(critico ? 'Reponer' : 'Disponible',
+                    tono: critico ? Tono.danger : Tono.ok, punto: true),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${stock.toStringAsFixed(1)} ${i['unidad']} · mínimo ${minimo.toStringAsFixed(0)}',
+              style: const TextStyle(fontSize: 12, color: TantaColors.textMuted),
+            ),
+            const SizedBox(height: 8),
+            Progreso(
+              valor: minimo > 0 ? stock / (minimo * 3) : 1,
+              color: critico ? TantaColors.stateDanger : TantaColors.stateOk,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
