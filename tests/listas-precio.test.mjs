@@ -86,3 +86,21 @@ test('listas de precios: se crean con precios propios, el cliente asignado paga 
   const inactiva = await api(ven, 'POST', '/pedidos', { clienteId: cliente, items: [{ productoId: prod, cantidad: 1 }] });
   assert.equal(precioPedido(inactiva.b.codigo, prod), Number(catalogo));
 });
+
+test('OBS-03: la lista General es la de todo cliente nuevo, no se inactiva y el cambio de precio queda auditado', async () => {
+  const sa = await login('superadmin');
+  const nuevo = await api(sa, 'POST', '/clientes', { nombre: `Cliente General ${Date.now()}`, docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', diasCredito: 0, limiteCredito: 0 });
+  assert.equal(nuevo.s, 201, JSON.stringify(nuevo.b));
+  assert.equal(sql(`SELECT lista_precio FROM core.cliente WHERE id = '${nuevo.b.id}'`), 'GENERAL', 'sin elegir lista queda en la General');
+  sql(`DELETE FROM core.cliente WHERE id = '${nuevo.b.id}'`);
+  assert.equal((await api(sa, 'PUT', '/listas-precio/GENERAL', { nombre: 'General', activa: false })).s, 422, 'la General no se inactiva');
+
+  const nombre = `Prueba auditoría ${Date.now()}`;
+  const c = await api(sa, 'POST', '/listas-precio', { nombre, precios: [{ productoId: prod, precio: 5 }] });
+  assert.equal(c.s, 201);
+  try {
+    assert.equal((await api(sa, 'PUT', `/listas-precio/${c.b.codigo}`, { nombre, precios: [{ productoId: prod, precio: 6.5 }] })).s, 200);
+    const det = JSON.parse(sql(`SELECT detalle::text FROM audit.evento WHERE accion = 'LISTA_PRECIO_EDITADA' AND entidad_id = '${c.b.codigo}' ORDER BY creado_en DESC LIMIT 1`));
+    assert.deepEqual(det.precios.map((x) => [x.antes, x.despues]), [[5, 6.5]], 'precio anterior y nuevo');
+  } finally { sql(`DELETE FROM core.lista_precio WHERE codigo = '${c.b.codigo}'`); }
+});

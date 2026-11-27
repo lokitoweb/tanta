@@ -1,7 +1,7 @@
 import { Paginador, filtrarTexto, usePaginado } from './Paginador';
 import { Buscador } from './primitives';
 import { useMemo, useState } from 'react';
-import { money, num2, pct } from '@/core/format';
+import { money, moneyUnit, num2, pct } from '@/core/format';
 import { Insignia } from './primitives';
 import { Icon, type NombreIcono } from './icons';
 
@@ -9,7 +9,8 @@ import { Icon, type NombreIcono } from './icons';
 export interface AccionFila { etiqueta: string | ((f: Fila) => string); icono: NombreIcono | ((f: Fila) => NombreIcono); onClick: (f: Fila) => void; visible?: (f: Fila) => boolean; peligro?: boolean | ((f: Fila) => boolean) }
 const valorDe = <T,>(v: T | ((f: Fila) => T), f: Fila): T => (typeof v === 'function' ? (v as (f: Fila) => T)(f) : v);
 
-export interface ColRep { key: string; label: string; tipo?: 'dinero' | 'pct' | 'num' | 'texto' | 'fecha' | 'semaforo' }
+export interface ColRep { key: string; label: string; tipo?: 'dinero' | 'dinero4' | 'pct' | 'num' | 'texto' | 'fecha' | 'semaforo' }
+const NUMERICAS = ['dinero', 'dinero4', 'pct', 'num'];
 type Fila = Record<string, unknown>;
 
 const SEMAFORO: Record<string, { tono: 'ok' | 'warn' | 'danger'; txt: string }> = {
@@ -19,9 +20,12 @@ const SEMAFORO: Record<string, { tono: 'ok' | 'warn' | 'danger'; txt: string }> 
 export function formatear(v: unknown, tipo?: ColRep['tipo'], fila?: Fila): React.ReactNode {
   if (v === null || v === undefined || v === '') return <span className="t-muted">—</span>;
   if (typeof v === 'boolean') return <Insignia tono={v ? 'ok' : 'neutral'} punto>{v ? 'Sí' : 'No'}</Insignia>;
+  // Un texto en una columna numérica («Sin costo») se muestra tal cual.
+  if (typeof v === 'string' && tipo && NUMERICAS.includes(tipo) && !Number.isFinite(Number(v))) return <span className="t-muted">{v}</span>;
   // Filas de reporte que traen su propio formato (G-01, G-09); un campo «tipo» de negocio (tipo de insumo) no cuenta.
   const t = (tipo === 'dinero' && ['dinero', 'pct', 'num'].includes(String(fila?.tipo))) ? fila!.tipo as ColRep['tipo'] : tipo;
   if (t === 'dinero') return money(v as number);
+  if (t === 'dinero4') return moneyUnit(v as number);
   if (t === 'pct') return pct(v as number);
   if (t === 'num') return Number.isInteger(v) ? (v as number).toLocaleString('es-PE') : num2(v as number);
   if (t === 'fecha') return String(v).slice(0, 16).replace('T', ' ');
@@ -30,7 +34,9 @@ export function formatear(v: unknown, tipo?: ColRep['tipo'], fila?: Fila): React
 }
 
 /** Tabla de reporte: columnas tipadas, orden por clic, buscador, paginación y totales de columnas de dinero. */
-export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [] }: { columnas: ColRep[]; filas: Fila[]; onFila?: (f: Fila) => void; acciones?: AccionFila[];
+export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [], totales = true }: { columnas: ColRep[]; filas: Fila[]; onFila?: (f: Fila) => void; acciones?: AccionFila[];
+  /** Fila Total de las columnas de dinero (reportes). En un maestro no tiene sentido: sumaría precios de productos distintos. */
+  totales?: boolean;
   /** Si existe, cada fila muestra un botón de eliminar (no abre la edición). */
   onEliminar?: (f: Fila) => void }) {
   const [orden, setOrden] = useState<{ key: string; asc: boolean } | null>(null);
@@ -46,7 +52,7 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [
   }, [filas, orden, texto]);
   const pag = usePaginado(ordenadas, 50);
   // El total sigue a la búsqueda: suma lo que se ve, no todo el reporte.
-  const sumables = columnas.filter((c) => c.tipo === 'dinero' && ordenadas.length > 1 && ordenadas.every((f) => typeof f[c.key] === 'number' && !f.tipo));
+  const sumables = !totales ? [] : columnas.filter((c) => c.tipo === 'dinero' && ordenadas.length > 1 && ordenadas.every((f) => typeof f[c.key] === 'number' && !f.tipo));
 
   return (
     <>
@@ -55,7 +61,7 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [
       <table className="table">
         <thead>
           <tr>{columnas.map((c) => {
-            const der = ['dinero', 'pct', 'num'].includes(c.tipo ?? '');
+            const der = NUMERICAS.includes(c.tipo ?? '');
             const activo = orden?.key === c.key;
             return (
               <th key={c.key} className={der ? 't-right' : ''} aria-sort={activo ? (orden!.asc ? 'ascending' : 'descending') : 'none'}>
@@ -69,7 +75,7 @@ export function TablaReporte({ columnas, filas, onFila, onEliminar, acciones = [
           {pag.visibles.map((f, i) => (
             <tr key={i} className={onFila ? 'is-clickable' : ''} onClick={onFila ? () => onFila(f) : undefined}>
               {columnas.map((c) => (
-                <td key={c.key} className={`${['dinero', 'pct', 'num'].includes(c.tipo ?? '') ? 't-right' : ''} ${c.tipo === 'pct' && typeof f[c.key] === 'number' && (f[c.key] as number) < 0 ? 't-neg' : ''}`}>
+                <td key={c.key} className={`${NUMERICAS.includes(c.tipo ?? '') ? 't-right' : ''} ${c.tipo === 'pct' && typeof f[c.key] === 'number' && (f[c.key] as number) < 0 ? 't-neg' : ''}`}>
                   {formatear(f[c.key], c.tipo, f)}
                 </td>))}
               {(onEliminar || acciones.length > 0) && (

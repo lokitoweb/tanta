@@ -132,7 +132,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
         {cargaError ? <Vacio titulo="No se pudo cargar" detalle={cargaError} onReintentar={() => { setCargaError(null); setFilas(null); void refrescar(); }} />
           : filas === null ? <TablaEsqueleto columnas={Math.min(columnas.length, 6)} />
           : visibles.length === 0 ? <Vacio titulo="Sin registros" detalle={q ? 'Prueba con otra búsqueda.' : 'Crea el primero con «Nuevo».'} />
-            : <TablaReporte columnas={columnas} filas={visibles} // Excel: cada fila con «Modificar» visible (además del clic en la fila) y sus acciones propias.
+            : <TablaReporte totales={false} columnas={columnas} filas={visibles} // Excel: cada fila con «Modificar» visible (además del clic en la fila) y sus acciones propias.
               acciones={[...(editar ? [{ etiqueta: 'Modificar', icono: 'edit' as const, onClick: (f: Reg) => { setError(null); setForm({ ...f }); } }] : []), ...(accionesFila ?? [])]}
               onFila={editar ? (f) => { setError(null); setForm({ ...f }); } : undefined}
               onEliminar={eliminar ? (f) => { setErrorBorrar(null); setABorrar(f); } : undefined} />}

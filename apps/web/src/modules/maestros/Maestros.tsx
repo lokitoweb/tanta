@@ -3,7 +3,7 @@ import { InputNumero } from '@/ui/InputNumero';
 import { api } from '@/core/api';
 import { useCatalogos } from '@/core/catalogos';
 import { useApp } from '@/core/app-state';
-import { money, num, pct } from '@/core/format';
+import { money, moneyUnit, num, pct } from '@/core/format';
 import { exportarExcel } from '@/core/exportar';
 import { Crud, type Campo } from '@/ui/Crud';
 import { Dialogo } from '@/ui/Dialogo';
@@ -38,7 +38,7 @@ export function Clientes() {
     <>
     <Crud titulo="Clientes" nombreExport="clientes" descripcion="Datos, crédito y lista de precios. El límite de crédito se valida en cada venta al crédito."
       cargar={() => api<Reg[]>('/clientes')}
-      nuevo={{ nombre: '', contacto: '', docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', listaPrecio: 'MINORISTA', condicionPago: 'CONTADO', diasCredito: 0, limiteCredito: 0, estado: 'ACTIVO', vendedorId: '' }}
+      nuevo={{ nombre: '', contacto: '', docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', listaPrecio: 'GENERAL', condicionPago: 'CONTADO', diasCredito: 0, limiteCredito: 0, estado: 'ACTIVO', vendedorId: '' }}
       crear={guardar('POST', '/clientes')} editar={(id, d) => api(`/clientes/${id}`, { method: 'PATCH', body: d })}
       accionesFila={[{ etiqueta: 'Direcciones', icono: 'truck', onClick: (f) => setDirs({ id: String(f.id), nombre: String(f.nombre) }) }]}
       columnas={[
@@ -186,6 +186,7 @@ export function Productos() {
           presentacionCodigo: p.presentacionCodigo ?? 'UNID',
           precioUnidad: p.precioConIgv,
           precioConIgv: Math.round(p.precioConIgv * (p.presentacionEquivalencia ?? 1) * 100) / 100,
+          costoUnitario: p.costoUnitario > 0 ? p.costoUnitario : 'Sin costo', margen: p.costoUnitario > 0 ? p.margen : '',
         } as unknown as Reg))}
         nuevo={{ codigo: '', nombre: '', categoriaId: cats[0]?.valor ?? '', unidad: 'UNIDAD', precioConIgv: 0, estado: 'ACTIVO', sku: '', presentacionCodigo: presVenta[0]?.valor ?? 'UNID', presentaciones: [] }}
         // Alta en dos pasos: se crea (código, nombre, categoría, precio) y se guardan los datos de producción con la misma validación de la edición.
@@ -415,7 +416,7 @@ export function Insumos() {
           { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'tipo', label: 'Tipo' }, { key: 'presentacion', label: 'Presentación' },
           { key: 'cantPresentacion', label: 'Equivalencia', tipo: 'num' }, { key: 'unidad', label: 'En' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
           { key: 'stock', label: 'Stock', tipo: 'num' },
-          ...(verCosto ? [{ key: 'precioConIgv', label: 'Precio', tipo: 'dinero' } as ColRep, { key: 'precioUnit', label: 'Precio unit.', tipo: 'dinero' } as ColRep] : []),
+          ...(verCosto ? [{ key: 'precioConIgv', label: 'Precio', tipo: 'dinero' } as ColRep, { key: 'precioUnit', label: 'Precio unit.', tipo: 'dinero4' } as ColRep] : []),
           { key: 'manejaStock', label: 'Maneja stock' }, { key: 'estadoTxt', label: 'Estado' },
         ]}
         campos={[
@@ -428,13 +429,13 @@ export function Insumos() {
             opciones: [{ valor: '', texto: 'Elige…' }, ...presCompra.map((p) => ({ valor: p.codigo, texto: p.nombre }))],
             alCambiar: (v) => { const p = presCompra.find((x) => x.codigo === v); return p ? { cantPresentacion: p.equivalencia, presentacion: p.nombre } : {}; },
             ayuda: 'Saco x 50 kg, botella 900 ml… (Maestros → Catálogos → Presentaciones de compra)' },
-          { key: 'cantPresentacion', label: 'Cantidad por presentación (en unidad base)', tipo: 'numero', ayuda: 'Saco x 50 kg = 50 · botella 900 ml con base L = 0.9' },
+          { key: 'cantPresentacion', label: 'Equivalencia (unidad base que trae una presentación)', tipo: 'numero', requerido: true, ayuda: 'Mayor que 0. Saco x 50 kg = 50 · celda x 30 = 30 · botella 1 L de aceite con base kg = 0.92' },
           { key: 'equivKg', label: 'Conversión a kg (por 1 unidad base)', tipo: 'numero', ayuda: 'Para aceite, leche, huevos… que se compran en L o unidad y se pesan en kg. Aceite: 0.916 · huevo: 0.05' },
           { key: 'unidadInventario', label: 'Unidad en la que se lleva el stock', tipo: 'select', opciones: op(cat.unidades), ayuda: 'No se cambia si el insumo ya tiene stock' },
           { key: 'precioConIgv', label: 'Precio actual con IGV (S/)', tipo: 'numero', ayuda: 'Por presentación, como figura en el comprobante' },
           { key: 'c-sinigv', label: 'Precio actual sin IGV', tipo: 'calculado', calcular: (f) => (n(f.precioConIgv) > 0 ? money(n(f.precioConIgv) / (1 + igv)) : '—'), ayuda: `Con IGV ÷ ${(1 + igv).toFixed(2)}` },
           { key: 'c-costobase', label: 'Costo por unidad base', tipo: 'calculado',
-            calcular: (f) => (n(f.precioConIgv) > 0 && n(f.cantPresentacion) > 0 ? `${money(n(f.precioConIgv) / (1 + igv) / n(f.cantPresentacion))} por ${String(f.unidad ?? '').toLowerCase()}` : '—'),
+            calcular: (f) => (n(f.precioConIgv) > 0 && n(f.cantPresentacion) > 0 ? `${moneyUnit(n(f.precioConIgv) / (1 + igv) / n(f.cantPresentacion))} por ${String(f.unidad ?? '').toLowerCase()}` : '—'),
             ayuda: 'Precio sin IGV ÷ cantidad por presentación. Desde la primera compra manda el costo de las compras' },
           { key: 's-stock', label: 'Stock', tipo: 'seccion' },
           { key: 'minimo', label: 'Stock mínimo (en la unidad del stock)', tipo: 'numero', ayuda: 'Por debajo se avisa a Almacén y Gerencia' },

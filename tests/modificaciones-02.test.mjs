@@ -85,14 +85,18 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   assert.equal(h.s, 200, JSON.stringify(h.b));
   const fila = h.b.filas.find((f) => f.productoId === prodA);
   assert.ok(fila.pedido >= 10);
-  assert.ok(Object.values(fila.porCliente).includes(10), 'columna por cliente');
-  assert.ok(h.b.insumos.length > 0 && h.b.insumos.every((i) => ['NORMAL', 'ALERTA', 'FALTA'].includes(i.estado)));
+  // Observaciones 04: Producción (sin pedidos.ver ni inventario.ver) ve cuánto hacer, no los clientes ni el consumo de insumos.
+  const sinPermisos = sql("SELECT count(*) FROM core.rol_permiso WHERE rol_id = 'PRODUCCION' AND permiso_id IN ('pedidos.ver','inventario.ver')") === '0';
+  if (sinPermisos) assert.ok(h.b.clientes.length === 0 && Object.keys(fila.porCliente).length === 0 && h.b.insumos.length === 0, 'producción no ve clientes ni consumos');
+  const hAdm = (await api(adm, 'GET', `/produccion/hoja?fecha=${fecha}`)).b;
+  assert.ok(Object.values(hAdm.filas.find((f) => f.productoId === prodA).porCliente).includes(10), 'columna por cliente');
+  assert.ok(hAdm.insumos.length > 0 && hAdm.insumos.every((i) => ['NORMAL', 'ALERTA', 'FALTA'].includes(i.estado)));
   const pedido = fila.pedido;
   // Word 04: consumo, stock actual y saldo; costo unitario y total solo para quien ve costos.
   const kardex = (await api(adm, 'GET', `/produccion/hoja?fecha=${fecha}`)).b.insumos;
   assert.ok(kardex.every((i) => Math.abs(i.stock - i.cantidad - i.restante) < 0.001), 'saldo = stock actual − consumo');
   assert.ok(kardex.every((i) => Math.abs(i.costoUnitario * i.cantidad - i.costoTotal) < 0.02) && kardex.some((i) => i.costoTotal > 0), 'costo total = consumo × costo unitario');
-  assert.ok(!('costoTotal' in h.b.insumos[0]) || sql("SELECT count(*) FROM core.rol_permiso WHERE rol_id = 'PRODUCCION' AND permiso_id = 'costos.ver'") !== '0');
+  assert.ok(!h.b.insumos[0] || !('costoTotal' in h.b.insumos[0]) || sql("SELECT count(*) FROM core.rol_permiso WHERE rol_id = 'PRODUCCION' AND permiso_id = 'costos.ver'") !== '0');
 
   // Cerrar pedidos: pasan a producción.
   assert.equal((await api(cli, 'POST', '/produccion/hoja/cerrar-pedidos', { fecha })).s, 403, 'un cliente no cierra');

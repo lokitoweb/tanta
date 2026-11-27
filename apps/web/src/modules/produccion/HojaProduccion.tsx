@@ -49,7 +49,7 @@ export function HojaProduccion() {
   const [hoja, setHoja] = useState<Abierta | null>(null);
   const [hojas, setHojas] = useState<Hoja[]>([]);
   const [det, setDet] = useState<Detalle | null>(null);
-  const [reales, setReales] = useState<Record<string, { real: string; merma: string }>>({});
+  const [reales, setReales] = useState<Record<string, string>>({});
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -71,7 +71,7 @@ export function HojaProduccion() {
   const abrir = async (codigo: string) => {
     const d = await api<Detalle>(`/produccion/hojas/${encodeURIComponent(codigo)}`);
     setDet(d); setConfirmado(false);
-    setReales(Object.fromEntries(d.resumen.map((r) => [r.productoId, { real: String(r.real ?? r.pedido), merma: '0' }])));
+    setReales(Object.fromEntries(d.resumen.map((r) => [r.productoId, String(r.real ?? r.pedido)])));
   };
   const accion = async (fn: () => Promise<string>) => {
     setOcupado(true); setAviso(null);
@@ -85,7 +85,7 @@ export function HojaProduccion() {
   });
   const cerrarProduccion = () => accion(async () => {
     const r = await api<{ listos: number; sinStock: string[] }>(`/produccion/hojas/${encodeURIComponent(det!.codigo)}/cerrar`, { method: 'POST',
-      body: { lineas: det!.resumen.map((x) => ({ productoId: x.productoId, real: Number(reales[x.productoId]?.real) || 0, merma: Number(reales[x.productoId]?.merma) || 0 })), confirmar: confirmado } });
+      body: { lineas: det!.resumen.map((x) => ({ productoId: x.productoId, real: Number(reales[x.productoId]) || 0 })), confirmar: confirmado } });
     const c = det!.codigo;
     await abrir(c);
     return `${c} grabada: los panes entraron al almacén y se descargaron los insumos · ${r.listos} pedido(s) listo(s) para despacho${r.sinStock.length ? ` · sin stock: ${r.sinStock.join(', ')}` : ''}.`;
@@ -94,9 +94,9 @@ export function HojaProduccion() {
   const enCurso = hojas.filter((h) => h.estado === 'EN_PRODUCCION');
   const faltaInsumo = hoja?.insumos.some((i) => i.estado === 'FALTA');
   const conCosto = hoja?.insumos.some((i) => i.costoTotal !== undefined) ?? false;
-  const producido = (id: string) => Number(reales[id]?.real) || 0;
+  const producido = (id: string) => Number(reales[id]) || 0;
   const fuera = det?.estado === 'EN_PRODUCCION' && det.tolerancia > 0 ? det.resumen.filter((r) => r.pedido > 0 && Math.abs(producido(r.productoId) - r.pedido) / r.pedido > det.tolerancia) : [];
-  const fijar = (id: string, campo: 'real' | 'merma', v: string) => { setConfirmado(false); setReales({ ...reales, [id]: { real: reales[id]?.real ?? '', merma: reales[id]?.merma ?? '0', [campo]: v } }); };
+  const fijar = (id: string, v: string) => { setConfirmado(false); setReales({ ...reales, [id]: v }); };
 
   return (
     <>
@@ -114,7 +114,7 @@ export function HojaProduccion() {
         )}
         <Tarjeta padding="none">
           <div className="card__head card__head--padded">
-            <TarjetaTitulo titulo={`Pedidos para el ${dma(hoja.fecha)}`} subtitulo="El código de lote se asigna al cerrar los pedidos" />
+            <TarjetaTitulo titulo={`Producción para el ${dma(hoja.fecha)}`} subtitulo="El código de lote se asigna al cerrar los pedidos" />
             <div className="fila-acciones">
               <input className="field__input" type="date" aria-label="Fecha de entrega" value={hoja.fecha} onChange={(e) => setFecha(e.target.value)} />
               <Boton icono="download" disabled={!hoja.filas.length} onClick={() => aExcel(`hoja-produccion-${hoja.fecha}`, hoja.clientes, hoja.filas)}>Excel</Boton>
@@ -170,17 +170,14 @@ export function HojaProduccion() {
             <>
               <h4 className="hoja__titulo">Resumen de lo producido</h4>
               <div className="table-wrap"><table className="table table--compacta">
-                <thead><tr><th>Pan</th><th className="t-right">Solicitado</th><th className="t-right">Producido</th><th className="t-right">Merma</th><th className="t-right">Diferencia</th></tr></thead>
-                <tbody>{det.resumen.map((r) => { const dif = producido(r.productoId) - r.pedido; return (
+                <thead><tr><th>Producto</th><th className="t-right">Solicitado</th><th className="t-right">Producido</th></tr></thead>
+                <tbody>{det.resumen.map((r) => (
                   <tr key={r.productoId}><td><strong>{r.producto}</strong></td><td className="t-right">{num(r.pedido)}</td>
-                    <td className="t-right"><InputNumero className="field__input hoja__celda" aria-label={`${r.producto}: producido`} valor={aNumero(reales[r.productoId]?.real ?? '')} onValor={(n) => fijar(r.productoId, 'real', String(n))} /></td>
-                    <td className="t-right"><InputNumero className="field__input hoja__celda" aria-label={`${r.producto}: merma`} valor={aNumero(reales[r.productoId]?.merma ?? '')} onValor={(n) => fijar(r.productoId, 'merma', String(n))} /></td>
-                    <td className={`t-right ${fuera.includes(r) ? 't-neg' : 't-muted'}`}>{dif > 0 ? '+' : ''}{num(dif)}</td></tr>); })}</tbody>
-                <tfoot><tr><td><strong>Total</strong></td><td className="t-right"><strong>{num(det.resumen.reduce((a, r) => a + r.pedido, 0))}</strong></td><td className="t-right"><strong>{num(det.resumen.reduce((a, r) => a + producido(r.productoId), 0))}</strong></td><td /><td /></tr></tfoot>
+                    <td className={`t-right ${fuera.includes(r) ? 't-neg' : ''}`}><InputNumero className="field__input hoja__celda" aria-label={`${r.producto}: producido`} valor={aNumero(reales[r.productoId] ?? '')} onValor={(n) => fijar(r.productoId, String(n))} /></td></tr>))}</tbody>
               </table></div>
               {fuera.length > 0 && <div className="aviso aviso--danger" role="alert"><span className="aviso__icono">!</span><div><p>
                 {fuera.map((r) => `${r.producto}: solicitado ${num(r.pedido)}, producido ${num(producido(r.productoId))}`).join(' · ')}. {confirmado ? 'Si la cantidad es correcta, pulsa «Sí, grabar así».' : 'Revisa la cantidad antes de grabar.'}</p></div></div>}
-              <p className="dialogo__nota">Al grabar, los panes entran al almacén de productos y se descargan los insumos del kárdex.</p>
+              <p className="dialogo__nota">Lo producido es lo que entra al almacén de productos (si se hizo más de lo solicitado, entra todo).</p>
             </>
           )}
           {det.estado === 'CERRADA' && puede('costos.ver') && (<>

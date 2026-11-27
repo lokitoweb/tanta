@@ -102,5 +102,8 @@ export function partesQueSuman(partes: number[], total: number): number[] {
 // Kárdex (formato del Excel de CPP): cantidades y costo unitario con 3 decimales.
 const PEN3 = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 3, maximumFractionDigits: 3 });
 const NUM3 = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+const PEN4 = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 4, maximumFractionDigits: 4 });
+/** OBS-03: precio por unidad base; bajo S/ 1 con 4 decimales (agua S/ 0.0028 no se ve como S/ 0.00). */
+export const moneyUnit = (n: number) => (Number.isFinite(n) && n !== 0 && Math.abs(n) < 1 ? PEN4.format(n) : money(n));
 export const money3 = (n: number) => (Number.isFinite(n) ? PEN3.format(Math.abs(n) < 0.0005 ? 0 : n) : '—');
 export const num3 = (n: number) => NUM3.format(n ?? 0);

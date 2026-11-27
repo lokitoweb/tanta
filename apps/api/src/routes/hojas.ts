@@ -16,7 +16,8 @@ import { avisar } from './notificaciones.js';
 
 type Fila = { productoId: string; producto: string; porCliente: Record<string, number>; pedido: number };
 
-async function matriz(filtro: string, params: unknown[]) {
+/** Word 04: sin pedidos.ver no se ve a qué cliente va cada pan (Producción solo ve cuánto hacer). */
+async function matriz(filtro: string, params: unknown[], verClientes = true) {
   const lineas = await q<Record<string, string>>(`
     SELECT p.cliente_id, p.cliente, d.producto_id, d.producto, sum(d.cantidad) cantidad
     FROM core.pedido p JOIN core.pedido_detalle d ON d.pedido_id = p.id
@@ -31,6 +32,7 @@ async function matriz(filtro: string, params: unknown[]) {
     f.pedido += num(l.cantidad);
     filas.set(l.producto_id, f);
   }
+  if (!verClientes) return { clientes: [], filas: [...filas.values()].map((f) => ({ ...f, porCliente: {} })) };
   return { clientes: [...clientes].map(([id, nombre]) => ({ id, nombre })), filas: [...filas.values()] };
 }
 
@@ -56,11 +58,15 @@ async function insumosDe(filas: Fila[], verCostos: boolean) {
   return { insumos, sinReceta };
 }
 
-async function detalleHoja(codigo: string, verCostos: boolean) {
+/** Qué ve cada rol de la hoja (Sistema → Roles): clientes con pedidos.ver; insumos y consumos con inventario.ver; costos con costos.ver. */
+const vista = (permisos: Set<string>) => ({ clientes: permisos.has('pedidos.ver'), insumos: permisos.has('inventario.ver'), costos: permisos.has('costos.ver') });
+
+async function detalleHoja(codigo: string, ver: ReturnType<typeof vista>) {
+  const verCostos = ver.costos;
   const h = await uno<Record<string, string>>(`SELECT h.id, h.codigo, h.fecha::text, h.estado, h.creado_en::text, h.cerrada_en::text, u.nombre cerrada_por, h.turno, t.nombre turno_nombre
     FROM core.hoja_produccion h LEFT JOIN core.usuario u ON u.id = h.cerrada_por LEFT JOIN core.turno_produccion t ON t.codigo = h.turno WHERE h.codigo = $1`, [codigo]);
   if (!h) return null;
-  const { clientes, filas } = await matriz('p.hoja_id = $1', [h.id]);
+  const { clientes, filas } = await matriz('p.hoja_id = $1', [h.id], ver.clientes);
   const ops = await q<Record<string, string>>(`SELECT o.codigo, o.producto_id, o.producto, o.cantidad, o.cantidad_producida, o.costo_total, p.precio_con_igv
     FROM core.orden_produccion o JOIN core.producto p ON p.id = o.producto_id WHERE o.hoja_id = $1 AND o.estado <> 'ANULADA' ORDER BY o.producto`, [h.id]);
   const igv = num((await uno<{ valor: string }>("SELECT valor FROM core.parametro WHERE clave = 'igv'"))?.valor ?? '0.18');
@@ -72,10 +78,10 @@ async function detalleHoja(codigo: string, verCostos: boolean) {
     return { op: o.codigo, productoId: o.producto_id, producto: o.producto, pedido: num(o.cantidad), real,
       ...(verCostos ? { costo, venta, rentabilidad, pctRentabilidad: venta && rentabilidad !== null ? Number((rentabilidad / venta * 100).toFixed(2)) : null } : {}) };
   });
-  const usados = await q<Record<string, string>>(`SELECT i.nombre insumo, i.unidad_inventario unidad, sum(-m.cantidad) cantidad, sum(-m.valor) costo
+  const usados = !ver.insumos ? [] : await q<Record<string, string>>(`SELECT i.nombre insumo, i.unidad_inventario unidad, sum(-m.cantidad) cantidad, sum(-m.valor) costo
     FROM core.movimiento_inventario m JOIN core.insumo i ON i.id = m.insumo_id
     WHERE m.tipo = 'CONSUMO_OP' AND m.documento = ANY($1::text[]) GROUP BY i.nombre, i.unidad_inventario ORDER BY i.nombre`, [ops.map((o) => o.codigo)]);
-  const porComprar = await q<Record<string, string>>(`SELECT nombre insumo, unidad_inventario unidad, stock, minimo, minimo - stock falta FROM core.insumo
+  const porComprar = !ver.insumos ? [] : await q<Record<string, string>>(`SELECT nombre insumo, unidad_inventario unidad, stock, minimo, minimo - stock falta FROM core.insumo
     WHERE activo AND maneja_stock AND stock < minimo ORDER BY (minimo - stock) DESC LIMIT 100`);
   const n = (x: string) => num(x);
   return {
@@ -98,8 +104,11 @@ export async function rutasHojas(app: FastifyInstance) {
     const fechas = (await q<{ fecha: string }>(`SELECT DISTINCT p.fecha_entrega::text fecha FROM core.pedido p JOIN core.pedido_detalle d ON d.pedido_id = p.id
       WHERE p.estado = 'CONFIRMADO' AND d.promocion_id IS NULL ORDER BY 1 LIMIT 30`)).map((f) => f.fecha);
     const fecha = p.data.fecha ?? fechas[0] ?? await fechaEntregaSugerida();
-    const { clientes, filas } = await matriz("p.estado = 'CONFIRMADO' AND p.fecha_entrega = $1::date", [fecha]);
-    return { fecha, fechas, clientes, filas, ...(await insumosDe(filas, req.usuario!.permisos.has('costos.ver'))) };
+    const ver = vista(req.usuario!.permisos);
+    const { clientes, filas } = await matriz("p.estado = 'CONFIRMADO' AND p.fecha_entrega = $1::date", [fecha], ver.clientes);
+    // Sin receta se avisa a todos; el kárdex (consumos y totales) solo a quien ve el inventario.
+    const { insumos, sinReceta } = await insumosDe(filas, ver.costos);
+    return { fecha, fechas, clientes, filas, insumos: ver.insumos ? insumos : [], sinReceta };
   });
 
   // Historial: toda hoja, en curso o cerrada.
@@ -117,7 +126,7 @@ export async function rutasHojas(app: FastifyInstance) {
 
   app.get('/produccion/hojas/:codigo', { preHandler: autenticar }, async (req, reply) => {
     if (!exigir(req, reply, 'produccion.ver')) return;
-    const d = await detalleHoja((req.params as { codigo: string }).codigo, req.usuario!.permisos.has('costos.ver'));
+    const d = await detalleHoja((req.params as { codigo: string }).codigo, vista(req.usuario!.permisos));
     return d ?? reply.code(404).send(error(404, 'NO_ENCONTRADO', 'La hoja no existe.'));
   });
 

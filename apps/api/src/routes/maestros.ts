@@ -636,7 +636,7 @@ export async function rutasMaestros(app: FastifyInstance) {
   const Cliente = z.object({
     nombre: texto(2, 160), contacto: z.string().trim().max(120).default(''), docTipo: z.enum(['DNI', 'RUC', 'CE']), docNumero: z.string().trim().regex(/^[0-9A-Za-z]{0,15}$/, 'Solo letras y números'),
     telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido'), email: z.union([z.literal(''), z.string().trim().email().max(160)]),
-    direccion: z.string().trim().max(200), listaPrecio: z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{2,40}$/, 'Elige una lista de precios'),
+    direccion: z.string().trim().max(200), listaPrecio: z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{2,40}$/, 'Elige una lista de precios').default('GENERAL'),
     diasCredito: z.number().int().min(0).max(120), limiteCredito: dinero, estado: z.enum(['ACTIVO', 'INACTIVO']).default('ACTIVO'),
     // COB-03 / MAE-08: si no se indica, es al crédito quien tiene plazo o línea.
     condicionPago: z.enum(['CONTADO', 'CREDITO']).optional(), vendedorId: z.union([z.literal(''), z.string().uuid()]).default(''),
@@ -776,17 +776,27 @@ export async function rutasMaestros(app: FastifyInstance) {
     if (await uno('SELECT 1 FROM core.lista_precio WHERE lower(nombre) = lower($1) AND codigo <> $2', [d.nombre, codigo])) {
       return reply.code(409).send(error(409, 'LISTA_DUPLICADA', 'Ya existe una lista con ese nombre.'));
     }
+    if (codigo === 'GENERAL' && !d.activa) return reply.code(422).send(error(422, 'LISTA_GENERAL', 'La lista General no se inactiva: es la que reciben los clientes nuevos.'));
     try {
       const antes = await tx(async (c) => {
         const a = (await c.query<{ nombre: string; n: string }>(`SELECT nombre, (SELECT count(*) FROM core.lista_precio_item WHERE lista_codigo = $1) n
           FROM core.lista_precio WHERE codigo = $1 FOR UPDATE`, [codigo])).rows[0];
         if (!a) throw Object.assign(new Error('La lista no existe.'), { status: 404 });
+        const previos = new Map((await c.query<{ producto_id: string; producto: string; precio: string }>(`SELECT i.producto_id, p.nombre producto, i.precio_con_igv precio
+          FROM core.lista_precio_item i JOIN core.producto p ON p.id = i.producto_id WHERE i.lista_codigo = $1`, [codigo])).rows.map((x) => [x.producto_id, x]));
         await c.query('UPDATE core.lista_precio SET nombre = $2, descripcion = $3, activa = $4, orden = $5 WHERE codigo = $1', [codigo, d.nombre, d.descripcion, d.activa, d.orden]);
         await guardarPrecios(c, codigo, d.precios);
-        return a;
+        const nuevos = new Map(d.precios.map((x) => [x.productoId, x.precio]));
+        const nombres = new Map((await c.query<{ id: string; nombre: string }>('SELECT id, nombre FROM core.producto WHERE id = ANY($1::uuid[])', [[...nuevos.keys()]])).rows.map((x) => [x.id, x.nombre]));
+        // null = precio del catálogo.
+        const cambios = [...new Set([...previos.keys(), ...nuevos.keys()])].flatMap((id) => {
+          const ant = previos.has(id) ? Number(previos.get(id)!.precio) : null, nue = nuevos.get(id) ?? null;
+          return ant === nue ? [] : [{ producto: nombres.get(id) ?? previos.get(id)?.producto ?? id, antes: ant, despues: nue }];
+        });
+        return { ...a, cambios };
       });
       await auditar({ ...actor(req), accion: 'LISTA_PRECIO_EDITADA', entidad: 'lista_precio', entidadId: codigo,
-        detalle: { antes: { nombre: antes.nombre, productos: Number(antes.n) }, despues: { nombre: d.nombre, activa: d.activa, productos: d.precios.length } }, ip: req.ip });
+        detalle: { antes: { nombre: antes.nombre, productos: Number(antes.n) }, despues: { nombre: d.nombre, activa: d.activa, productos: d.precios.length }, precios: antes.cambios.slice(0, 500) }, ip: req.ip });
       return { codigo, ...d };
     } catch (e) {
       const err = e as Error & { status?: number };

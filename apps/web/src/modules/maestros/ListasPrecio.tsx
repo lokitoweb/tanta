@@ -17,7 +17,9 @@ const vacio: Form = { codigo: null, nombre: '', descripcion: '', activa: true, o
  * Un producto sin precio en la lista se cobra al del catálogo. La oferta vale para todos y manda sobre la lista.
  */
 export function ListasPrecio() {
-  const { dataset } = useApp();
+  const { dataset, puede } = useApp();
+  const igv = dataset.negocio.igv;
+  const verCosto = puede('costos.ver');
   const productos = useMemo(() => dataset.productos.filter((p) => p.estado === 'ACTIVO' && !p.insumoId), [dataset.productos]);
   const [listas, setListas] = useState<Resumen[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -100,7 +102,7 @@ export function ListasPrecio() {
                   <input className="field__input" maxLength={200} value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} /></label>
                 <label className="field"><span className="field__label">Estado</span>
                   <select className="field__input" value={form.activa ? '1' : '0'} onChange={(e) => setForm({ ...form, activa: e.target.value === '1' })}>
-                    <option value="1">Activa</option><option value="0">Inactiva (sus clientes pagan el precio del catálogo)</option></select></label>
+                    <option value="1">Activa</option>{form.codigo !== 'GENERAL' && <option value="0">Inactiva (sus clientes pagan el precio del catálogo)</option>}</select></label>
               </div>
 
               {form.codigo && (
@@ -117,6 +119,8 @@ export function ListasPrecio() {
                   {filtrados.map((p) => {
                     const v = form.precios[p.id] ?? '', n = Number(v.replace(',', '.'));
                     const dif = v.trim() && n > 0 && p.precioConIgv > 0 ? n / p.precioConIgv - 1 : null;
+                    // Margen negativo: el precio sin IGV no cubre el costo del pan.
+                    const bajoCosto = verCosto && v.trim() !== '' && n > 0 && p.costoUnitario > 0 && n / (1 + igv) < p.costoUnitario;
                     return (
                       <tr key={p.id}>
                         <td>{p.nombre}</td>
@@ -126,7 +130,8 @@ export function ListasPrecio() {
                             value={v} placeholder="catálogo" onChange={(e) => ponerPrecio(p.id, e.target.value)} />
                         </td>
                         <td className="t-right">{dif === null ? <span className="t-muted">—</span>
-                          : <Insignia tono={dif < 0 ? 'ok' : dif > 0 ? 'warn' : 'neutral'}>{dif > 0 ? '+' : ''}{Math.round(dif * 1000) / 10} %</Insignia>}</td>
+                          : <Insignia tono={dif < 0 ? 'ok' : dif > 0 ? 'warn' : 'neutral'}>{dif > 0 ? '+' : ''}{Math.round(dif * 1000) / 10} %</Insignia>}
+                          {bajoCosto && <> <Insignia tono="danger">Bajo el costo ({money(p.costoUnitario * (1 + igv))} con IGV)</Insignia></>}</td>
                       </tr>
                     );
                   })}
@@ -134,6 +139,7 @@ export function ListasPrecio() {
               </table>
               <p className="t-muted" style={{ marginTop: 8 }}>Deja el precio vacío para cobrar el del catálogo. Los paquetes (docena, etc.) bajan o suben en la misma proporción que la unidad.</p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+                {form.codigo && <Boton icono="plus" onClick={() => { setNota('Copia lista: cambia el nombre y los precios que quieras y pulsa «Guardar lista».'); setForm({ ...form, codigo: null, nombre: `${form.nombre} (copia)`.slice(0, 60), clientes: [], activa: true }); }}>Duplicar</Boton>}
                 <Boton onClick={() => setForm(null)}>Cancelar</Boton>
                 <Boton variant="primary" disabled={guardando || form.nombre.trim().length < 2 || invalidos.length > 0} onClick={() => void guardar()}>
                   {guardando ? 'Guardando…' : 'Guardar lista'}</Boton>

@@ -166,7 +166,7 @@ class _HojaProduccionState extends State<HojaProduccion> {
                         ),
                       ),
                     Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                      Text('Pedidos para el ${_dma(fecha)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                      Text('Producción para el ${_dma(fecha)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
                       const Text('El código de lote se asigna al cerrar los pedidos', style: TextStyle(fontSize: 11.5, color: TantaColors.textMuted)),
                       if (fechas.length > 1) ...[
                         const SizedBox(height: 8),
@@ -245,7 +245,6 @@ class _DetalleHojaState extends State<DetalleHoja> {
   String? _error;
   bool _ocupado = false;
   final _real = <String, TextEditingController>{};
-  final _merma = <String, TextEditingController>{};
   double _num(TextEditingController? c) => double.tryParse((c?.text ?? '').replaceAll(',', '.')) ?? 0;
 
   @override
@@ -256,7 +255,7 @@ class _DetalleHojaState extends State<DetalleHoja> {
 
   @override
   void dispose() {
-    for (final c in [..._real.values, ..._merma.values]) { c.dispose(); }
+    for (final c in _real.values) { c.dispose(); }
     super.dispose();
   }
 
@@ -265,7 +264,6 @@ class _DetalleHojaState extends State<DetalleHoja> {
       final d = await Api.instancia.detalleHoja(widget.codigo);
       for (final r in (d['resumen'] as List).cast<Map<String, dynamic>>()) {
         _real.putIfAbsent('${r['productoId']}', () => TextEditingController(text: _c((r['real'] ?? r['pedido']) as num)));
-        _merma.putIfAbsent('${r['productoId']}', () => TextEditingController(text: '0'));
       }
       if (mounted) setState(() { _d = d; _error = null; });
     } on ApiException catch (e) {
@@ -300,7 +298,7 @@ class _DetalleHojaState extends State<DetalleHoja> {
     setState(() => _ocupado = true);
     try {
       final r = await Api.instancia.cerrarProduccionHoja(widget.codigo, [
-        for (final e in _real.entries) {'productoId': e.key, 'real': _num(e.value), 'merma': _num(_merma[e.key])},
+        for (final e in _real.entries) {'productoId': e.key, 'real': _num(e.value)},
       ], confirmar: fuera.isNotEmpty);
       await _cargar();
       final falta = (r['sinStock'] as List? ?? const []);
@@ -334,26 +332,30 @@ class _DetalleHojaState extends State<DetalleHoja> {
                   const SizedBox(height: 14),
                   Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     const Text('Resumen de lo producido', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                    if (abierta) const Text('Al grabar, los panes entran al almacén y se descargan los insumos', style: TextStyle(fontSize: 11.5, color: TantaColors.textMuted)),
+                    if (abierta) const Text('Lo producido es lo que entra al almacén (si se hizo más de lo solicitado, entra todo)', style: TextStyle(fontSize: 11.5, color: TantaColors.textMuted)),
                     const SizedBox(height: 8),
+                    const Row(children: [
+                      Expanded(flex: 3, child: Text('Producto', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: TantaColors.textMuted))),
+                      Expanded(flex: 2, child: Text('Solicitado', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: TantaColors.textMuted))),
+                      SizedBox(width: 12),
+                      Expanded(flex: 2, child: Text('Producido', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: TantaColors.textMuted))),
+                    ]),
+                    const Divider(height: 14),
                     for (final r in resumen) Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: abierta
-                          ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Expanded(flex: 3, child: TextField(controller: _real['${r['productoId']}'], keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: InputDecoration(labelText: '${r['producto']}', helperText: 'Solicitado: ${_c(r['pedido'] as num)}'))),
-                              const SizedBox(width: 10),
-                              Expanded(flex: 2, child: TextField(controller: _merma['${r['productoId']}'], keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(labelText: 'Merma'))),
-                            ])
-                          : Row(children: [
-                              Expanded(child: Text('${r['producto']}')),
-                              Text('${_c((r['real'] ?? 0) as num)} de ${_c(r['pedido'] as num)}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                            ]),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(children: [
+                        Expanded(flex: 3, child: Text('${r['producto']}', style: const TextStyle(fontWeight: FontWeight.w600))),
+                        Expanded(flex: 2, child: Text(_c(r['pedido'] as num), textAlign: TextAlign.right)),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 2, child: abierta
+                            ? TextField(controller: _real['${r['productoId']}'], textAlign: TextAlign.right, keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: const InputDecoration(isDense: true, hintText: 'Producido'))
+                            : Text(_c((r['real'] ?? 0) as num), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w700))),
+                      ]),
                     ),
                     if (abierta && Api.instancia.puede('produccion.ejecutar'))
                       FilledButton(onPressed: _ocupado ? null : _cerrar, child: Text(_ocupado ? 'Grabando…' : 'Grabar producción')),
-                    if (!abierta && (d['insumosPorComprar'] as List).isNotEmpty) ...[
+                    if (!abierta && ((d['insumosPorComprar'] as List?) ?? const []).isNotEmpty) ...[
                       const Divider(height: 22),
                       const Text('Insumos por comprar', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                       for (final i in (d['insumosPorComprar'] as List).cast<Map<String, dynamic>>())
