@@ -383,6 +383,8 @@ export function Insumos() {
         cargar={async () => dataset.insumos.map((i) => ({
           ...i, activo: i.activo ?? true, estadoTxt: i.activo === false ? 'INACTIVO' : 'ACTIVO', manejaStock: i.manejaStock ?? true,
           precioConIgv: i.precioCompra === null || i.precioCompra === undefined ? '' : Math.round(i.precioCompra * (1 + igv) * 100) / 100,
+          // Precio con IGV de una unidad base (kg, L, unidad): precio de la presentación ÷ su equivalencia.
+          precioUnit: i.precioCompra != null && (i.cantPresentacion ?? 0) > 0 ? Math.round(i.precioCompra * (1 + igv) / i.cantPresentacion! * 10_000) / 10_000 : '',
         } as unknown as Reg))}
         nuevo={{ codigo: '', nombre: '', unidad: 'KG', unidadInventario: 'KG', minimo: 0, proveedor: '', activo: true, tipo: 'OTRO', presentacionCodigo: '', presentacion: '',
           precioConIgv: '', cantPresentacion: '', equivKg: '', manejaStock: true }}
@@ -404,9 +406,11 @@ export function Insumos() {
             peligro: (f: Reg) => f.activo !== false, onClick: (f: Reg) => void cambiarEstado(f) }] : []),
         ]}
         columnas={[
+          // Columnas pedidas por el ingeniero: cómo se compra (presentación = equivalencia en su unidad) y a cuánto.
+          // El stock y su valor se consultan en Almacén.
           { key: 'codigo', label: 'Código' }, { key: 'nombre', label: 'Insumo' }, { key: 'tipo', label: 'Tipo' }, { key: 'presentacion', label: 'Presentación' },
-          { key: 'stock', label: 'Stock', tipo: 'num' }, { key: 'unidadInventario', label: 'En' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
-          ...(verCosto ? [{ key: 'costoFormulas', label: 'Costo (fórmulas)', tipo: 'dinero' } as ColRep, { key: 'cpp', label: 'Costo compras', tipo: 'dinero' } as ColRep] : []),
+          { key: 'cantPresentacion', label: 'Equivalencia', tipo: 'num' }, { key: 'unidad', label: 'En' }, { key: 'minimo', label: 'Mínimo', tipo: 'num' },
+          ...(verCosto ? [{ key: 'precioConIgv', label: 'Precio', tipo: 'dinero' } as ColRep, { key: 'precioUnit', label: 'Precio unit.', tipo: 'dinero' } as ColRep] : []),
           { key: 'manejaStock', label: 'Maneja stock' }, { key: 'estadoTxt', label: 'Estado' },
         ]}
         campos={[
