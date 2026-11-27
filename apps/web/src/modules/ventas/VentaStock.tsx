@@ -9,14 +9,14 @@ const hoy = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10
 interface Disponible { id: string; codigo: string; nombre: string; precio: number; stock: number; apartado: number; vencido: number; libre: number; venceHoy: number;
   proximoVence: string | null; promocion: { id: string; titulo: string; precio: number } | null }
 interface Aprobacion { id: string; porcentaje: number; estado: string; vigente: boolean; cliente: string | null }
-export interface Direccion { id: string | null; direccion: string; referencia: string; principal: boolean }
+export interface Direccion { id: string | null; alias?: string; direccion: string; referencia: string; telefono?: string; principal: boolean }
 
 /** Dirección de entrega: se elige de las registradas del cliente (no se escribe) o recojo en tienda. */
 export function SelectorDireccion({ direcciones, valor, onChange, ayuda }: { direcciones: Direccion[]; valor: string; onChange: (v: string) => void; ayuda: string }) {
   return (
     <label className="field"><span className="field__label">Entrega</span>
       <select className="field__input" value={valor} onChange={(e) => onChange(e.target.value)}>
-        {direcciones.map((d) => <option key={d.direccion} value={d.direccion}>{d.direccion}{d.referencia ? ` (${d.referencia})` : ''}{d.principal ? ' · principal' : ''}</option>)}
+        {direcciones.map((d) => <option key={d.direccion} value={d.direccion}>{d.alias ? `${d.alias}: ` : ''}{d.direccion}{d.referencia ? ` (${d.referencia})` : ''}{d.principal ? ' · principal' : ''}</option>)}
         <option value="">Recojo en tienda</option>
       </select>
       <span className="field__ayuda">{direcciones.length ? ayuda : `Sin direcciones registradas: ${ayuda.charAt(0).toLowerCase()}${ayuda.slice(1)}`}</span></label>

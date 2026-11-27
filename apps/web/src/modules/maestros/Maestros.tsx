@@ -56,7 +56,8 @@ export function Clientes() {
         // Las demás direcciones (las que el cliente elige al pedir en la app o la web) se administran aquí mismo.
         { key: 'a-direcciones', label: 'Otras direcciones de entrega', tipo: 'accion', texto: 'Ver y agregar direcciones', ancho: true,
           alClic: (f) => setDirs({ id: String(f.id), nombre: String(f.nombre) }),
-          ayuda: 'El cliente elige entre ellas al hacer su pedido. En un cliente nuevo, guárdalo primero' },
+          // La ficha se cierra al abrirlas: así no se guarda encima una dirección principal vieja.
+          ayuda: 'Alias, teléfono, editar y elegir la principal. El cliente elige entre ellas al pedir. Guarda antes los cambios de la ficha (se cierra al abrirlas)' },
         { key: 'listaPrecio', label: 'Lista de precios', tipo: 'select', opciones: listas, ayuda: 'Se crean y ponen sus precios en Maestros → Listas de precios' },
         { key: 'condicionPago', label: 'Condición de pago', tipo: 'select', opciones: [{ valor: 'CONTADO', texto: 'Contado' }, { valor: 'CREDITO', texto: 'Crédito (puede comprar a plazo)' }] },
         { key: 'diasCredito', label: 'Días de crédito', tipo: 'numero' }, { key: 'limiteCredito', label: 'Límite de crédito (S/)', tipo: 'numero' },

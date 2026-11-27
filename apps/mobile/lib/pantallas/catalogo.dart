@@ -374,6 +374,8 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
   // La dirección se elige de las registradas (no se escribe); sin ninguna, se agrega a Mi perfil y queda elegida (CLI-09).
   final _dir = TextEditingController();
   List<String> _dirs = const [];
+  // Alias de cada dirección (Casa, Local…) para reconocerla al elegir.
+  Map<String, String> _alias = const {};
   final _obs = TextEditingController();
   // Boleta, factura o nota de pedido (catálogo administrable; la factura exige RUC y lo valida el servidor).
   String? _comp = comprobantesVenta().firstOrNull?['codigo'] as String?;
@@ -388,10 +390,12 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
 
   Future<void> _cargarDirecciones() async {
     try {
-      final l = (await Api.instancia.misDirecciones()).map((d) => '${(d as Map)['direccion']}').toList();
+      final ds = (await Api.instancia.misDirecciones()).cast<Map>();
+      final l = ds.map((d) => '${d['direccion']}').toList();
       if (!mounted) return;
       setState(() {
         _dirs = l;
+        _alias = {for (final d in ds) '${d['direccion']}': '${d['alias'] ?? ''}'};
         if (l.isNotEmpty && !l.contains(_dir.text)) _dir.text = l.first;
       });
     } catch (_) {}
@@ -412,7 +416,7 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
     if (nueva == null || !mounted) return;
     final aviso = ScaffoldMessenger.of(context);
     try {
-      await Api.instancia.agregarDireccion(nueva, '');
+      await Api.instancia.agregarDireccion({'direccion': nueva});
       _dir.text = nueva;
       await _cargarDirecciones();
     } on ApiException catch (e) {
@@ -474,6 +478,7 @@ class _ConfirmarPedidoState extends State<ConfirmarPedido> {
               contentPadding: EdgeInsets.zero, dense: true,
               leading: Icon(_dir.text == d ? Icons.radio_button_checked : Icons.radio_button_unchecked, color: _dir.text == d ? TantaColors.ink800 : TantaColors.textMuted),
               title: Text(d),
+              subtitle: (_alias[d] ?? '').isEmpty ? null : Text(_alias[d]!),
               onTap: () => setState(() => _dir.text = d),
             ),
           Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: _agregarDireccion, icon: const Icon(Icons.add_location_alt_outlined), label: const Text('Otra dirección'))),

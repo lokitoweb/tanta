@@ -152,7 +152,33 @@ test('Dirección elegida (no escrita) y varias direcciones en la ficha del clien
   const ok = await api(ven, 'POST', '/pedidos', { clienteId: cliente, items: [{ productoId: prod, cantidad: 1 }], tipoEntrega: 'DELIVERY', direccion: elegida });
   assert.equal(ok.s, 201, JSON.stringify(ok.b));
   await api(ven, 'PATCH', `/pedidos/${ok.b.codigo}/estado`, { estado: 'CANCELADO', motivo: 'Fin de prueba' });
-  if (n.s === 201) assert.equal((await api(adm, 'DELETE', `/clientes/${cliente}/direcciones/${n.b.id}`)).s, 200);
+  // Un cliente sin dirección en su ficha: la primera que se agrega pasa a ser la principal (OBS-03-04).
+  if (n.s === 201 && n.b.id) assert.equal((await api(adm, 'DELETE', `/clientes/${cliente}/direcciones/${n.b.id}`)).s, 200);
+  else if (n.s === 201) sql(`UPDATE core.cliente SET direccion = '', direccion_referencia = '' WHERE id = '${cliente}'`);
+});
+
+test('OBS-03-04: direcciones con alias y teléfono; la primera es la principal, se editan y se cambia la principal (una sola)', async () => {
+  const adm = await login('lbermudez');
+  const c = await api(adm, 'POST', '/clientes', { nombre: `Cliente direcciones ${randomUUID().slice(0, 6)}`, docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', diasCredito: 0, limiteCredito: 0 });
+  assert.equal(c.s, 201, JSON.stringify(c.b));
+  const base = `/clientes/${c.b.id}/direcciones`;
+  try {
+    const casa = await api(adm, 'POST', base, { alias: 'Casa', direccion: 'Jr. Casa 123, Lima', telefono: '999 111 222' });
+    assert.equal(casa.s, 201, JSON.stringify(casa.b));
+    assert.equal(casa.b.principal, true, 'sin principal, la primera lo es');
+    const local = await api(adm, 'POST', base, { alias: 'Local', direccion: 'Av. Local 456, Lima', referencia: 'Frente al parque' });
+    assert.equal(local.s, 201);
+    assert.equal((await api(adm, 'POST', base, { direccion: 'jr. casa 123, lima' })).s, 409, 'repetida');
+    assert.equal((await api(adm, 'POST', base, { direccion: 'Calle X 1', telefono: 'abc' })).s, 422, 'teléfono inválido');
+    assert.equal((await api(adm, 'PATCH', `${base}/${local.b.id}`, { alias: 'Tienda', direccion: 'Av. Local 456, Lima', referencia: 'Frente al parque' })).s, 200);
+    assert.equal((await api(adm, 'POST', `${base}/${local.b.id}/principal`)).s, 200);
+    const l = (await api(adm, 'GET', base)).b.direcciones;
+    assert.equal(l.filter((d) => d.principal).length, 1, 'una sola principal');
+    assert.deepEqual([l[0].alias, l[0].direccion], ['Tienda', 'Av. Local 456, Lima'], 'la marcada pasa a principal');
+    assert.ok(l.some((d) => !d.principal && d.alias === 'Casa' && d.telefono === '999 111 222'), 'la anterior queda como una más, con sus datos');
+    assert.equal(sql(`SELECT direccion FROM core.cliente WHERE id = '${c.b.id}'`), 'Av. Local 456, Lima', 'la principal es la de la ficha');
+    assert.equal((await api(adm, 'DELETE', `${base}/principal`)).s, 404, 'la principal no se quita');
+  } finally { sql(`DELETE FROM core.cliente WHERE id = '${c.b.id}'`); }
 });
 
 test('Factura de SUNAT: se sube en PDF al pedido y solo su cliente (o el personal) la descarga', async () => {

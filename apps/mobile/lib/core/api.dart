@@ -430,7 +430,10 @@ class Api {
   Future<void> cancelarPedido(String codigo, String motivo) async => await _post('/pedidos/$codigo/cancelar', {'motivo': motivo});
 
   Future<List<dynamic>> misDirecciones() async => await _get('/mis-direcciones') as List<dynamic>;
-  Future<void> agregarDireccion(String direccion, String referencia) async => await _post('/mis-direcciones', {'direccion': direccion, 'referencia': referencia});
+  /// OBS-03-04: alias (Casa, Local…), dirección, referencia y teléfono. id 'principal' = la de la ficha.
+  Future<void> agregarDireccion(Map<String, String> d) async => await _post('/mis-direcciones', d);
+  Future<void> editarDireccion(String id, Map<String, String> d) async => await _enviar('PATCH', '/mis-direcciones/$id', d);
+  Future<void> direccionPrincipal(String id) async => await _post('/mis-direcciones/$id/principal', {});
   Future<void> quitarDireccion(String id) async => await _enviar('DELETE', '/mis-direcciones/$id', {});
 
   /// Ficha del cliente: contacto, documento, celular y direcciones (máximo en Parámetros).

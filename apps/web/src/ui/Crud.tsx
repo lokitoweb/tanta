@@ -154,7 +154,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
           ) : c.tipo === 'accion' ? (
             <div key={c.key} className={`field ${c.ancho ? 'field--ancho' : ''}`}>
               <span className="field__label">{c.label}</span>
-              <div><Boton type="button" icono="truck" disabled={!form?.id} onClick={() => form && c.alClic?.(form)}>{c.texto ?? c.label}</Boton></div>
+              <div><Boton type="button" icono="truck" disabled={!form?.id} onClick={() => { if (!form) return; const f = form; setForm(null); c.alClic?.(f); }}>{c.texto ?? c.label}</Boton></div>
               {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}
             </div>
           ) : c.tipo === 'calculado' ? (

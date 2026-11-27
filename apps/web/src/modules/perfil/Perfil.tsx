@@ -5,6 +5,7 @@ import { imagenABase64 } from '@/core/imagen';
 import { fechaHora } from '@/core/format';
 import { Avatar, Boton, Encabezado, PilaEsqueleto, Tarjeta, TarjetaTitulo, Vacio } from '@/ui/primitives';
 import { Dialogo } from '@/ui/Dialogo';
+import { ListaDirecciones } from '@/modules/maestros/DireccionesCliente';
 
 interface PerfilDatos {
   id: string; nombre: string; usuario: string; email: string; telefono: string;
@@ -162,7 +163,7 @@ export function Perfil() {
 }
 
 interface Ficha { nombre: string; contacto: string; docTipo: string; docNumero: string; telefono: string; email: string;
-  direcciones: Array<{ id: string | null; direccion: string; referencia: string; principal: boolean }>; maxDirecciones: number }
+ }
 
 /**
  * Ficha del cliente (solo cuentas de cliente): contacto, documento, celular y sus direcciones de entrega.
@@ -171,7 +172,6 @@ interface Ficha { nombre: string; contacto: string; docTipo: string; docNumero: 
 function FichaCliente({ onAviso }: { onAviso: (a: { tono: 'ok' | 'danger'; texto: string }) => void }) {
   const [f, setF] = useState<Ficha | null>(null);
   const [datos, setDatos] = useState({ contacto: '', telefono: '' });
-  const [nueva, setNueva] = useState({ direccion: '', referencia: '' });
   const [ocupado, setOcupado] = useState(false);
   const cargar = () => api<Ficha>('/mi-ficha').then((x) => { setF(x); setDatos({ contacto: x.contacto ?? '', telefono: x.telefono ?? '' }); }).catch(() => setF(null));
   useEffect(() => { void cargar(); }, []);
@@ -182,7 +182,6 @@ function FichaCliente({ onAviso }: { onAviso: (a: { tono: 'ok' | 'danger'; texto
     catch (e) { onAviso({ tono: 'danger', texto: e instanceof Error ? e.message : 'No se pudo guardar.' }); }
     finally { setOcupado(false); }
   };
-  const lleno = f.direcciones.length >= f.maxDirecciones;
   return (
     <Tarjeta>
       <TarjetaTitulo titulo="Mi ficha de cliente" subtitulo={`${f.nombre} · ${f.docTipo} ${f.docNumero || '—'} · el documento lo actualiza la panadería`} />
@@ -193,20 +192,8 @@ function FichaCliente({ onAviso }: { onAviso: (a: { tono: 'ok' | 'danger'; texto
           <input className="field__input" type="tel" required minLength={6} maxLength={30} value={datos.telefono} onChange={(e) => setDatos({ ...datos, telefono: e.target.value })} /></label>
         <div className="form__acciones field--ancho"><Boton variant="primary" type="submit" disabled={ocupado}>Guardar ficha</Boton></div>
       </form>
-      <h4 className="card__sub">Direcciones de entrega · {f.direcciones.length} de {f.maxDirecciones}</h4>
-      <ul className="lista-direcciones">{f.direcciones.map((d, i) => (
-        <li key={d.id ?? `p${i}`}><span>{d.direccion}{d.referencia && <span className="t-muted"> · {d.referencia}</span>}{d.principal && <span className="badge">Principal</span>}</span>
-          {d.id && <Boton size="sm" disabled={ocupado} onClick={() => void hacer(() => api(`/mis-direcciones/${d.id}`, { method: 'DELETE' }), 'Dirección eliminada.')}>Quitar</Boton>}</li>))}
-      </ul>
-      {lleno ? <p className="t-muted">Llegaste al máximo de direcciones: quita una para agregar otra.</p> : (
-        <form className="form form--2col" onSubmit={(e) => { e.preventDefault(); void hacer(async () => { await api('/mis-direcciones', { method: 'POST', body: nueva }); setNueva({ direccion: '', referencia: '' }); }, 'Dirección agregada.'); }}>
-          <label className="field"><span className="field__label">Nueva dirección</span>
-            <input className="field__input" required minLength={5} maxLength={200} placeholder="Calle, número, distrito" value={nueva.direccion} onChange={(e) => setNueva({ ...nueva, direccion: e.target.value })} /></label>
-          <label className="field"><span className="field__label">Referencia (opcional)</span>
-            <input className="field__input" maxLength={120} value={nueva.referencia} onChange={(e) => setNueva({ ...nueva, referencia: e.target.value })} /></label>
-          <div className="form__acciones field--ancho"><Boton type="submit" icono="plus" disabled={ocupado}>Agregar dirección</Boton></div>
-        </form>
-      )}
+      <h4 className="card__sub">Mis direcciones de entrega</h4>
+      <ListaDirecciones leer="/mi-ficha" base="/mis-direcciones" onCambio={(texto) => onAviso({ tono: 'ok', texto })} />
     </Tarjeta>
   );
 }

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { q, tx, uno, num, type Cliente } from '../db.js';
 import { autenticar, exigir, error, proyectarCostos } from '../seguridad.js';
@@ -181,10 +181,11 @@ export const parametro = async (clave: string) => (await uno<{ valor: string }>(
 export const parametroSi = async (clave: string) => (await parametro(clave)) === 'true';
 
 /** La principal (registro o ficha que mantiene la empresa) va primero y no se borra desde la app; luego las guardadas. */
-export const direccionesDe = (cli: string) => q<{ id: string | null; direccion: string; referencia: string; principal: boolean }>(
-  `SELECT id, direccion, referencia, principal FROM (
-     SELECT NULL::text id, direccion, '' referencia, true principal, NULL::timestamptz creado_en FROM core.cliente WHERE id = $1 AND length(trim(direccion)) >= 5
-     UNION ALL SELECT id::text, direccion, coalesce(referencia, ''), false, creado_en FROM core.direccion_cliente WHERE cliente_id = $1) d
+export const direccionesDe = (cli: string) => q<{ id: string | null; alias: string; direccion: string; referencia: string; telefono: string; principal: boolean }>(
+  `SELECT id, alias, direccion, referencia, telefono, principal FROM (
+     SELECT NULL::text id, direccion_alias alias, direccion, direccion_referencia referencia, direccion_telefono telefono, true principal, NULL::timestamptz creado_en
+       FROM core.cliente WHERE id = $1 AND length(trim(direccion)) >= 5
+     UNION ALL SELECT id::text, alias, direccion, coalesce(referencia, ''), telefono, false, creado_en FROM core.direccion_cliente WHERE cliente_id = $1) d
    ORDER BY principal DESC, creado_en`, [cli]);
 export const maxDirecciones = async () => {
   const v = Number(await parametro('cliente_max_direcciones'));
@@ -553,27 +554,6 @@ export async function rutasFlujo(app: FastifyInstance) {
     return p.data;
   });
 
-  app.post('/mis-direcciones', { preHandler: autenticar }, async (req, reply) => {
-    const cli = await clienteDe(req.usuario!.id);
-    if (!cli) return reply.code(403).send(error(403, 'SOLO_CLIENTES', 'Solo para cuentas de cliente.'));
-    const p = z.object({ direccion: z.string().trim().min(5).max(200), referencia: z.string().trim().max(120).default('') }).safeParse(req.body);
-    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Escribe la dirección completa.'));
-    // Parámetros → cliente_max_direcciones, contando la dirección principal registrada.
-    const [actuales, max] = [(await direccionesDe(cli)).length, await maxDirecciones()];
-    if (actuales >= max) return reply.code(409).send(error(409, 'LIMITE', `Puedes tener hasta ${max} direcciones: elimina una para agregar otra.`));
-    const r = await uno('INSERT INTO core.direccion_cliente (cliente_id, direccion, referencia) VALUES ($1,$2,$3) RETURNING id, direccion, referencia', [cli, p.data.direccion, p.data.referencia]);
-    return reply.code(201).send(r);
-  });
-
-  app.delete('/mis-direcciones/:id', { preHandler: autenticar }, async (req, reply) => {
-    const cli = await clienteDe(req.usuario!.id);
-    const { id } = req.params as { id: string };
-    if (!cli || !z.string().uuid().safeParse(id).success) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
-    const r = await q('DELETE FROM core.direccion_cliente WHERE id = $1 AND cliente_id = $2 RETURNING id', [id, cli]);
-    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
-    return { ok: true };
-  });
-
   /* ------------------------------------- direcciones de un cliente (personal) */
   // Maestros → Clientes: varias direcciones por cliente (la misma lista que el cliente ve y edita en su perfil).
   const clienteValido = async (id: string) => z.string().uuid().safeParse(id).success && !!(await uno('SELECT 1 FROM core.cliente WHERE id = $1', [id]));
@@ -583,27 +563,106 @@ export async function rutasFlujo(app: FastifyInstance) {
     if (!(await clienteValido(id))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
     return { direcciones: await direccionesDe(id), maxDirecciones: await maxDirecciones() };
   });
-  app.post('/clientes/:id/direcciones', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'clientes.gestionar')) return;
-    const { id } = req.params as { id: string };
-    if (!(await clienteValido(id))) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.'));
-    const p = z.object({ direccion: z.string().trim().min(5).max(200), referencia: z.string().trim().max(120).default('') }).safeParse(req.body);
-    if (!p.success) return reply.code(422).send(error(422, 'DATOS_INVALIDOS', 'Escribe la dirección completa.'));
-    const [actuales, max] = [await direccionesDe(id), await maxDirecciones()];
-    if (actuales.length >= max) return reply.code(409).send(error(409, 'LIMITE', `El cliente puede tener hasta ${max} direcciones (Parámetros → cliente_max_direcciones).`));
-    if (actuales.some((x) => x.direccion.trim().toLowerCase() === p.data.direccion.toLowerCase())) return reply.code(409).send(error(409, 'REPETIDA', 'Esa dirección ya está registrada.'));
-    const r = await uno('INSERT INTO core.direccion_cliente (cliente_id, direccion, referencia) VALUES ($1,$2,$3) RETURNING id, direccion, referencia', [id, p.data.direccion, p.data.referencia]);
-    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CLIENTE_DIRECCION_AGREGADA', entidad: 'cliente', entidadId: id, detalle: p.data, ip: req.ip });
-    return reply.code(201).send(r);
+
+  /*
+   * Alta, edición, cambio de principal y baja: lo mismo para el cliente (Mi perfil) y para el personal (Maestros → Clientes).
+   * «principal» es la dirección de la ficha del cliente; las demás viven en direccion_cliente. Los pedidos guardan su
+   * copia del texto, así que editar o quitar una dirección no cambia el historial (OBS-03-04).
+   */
+  const DatosDir = z.object({
+    alias: z.string().trim().max(40).default(''),
+    direccion: z.string().trim().min(5, 'Escribe la dirección completa.').max(200),
+    referencia: z.string().trim().max(120).default(''),
+    telefono: z.string().trim().max(30).regex(/^[0-9+ ()-]*$/, 'Teléfono inválido.').default(''),
   });
-  app.delete('/clientes/:id/direcciones/:dir', { preHandler: autenticar }, async (req, reply) => {
-    if (!exigir(req, reply, 'clientes.gestionar')) return;
-    const { id, dir } = req.params as { id: string; dir: string };
-    if (!z.string().uuid().safeParse(id).success || !z.string().uuid().safeParse(dir).success) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
-    const r = await q<{ direccion: string }>('DELETE FROM core.direccion_cliente WHERE id = $1 AND cliente_id = $2 RETURNING direccion', [dir, id]);
-    if (!r.length) return reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
-    await auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion: 'CLIENTE_DIRECCION_QUITADA', entidad: 'cliente', entidadId: id, detalle: r[0], ip: req.ip });
-    return { ok: true };
+  const rutasDirecciones = (base: string, dueno: (req: FastifyRequest, reply: FastifyReply) => Promise<string | null>) => {
+    const registrar = (req: FastifyRequest, cli: string, accion: string, detalle: Record<string, unknown>) =>
+      auditar({ actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol, accion, entidad: 'cliente', entidadId: cli, detalle, ip: req.ip });
+    const leer = (req: FastifyRequest, reply: FastifyReply) => {
+      const p = DatosDir.safeParse(req.body);
+      if (!p.success) { void reply.code(422).send(error(422, 'DATOS_INVALIDOS', p.error.issues[0]?.message ?? 'Datos inválidos.')); return null; }
+      return p.data;
+    };
+    // salvo: la que se está editando ('principal' o su id).
+    const repetida = async (cli: string, direccion: string, salvo?: string) =>
+      (await direccionesDe(cli)).some((x) => (x.id ?? 'principal') !== salvo && x.direccion.trim().toLowerCase() === direccion.toLowerCase());
+    const dirValida = (dir: string) => dir === 'principal' || z.string().uuid().safeParse(dir).success;
+    const noEncontrada = (reply: FastifyReply) => reply.code(404).send(error(404, 'NO_ENCONTRADO', 'Dirección no encontrada.'));
+
+    app.post(base, { preHandler: autenticar }, async (req, reply) => {
+      const cli = await dueno(req, reply); if (!cli) return;
+      const d = leer(req, reply); if (!d) return;
+      // Parámetros → cliente_max_direcciones, contando la dirección principal registrada.
+      const [actuales, max] = [await direccionesDe(cli), await maxDirecciones()];
+      if (actuales.length >= max) return reply.code(409).send(error(409, 'LIMITE', `Hasta ${max} direcciones por cliente (Parámetros → cliente_max_direcciones): quita una para agregar otra.`));
+      if (await repetida(cli, d.direccion)) return reply.code(409).send(error(409, 'REPETIDA', 'Esa dirección ya está registrada.'));
+      // Sin principal (cliente sin dirección en su ficha), la primera pasa a serlo.
+      if (!actuales.some((x) => x.principal)) {
+        await q('UPDATE core.cliente SET direccion = $2, direccion_alias = $3, direccion_referencia = $4, direccion_telefono = $5 WHERE id = $1', [cli, d.direccion, d.alias, d.referencia, d.telefono]);
+        await registrar(req, cli, 'CLIENTE_DIRECCION_AGREGADA', { ...d, principal: true });
+        return reply.code(201).send({ id: null, ...d, principal: true });
+      }
+      const r = await uno('INSERT INTO core.direccion_cliente (cliente_id, alias, direccion, referencia, telefono) VALUES ($1,$2,$3,$4,$5) RETURNING id, alias, direccion, referencia, telefono', [cli, d.alias, d.direccion, d.referencia, d.telefono]);
+      await registrar(req, cli, 'CLIENTE_DIRECCION_AGREGADA', d);
+      return reply.code(201).send({ ...r, principal: false });
+    });
+
+    app.patch(`${base}/:dir`, { preHandler: autenticar }, async (req, reply) => {
+      const cli = await dueno(req, reply); if (!cli) return;
+      const { dir } = req.params as { dir: string };
+      if (!dirValida(dir)) return noEncontrada(reply);
+      const d = leer(req, reply); if (!d) return;
+      if (await repetida(cli, d.direccion, dir)) return reply.code(409).send(error(409, 'REPETIDA', 'Esa dirección ya está registrada.'));
+      const r = dir === 'principal'
+        ? await q('UPDATE core.cliente SET direccion = $2, direccion_alias = $3, direccion_referencia = $4, direccion_telefono = $5 WHERE id = $1 RETURNING id', [cli, d.direccion, d.alias, d.referencia, d.telefono])
+        : await q('UPDATE core.direccion_cliente SET alias = $3, direccion = $4, referencia = $5, telefono = $6 WHERE id = $1 AND cliente_id = $2 RETURNING id', [dir, cli, d.alias, d.direccion, d.referencia, d.telefono]);
+      if (!r.length) return noEncontrada(reply);
+      await registrar(req, cli, 'CLIENTE_DIRECCION_EDITADA', { dir, ...d });
+      return { id: dir === 'principal' ? null : dir, ...d };
+    });
+
+    // Marcar como principal: intercambia con la de la ficha (la anterior queda como una más). Una sola principal por cliente.
+    app.post(`${base}/:dir/principal`, { preHandler: autenticar }, async (req, reply) => {
+      const cli = await dueno(req, reply); if (!cli) return;
+      const { dir } = req.params as { dir: string };
+      if (!z.string().uuid().safeParse(dir).success) return noEncontrada(reply);
+      const ok = await tx(async (c) => {
+        const p = (await c.query<{ direccion: string; direccion_alias: string; direccion_referencia: string; direccion_telefono: string }>(
+          'SELECT direccion, direccion_alias, direccion_referencia, direccion_telefono FROM core.cliente WHERE id = $1 FOR UPDATE', [cli])).rows[0];
+        const n = (await c.query<{ alias: string; direccion: string; referencia: string; telefono: string }>(
+          'SELECT alias, direccion, coalesce(referencia, \'\') referencia, telefono FROM core.direccion_cliente WHERE id = $1 AND cliente_id = $2 FOR UPDATE', [dir, cli])).rows[0];
+        if (!p || !n) return false;
+        await c.query('UPDATE core.cliente SET direccion = $2, direccion_alias = $3, direccion_referencia = $4, direccion_telefono = $5 WHERE id = $1', [cli, n.direccion, n.alias, n.referencia, n.telefono]);
+        if ((p.direccion ?? '').trim().length >= 5) {
+          await c.query('UPDATE core.direccion_cliente SET direccion = $2, alias = $3, referencia = $4, telefono = $5 WHERE id = $1', [dir, p.direccion.trim(), p.direccion_alias, p.direccion_referencia, p.direccion_telefono]);
+        } else await c.query('DELETE FROM core.direccion_cliente WHERE id = $1', [dir]);
+        return true;
+      });
+      if (!ok) return noEncontrada(reply);
+      await registrar(req, cli, 'CLIENTE_DIRECCION_PRINCIPAL', { dir });
+      return { ok: true };
+    });
+
+    app.delete(`${base}/:dir`, { preHandler: autenticar }, async (req, reply) => {
+      const cli = await dueno(req, reply); if (!cli) return;
+      const { dir } = req.params as { dir: string };
+      if (!z.string().uuid().safeParse(dir).success) return noEncontrada(reply);
+      const r = await q<{ direccion: string }>('DELETE FROM core.direccion_cliente WHERE id = $1 AND cliente_id = $2 RETURNING direccion', [dir, cli]);
+      if (!r.length) return noEncontrada(reply);
+      await registrar(req, cli, 'CLIENTE_DIRECCION_QUITADA', r[0]);
+      return { ok: true };
+    });
+  };
+  rutasDirecciones('/mis-direcciones', async (req, reply) => {
+    const cli = await clienteDe(req.usuario!.id);
+    if (!cli) void reply.code(403).send(error(403, 'SOLO_CLIENTES', 'Solo para cuentas de cliente.'));
+    return cli;
+  });
+  rutasDirecciones('/clientes/:id/direcciones', async (req, reply) => {
+    if (!exigir(req, reply, 'clientes.gestionar')) return null;
+    const { id } = req.params as { id: string };
+    if (!(await clienteValido(id))) { void reply.code(404).send(error(404, 'NO_ENCONTRADO', 'El cliente no existe.')); return null; }
+    return id;
   });
 
   /* ------------------------------------------------- factura de SUNAT (PDF) */

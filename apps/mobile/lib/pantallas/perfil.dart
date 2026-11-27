@@ -97,13 +97,29 @@ class _PerfilState extends State<Perfil> {
                 for (final d in dirs)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.place_outlined),
-                    title: Text('${d['direccion']}'),
+                    leading: Icon(d['principal'] == true ? Icons.home_outlined : Icons.place_outlined),
+                    title: Text('${'${d['alias'] ?? ''}'.isEmpty ? '' : '${d['alias']}: '}${d['direccion']}'),
                     subtitle: _detalleDireccion(d),
-                    // La principal la mantiene la panadería: no se quita desde aquí.
-                    trailing: d['id'] == null ? null : IconButton(
-                      tooltip: 'Quitar', icon: const Icon(Icons.delete_outline),
-                      onPressed: _ocupado ? null : () => hacer(() => Api.instancia.quitarDireccion('${d['id']}'), 'Dirección eliminada'),
+                    // Editar todas; la principal no se quita (se cambia marcando otra como principal).
+                    trailing: PopupMenuButton<String>(
+                      tooltip: 'Opciones',
+                      enabled: !_ocupado,
+                      onSelected: (op) async {
+                        final id = '${d['id'] ?? 'principal'}';
+                        if (op == 'editar') {
+                          final datos = await _formDireccion('Editar dirección', d);
+                          if (datos != null) await hacer(() => Api.instancia.editarDireccion(id, datos), 'Dirección actualizada');
+                        } else if (op == 'principal') {
+                          await hacer(() => Api.instancia.direccionPrincipal(id), 'Dirección principal cambiada');
+                        } else {
+                          await hacer(() => Api.instancia.quitarDireccion(id), 'Dirección eliminada');
+                        }
+                      },
+                      itemBuilder: (_) => [
+                        const PopupMenuItem(value: 'editar', child: Text('Editar')),
+                        if (d['id'] != null) const PopupMenuItem(value: 'principal', child: Text('Marcar como principal')),
+                        if (d['id'] != null) const PopupMenuItem(value: 'quitar', child: Text('Quitar')),
+                      ],
                     ),
                   ),
                 const SizedBox(height: 8),
@@ -112,14 +128,8 @@ class _PerfilState extends State<Perfil> {
                 else
                   OutlinedButton.icon(
                     onPressed: _ocupado ? null : () async {
-                      final dir = TextEditingController(), ref = TextEditingController();
-                      final ok = await _dialogo('Nueva dirección', [
-                        TextField(controller: dir, autofocus: true, maxLength: 200, decoration: const InputDecoration(labelText: 'Calle, número, distrito')),
-                        TextField(controller: ref, maxLength: 120, decoration: const InputDecoration(labelText: 'Referencia (opcional)')),
-                      ], 'Agregar');
-                      if (ok != true) return;
-                      if (dir.text.trim().length < 5) return _aviso('Escribe la dirección completa.', error: true);
-                      await hacer(() => Api.instancia.agregarDireccion(dir.text.trim(), ref.text.trim()), 'Dirección agregada');
+                      final datos = await _formDireccion('Nueva dirección', const {});
+                      if (datos != null) await hacer(() => Api.instancia.agregarDireccion(datos), 'Dirección agregada');
                     },
                     icon: const Icon(Icons.add_location_alt_outlined),
                     label: const Text('Agregar dirección'),
@@ -130,8 +140,24 @@ class _PerfilState extends State<Perfil> {
         }),
       );
 
+  /// Alias, dirección, referencia y teléfono; null si se cancela o la dirección es muy corta.
+  Future<Map<String, String>?> _formDireccion(String titulo, Map d) async {
+    final alias = TextEditingController(text: '${d['alias'] ?? ''}'), dir = TextEditingController(text: '${d['direccion'] ?? ''}');
+    final ref = TextEditingController(text: '${d['referencia'] ?? ''}'), tel = TextEditingController(text: '${d['telefono'] ?? ''}');
+    final ok = await _dialogo(titulo, [
+      TextField(controller: alias, maxLength: 40, textCapitalization: TextCapitalization.sentences, decoration: const InputDecoration(labelText: 'Alias (Casa, Local, Oficina…)')),
+      TextField(controller: dir, maxLength: 200, decoration: const InputDecoration(labelText: 'Calle, número, distrito')),
+      TextField(controller: ref, maxLength: 120, decoration: const InputDecoration(labelText: 'Referencia (opcional)')),
+      TextField(controller: tel, maxLength: 30, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono de contacto (opcional)')),
+    ], 'Guardar');
+    if (ok != true) return null;
+    if (dir.text.trim().length < 5) { _aviso('Escribe la dirección completa.', error: true); return null; }
+    return {'alias': alias.text.trim(), 'direccion': dir.text.trim(), 'referencia': ref.text.trim(), 'telefono': tel.text.trim()};
+  }
+
   Widget? _detalleDireccion(Map d) {
-    final partes = [if (d['principal'] == true) 'Principal', if ('${d['referencia'] ?? ''}'.isNotEmpty) '${d['referencia']}'];
+    final partes = [if (d['principal'] == true) 'Principal', if ('${d['referencia'] ?? ''}'.isNotEmpty) '${d['referencia']}',
+      if ('${d['telefono'] ?? ''}'.isNotEmpty) 'Tel. ${d['telefono']}'];
     return partes.isEmpty ? null : Text(partes.join(' · '), style: const TextStyle(fontSize: 12));
   }
 

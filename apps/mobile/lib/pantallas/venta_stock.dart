@@ -164,7 +164,7 @@ class _VentaStockState extends State<VentaStock> {
                     initialValue: _direccion, isExpanded: true,
                     decoration: InputDecoration(labelText: 'Entrega', helperText: _cliente != null && _direcciones.isEmpty ? 'Sin direcciones registradas: recojo en tienda' : null),
                     items: [
-                      for (final d in _direcciones) DropdownMenuItem(value: '${d['direccion']}', child: Text('${d['direccion']}', overflow: TextOverflow.ellipsis)),
+                      for (final d in _direcciones) DropdownMenuItem(value: '${d['direccion']}', child: Text('${'${d['alias'] ?? ''}'.isEmpty ? '' : '${d['alias']}: '}${d['direccion']}', overflow: TextOverflow.ellipsis)),
                       const DropdownMenuItem(value: '', child: Text('Recojo en tienda')),
                     ],
                     onChanged: (v) => setState(() => _direccion = v ?? ''),
