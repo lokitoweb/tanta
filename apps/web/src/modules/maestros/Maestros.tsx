@@ -36,7 +36,6 @@ export function Clientes() {
   const [dirs, setDirs] = useState<{ id: string; nombre: string } | null>(null);
   return (
     <>
-    {dirs && <DireccionesCliente clienteId={dirs.id} nombre={dirs.nombre} onCerrar={() => setDirs(null)} />}
     <Crud titulo="Clientes" nombreExport="clientes" descripcion="Datos, crédito y lista de precios. El límite de crédito se valida en cada venta al crédito."
       cargar={() => api<Reg[]>('/clientes')}
       nuevo={{ nombre: '', contacto: '', docTipo: 'DNI', docNumero: '', telefono: '', email: '', direccion: '', listaPrecio: 'MINORISTA', condicionPago: 'CONTADO', diasCredito: 0, limiteCredito: 0, estado: 'ACTIVO', vendedorId: '' }}
@@ -53,13 +52,18 @@ export function Clientes() {
         { key: 'docTipo', label: 'Tipo de documento', tipo: 'select', opciones: [{ valor: 'DNI', texto: 'DNI' }, { valor: 'RUC', texto: 'RUC' }, { valor: 'CE', texto: 'Carné de extranjería' }] },
         { key: 'docNumero', label: 'Número', max: 15, ayuda: 'DNI 8 dígitos · RUC 11 dígitos' },
         { key: 'telefono', label: 'Teléfono', tipo: 'tel', max: 30 }, { key: 'email', label: 'Correo', tipo: 'email' },
-        { key: 'direccion', label: 'Dirección principal de entrega', ancho: true, max: 200, ayuda: 'Más direcciones: botón «Direcciones» de la fila' },
+        { key: 'direccion', label: 'Dirección principal de entrega', ancho: true, max: 200 },
+        // Las demás direcciones (las que el cliente elige al pedir en la app o la web) se administran aquí mismo.
+        { key: 'a-direcciones', label: 'Otras direcciones de entrega', tipo: 'accion', texto: 'Ver y agregar direcciones', ancho: true,
+          alClic: (f) => setDirs({ id: String(f.id), nombre: String(f.nombre) }),
+          ayuda: 'El cliente elige entre ellas al hacer su pedido. En un cliente nuevo, guárdalo primero' },
         { key: 'listaPrecio', label: 'Lista de precios', tipo: 'select', opciones: listas, ayuda: 'Se crean y ponen sus precios en Maestros → Listas de precios' },
         { key: 'condicionPago', label: 'Condición de pago', tipo: 'select', opciones: [{ valor: 'CONTADO', texto: 'Contado' }, { valor: 'CREDITO', texto: 'Crédito (puede comprar a plazo)' }] },
         { key: 'diasCredito', label: 'Días de crédito', tipo: 'numero' }, { key: 'limiteCredito', label: 'Límite de crédito (S/)', tipo: 'numero' },
         { key: 'vendedorId', label: 'Vendedor asignado', tipo: 'select', opciones: [{ valor: '', texto: 'Sin asignar' }, ...vendedores] },
         { key: 'estado', label: 'Estado', tipo: 'select', opciones: ESTADOS },
       ]} />
+    {dirs && <DireccionesCliente clienteId={dirs.id} nombre={dirs.nombre} onCerrar={() => setDirs(null)} />}
     </>
   );
 }

@@ -10,7 +10,9 @@ import { imagenABase64 } from '@/core/imagen';
 export interface Campo {
   key: string; label: string;
   /** seccion = subtítulo que agrupa campos; calculado = valor de solo lectura que se recalcula al escribir. */
-  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'fecha' | 'imagen' | 'seccion' | 'calculado' | 'filas';
+  tipo?: 'texto' | 'numero' | 'pct' | 'select' | 'bool' | 'email' | 'tel' | 'fecha' | 'imagen' | 'seccion' | 'calculado' | 'filas' | 'accion';
+  /** Para tipo accion: botón dentro del formulario (p. ej. administrar las direcciones del cliente). */
+  texto?: string; alClic?: (form: Record<string, unknown>) => void;
   /** Para tipo calculado: recibe el formulario actual y devuelve el texto a mostrar. */
   calcular?: (form: Record<string, unknown>) => string;
   placeholder?: string;
@@ -55,7 +57,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
   const formRef = useRef<HTMLFormElement>(null);
   const [cargaError, setCargaError] = useState<string | null>(null);
   // Campo que nombra al registro en los títulos: "nombre" si existe; si no, el primer campo editable.
-  const claveTitulo = (campos.find((c) => c.key === 'nombre') ?? campos.find((c) => !['imagen', 'seccion', 'calculado'].includes(c.tipo ?? '')) ?? campos[0]).key;
+  const claveTitulo = (campos.find((c) => c.key === 'nombre') ?? campos.find((c) => !['imagen', 'seccion', 'calculado', 'accion'].includes(c.tipo ?? '')) ?? campos[0]).key;
   const [aBorrar, setABorrar] = useState<Reg | null>(null);
   const [borrando, setBorrando] = useState(false);
   const [errorBorrar, setErrorBorrar] = useState<string | null>(null);
@@ -81,7 +83,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
     setGuardando(true);
     setError(null);
     try {
-      const datos = Object.fromEntries(campos.filter((c) => c.tipo !== 'seccion' && c.tipo !== 'calculado').map((c) => [c.key,
+      const datos = Object.fromEntries(campos.filter((c) => c.tipo !== 'seccion' && c.tipo !== 'calculado' && c.tipo !== 'accion').map((c) => [c.key,
         (c.tipo === 'numero' || c.tipo === 'pct') && form[c.key] === '' ? null
           // Subtabla: números como número; filas vacías fuera.
           : c.tipo === 'filas' ? ((form[c.key] as Reg[] | undefined) ?? []).map((fila) => Object.fromEntries(Object.entries(fila).map(([k, v]) =>
@@ -149,6 +151,12 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
         <form ref={formRef} className="form form--2col form--dialogo" onSubmit={(e) => { e.preventDefault(); if (!guardando) void guardar(); }}>
           {campos.map((c) => c.tipo === 'seccion' ? (
             <div key={c.key} className="form__seccion field--ancho"><b>{c.label}</b>{c.ayuda && <span>{c.ayuda}</span>}</div>
+          ) : c.tipo === 'accion' ? (
+            <div key={c.key} className={`field ${c.ancho ? 'field--ancho' : ''}`}>
+              <span className="field__label">{c.label}</span>
+              <div><Boton type="button" icono="truck" disabled={!form?.id} onClick={() => form && c.alClic?.(form)}>{c.texto ?? c.label}</Boton></div>
+              {c.ayuda && <span className="field__ayuda">{c.ayuda}</span>}
+            </div>
           ) : c.tipo === 'calculado' ? (
             <div key={c.key} className={`field field--calculado ${c.ancho ? 'field--ancho' : ''}`}>
               <span className="field__label">{c.label}</span>
@@ -214,7 +222,7 @@ export function Crud({ titulo, descripcion, cargar, columnas, campos, nuevo, cre
                   step={c.tipo === 'pct' ? '0.1' : 'any'} min={0}
                   valor={numero(c)} onValor={(n) => set(c, n === '' ? '' : String(n))} />
               ) : (
-                <input className="field__input" placeholder={c.placeholder} required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id}
+                <input className="field__input" placeholder={c.placeholder} required={c.requerido} maxLength={c.max ?? 160} disabled={c.soloAlCrear && !!form?.id} autoComplete="off"
                   type={c.tipo === 'email' ? 'email' : c.tipo === 'tel' ? 'tel' : c.tipo === 'fecha' ? 'date' : 'text'}
                   value={valor(c)} onChange={(e) => set(c, e.target.value)} />
               )}
