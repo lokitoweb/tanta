@@ -203,7 +203,8 @@ const REPORTES: Record<string, Reporte> = {
         cliente: r.cliente, vendedor: r.vendedor, canal: r.canal === 'APP' ? 'Pedido por app' : 'Venta a terceros', condicion: r.condicion === 'CREDITO' ? 'Crédito' : 'Contado',
         subtotal: num(r.subtotal), igv: num(r.igv), total: num(r.total), costo: num(r.costo), utilidad: num(r.utilidad), margen: num(r.margen), estadoPago: ESTADO[r.estado_pago] }));
       const suma = (k: 'subtotal' | 'igv' | 'total' | 'costo' | 'utilidad') => Number(lista.reduce((t, x) => t + x[k], 0).toFixed(2));
-      return { filas: lista, resumen: { documentos: lista.length, total: suma('total'), utilidad: suma('utilidad'), margen: suma('subtotal') ? suma('utilidad') / suma('subtotal') : 0,
+      return { filas: lista, resumen: { documentos: lista.length, total: suma('total'), utilidad: suma('utilidad'), // Margen sobre la venta neta de las líneas (= utilidad + costo), igual que cada fila y que G-01.
+        margen: suma('utilidad') + suma('costo') > 0 ? suma('utilidad') / (suma('utilidad') + suma('costo')) : 0,
         porCobrar: lista.filter((x) => x.estadoPago !== 'Pagado').length, ventasConMargenNegativo: lista.filter((x) => x.margen < 0).length } };
     },
   },
