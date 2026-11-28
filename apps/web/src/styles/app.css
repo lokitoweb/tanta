@@ -1739,8 +1739,10 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 /* Reportes: una sola fila compacta. El reporte es un filtro más, junto a fechas o año y el resto. */
 .reportes__barra { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
 .reportes__barra .filtros { display: contents; }
-.reportes__barra .filtros__campo { flex: 0 1 180px; min-width: 150px; }
-.reportes__barra .filtros__campo.selrep { flex: 1 1 300px; max-width: 420px; }
+.reportes__barra .filtros__campo { flex: 1 1 140px; min-width: 120px; }
+.reportes__barra .filtros__campo.selrep { flex: 1.6 1 280px; max-width: 380px; }
+/* Escritorio: todos los filtros en una sola línea (se reparten el ancho); en pantallas medianas bajan ordenados. */
+@media (min-width: 1200px) { .reportes__barra { flex-wrap: nowrap; } .reportes__barra .filtros__campo { min-width: 0; } }
 .reportes__barra.is-cargando .selrep__boton { background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tanta-primario) 8%, transparent), transparent); background-size: 200% 100%; animation: selrep-cargando 1.1s linear infinite; }
 @keyframes selrep-cargando { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
@@ -1752,24 +1754,24 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 .selrep__titulo { flex: 1; min-width: 0; font-size: .875rem; font-weight: 600; color: var(--tanta-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selrep__flecha { flex: none; color: var(--tanta-text-muted); rotate: 90deg; transition: rotate .15s; }
 .selrep__boton[aria-expanded="true"] .selrep__flecha { rotate: -90deg; }
-.selrep__panel { position: absolute; z-index: 32; top: calc(100% + 6px); left: 0; width: min(460px, calc(100vw - 32px)); background: var(--tanta-surface-card); border: 1px solid var(--tanta-border-subtle); border-radius: 14px; box-shadow: 0 24px 48px -12px rgba(30,20,15,.28); overflow: hidden; animation: subir 160ms cubic-bezier(.2,.8,.2,1); text-transform: none; letter-spacing: normal; font-weight: 400; }
+.selrep__panel { position: absolute; z-index: 32; top: calc(100% + 6px); left: 0; width: min(700px, calc(100vw - 32px)); background: var(--tanta-surface-card); border: 1px solid var(--tanta-border-subtle); border-radius: 10px; box-shadow: 0 24px 48px -12px rgba(30,20,15,.28); overflow: hidden; animation: subir 160ms cubic-bezier(.2,.8,.2,1); text-transform: none; letter-spacing: normal; font-weight: 400; }
 .selrep__buscar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--tanta-border-subtle); color: var(--tanta-text-muted); }
 .selrep__buscar input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-size: .875rem; color: var(--tanta-text-primary); outline: none; }
 .selrep__total { font-size: .75rem; white-space: nowrap; }
-.selrep__chips { display: flex; gap: 6px; padding: 8px 12px; overflow-x: auto; border-bottom: 1px solid var(--tanta-border-subtle); scrollbar-width: none; }
-.selrep__chips button { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 4px 10px; font-size: .75rem !important; border-radius: 999px; border: 1px solid var(--tanta-border-subtle); font-size: .8125rem; font-weight: 500; color: var(--tanta-text-secondary); background: var(--tanta-surface-card); }
-.selrep__chips button span { font-size: .6875rem; padding: 0 6px; border-radius: 999px; background: var(--tanta-neutral-50); color: var(--tanta-text-muted); }
+.selrep__chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--tanta-border-subtle); }
+.selrep__chips button { display: inline-flex; align-items: center; gap: 6px; flex: none; padding: 4px 10px; font-size: .75rem !important; border-radius: 6px; border: 1px solid var(--tanta-border-subtle); font-size: .8125rem; font-weight: 500; color: var(--tanta-text-secondary); background: var(--tanta-surface-card); }
+.selrep__chips button span { font-size: .6875rem; padding: 0 5px; border-radius: 4px; background: var(--tanta-neutral-50); color: var(--tanta-text-muted); }
 .selrep__chips button:hover { border-color: var(--tanta-border-default); }
 .selrep__chips button.is-active { background: var(--tanta-primario); border-color: var(--tanta-primario); color: var(--tanta-sobre-primario); }
 .selrep__chips button.is-active span { background: color-mix(in srgb, var(--tanta-sobre-primario) 22%, transparent); color: var(--tanta-sobre-primario); }
 .selrep__lista { max-height: min(56vh, 420px); overflow-y: auto; padding: 4px 8px 10px; overscroll-behavior: contain; scrollbar-width: thin; }
 .selrep__grupo { break-inside: avoid; }
 .selrep__grupo-t { position: sticky; top: -4px; z-index: 1; background: var(--tanta-surface-card); font-size: .625rem; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--tanta-text-muted); padding: 10px 8px 4px; }
-.selrep__item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 7px 8px; border-radius: 8px; font-size: .8125rem; color: var(--tanta-text-primary); }
+.selrep__item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 7px 8px; border-radius: 6px; font-size: .8125rem; color: var(--tanta-text-primary); }
 .selrep__item .mono { color: var(--tanta-text-muted); font-size: .6875rem; min-width: 34px; }
 .selrep__item:hover { background: var(--tanta-cream-100, #F6F1EA); }
 .selrep__item.is-active { background: var(--tanta-primario-suave); color: var(--tanta-primario-texto); font-weight: 600; }
-.selrep__marca { margin-left: auto; font-style: normal; font-size: .625rem; font-weight: 600; padding: 2px 6px; border-radius: 999px; background: var(--tanta-neutral-50); color: var(--tanta-text-muted); }
+.selrep__marca { margin-left: auto; font-style: normal; font-size: .625rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--tanta-neutral-50); color: var(--tanta-text-muted); }
 .selrep__vacio { padding: 18px 8px; color: var(--tanta-text-muted); font-size: .875rem; }
 @media (max-width: 640px) {
   .reportes__barra .filtros__campo, .reportes__barra .filtros__campo.selrep { flex: 1 1 100%; max-width: none; }
