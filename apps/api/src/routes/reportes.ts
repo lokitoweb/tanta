@@ -204,7 +204,7 @@ const REPORTES: Record<string, Reporte> = {
         subtotal: num(r.subtotal), igv: num(r.igv), total: num(r.total), costo: num(r.costo), utilidad: num(r.utilidad), margen: num(r.margen), estadoPago: ESTADO[r.estado_pago] }));
       const suma = (k: 'subtotal' | 'igv' | 'total' | 'costo' | 'utilidad') => Number(lista.reduce((t, x) => t + x[k], 0).toFixed(2));
       return { filas: lista, resumen: { documentos: lista.length, total: suma('total'), utilidad: suma('utilidad'), // Margen sobre la venta neta de las líneas (= utilidad + costo), igual que cada fila y que G-01.
-        margen: suma('utilidad') + suma('costo') > 0 ? suma('utilidad') / (suma('utilidad') + suma('costo')) : 0,
+        margen: margenDe(lista.reduce((t, x) => t + x.utilidad + x.costo, 0), lista.reduce((t, x) => t + x.costo, 0)),
         porCobrar: lista.filter((x) => x.estadoPago !== 'Pagado').length, ventasConMargenNegativo: lista.filter((x) => x.margen < 0).length } };
     },
   },
