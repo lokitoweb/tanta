@@ -1685,7 +1685,8 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
 
 /* Entrada suave y escalonada al abrir cada pantalla. */
 @keyframes tanta-aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.kpi, .card { animation: tanta-aparecer 380ms cubic-bezier(.2,.8,.2,1) both; }
+/* backwards (no both): al terminar no deja transform en la tarjeta; con él cada tarjeta era una capa y la siguiente tapaba los desplegables (calendario de fechas). */
+.kpi, .card { animation: tanta-aparecer 380ms cubic-bezier(.2,.8,.2,1) backwards; }
 .kpi:nth-child(2), .card:nth-child(2) { animation-delay: 50ms; }
 .kpi:nth-child(3), .card:nth-child(3) { animation-delay: 100ms; }
 .kpi:nth-child(4), .card:nth-child(4) { animation-delay: 150ms; }
