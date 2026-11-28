@@ -61,6 +61,9 @@ export function HojaProduccion() {
   const [turno, setTurno] = useState('');
   const [filtroTurno, setFiltroTurno] = useState('');
   useEffect(() => { if (!turno && turnosProduccion[0]) setTurno(turnosProduccion[0].codigo); }, [turnosProduccion, turno]);
+  // El turno elegido va en el título de la hoja impresa y en el nombre del archivo (quien cierra pedidos es quien lo elige).
+  const turnoNombre = puede('produccion.planificar') ? turnosProduccion.find((t) => t.codigo === turno)?.nombre.toLowerCase() : undefined;
+  const archivoHoja = (f: string) => `hoja-produccion-${f}${turnoNombre ? `-turno-${turno.toLowerCase()}` : ''}`;
 
   const cargar = () => Promise.all([
     api<Abierta>(`/produccion/hoja${fecha ? `?fecha=${fecha}` : ''}`).then(setHoja),
@@ -118,14 +121,14 @@ export function HojaProduccion() {
             <TarjetaTitulo titulo={`Producción para el ${dma(hoja.fecha)}`} subtitulo="El código de lote se asigna al cerrar los pedidos" />
             <div className="fila-acciones">
               <input className="field__input" type="date" aria-label="Fecha de entrega" value={hoja.fecha} onChange={(e) => setFecha(e.target.value)} />
-              <Boton icono="download" disabled={!hoja.filas.length} onClick={() => aExcel(`hoja-produccion-${hoja.fecha}`, hoja.clientes, hoja.filas)}>Excel</Boton>
-              <Boton icono="report" disabled={!hoja.filas.length} onClick={() => imprimirSolo('hoja-abierta', `hoja-produccion-${hoja.fecha}`)}>PDF</Boton>
+              <Boton icono="download" disabled={!hoja.filas.length} onClick={() => aExcel(archivoHoja(hoja.fecha), hoja.clientes, hoja.filas)}>Excel</Boton>
+              <Boton icono="report" disabled={!hoja.filas.length} onClick={() => imprimirSolo('hoja-abierta', archivoHoja(hoja.fecha))}>PDF</Boton>
               {puede('produccion.planificar') && turnosProduccion.length > 0 && <select className="field__input" aria-label="Turno" value={turno} onChange={(e) => setTurno(e.target.value)}>
                 {turnosProduccion.map((t) => <option key={t.codigo} value={t.codigo}>Turno {t.nombre.toLowerCase()}</option>)}</select>}
               {puede('produccion.planificar') && <Boton variant="primary" disabled={ocupado || !hoja.filas.length || hoja.sinReceta.length > 0} onClick={() => void cerrarPedidos()}>Cerrar pedidos</Boton>}
             </div>
           </div>
-          {hoja.filas.length ? <Matriz id="hoja-abierta" titulo={`Hoja de producción · entrega ${dma(hoja.fecha)}`} clientes={hoja.clientes} filas={hoja.filas} /> : <Vacio titulo="Sin pedidos confirmados para esta fecha" icono="clipboard" />}
+          {hoja.filas.length ? <Matriz id="hoja-abierta" titulo={`Hoja de producción · entrega ${dma(hoja.fecha)}${turnoNombre ? ` · turno ${turnoNombre}` : ''}`} clientes={hoja.clientes} filas={hoja.filas} /> : <Vacio titulo="Sin pedidos confirmados para esta fecha" icono="clipboard" />}
         </Tarjeta>
         {hoja.sinReceta.length > 0 && <div className="aviso aviso--danger" role="alert"><span className="aviso__icono">!</span><div><p>Sin receta vigente: {hoja.sinReceta.join(', ')}. Créala en Recetas para poder cerrar los pedidos.</p></div></div>}
         {hoja.insumos.length > 0 && (

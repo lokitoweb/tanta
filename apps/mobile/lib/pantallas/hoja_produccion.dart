@@ -97,6 +97,8 @@ class _HojaProduccionState extends State<HojaProduccion> {
   Map<String, dynamic>? _hoja;
   List<Map<String, dynamic>> _hojas = const [];
   String? _error, _fecha;
+  // Turno elegido en la hoja (Maestros → Catálogos → Turnos de producción): sale en el PDF y se propone al cerrar pedidos.
+  String? _turno;
   bool _ocupado = false;
   Timer? _reloj;
 
@@ -129,7 +131,7 @@ class _HojaProduccionState extends State<HojaProduccion> {
     final h = _hoja!;
     // Turno (Maestros → Catálogos → Turnos de producción): mañana, noche…
     final turnos = turnosProduccion();
-    String? turno = turnos.isEmpty ? null : '${turnos.first['codigo']}';
+    String? turno = _turnoActual(turnos);
     final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
       title: const Text('¿Cerrar pedidos?'),
       content: StatefulBuilder(builder: (ctx, set) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -162,9 +164,15 @@ class _HojaProduccionState extends State<HojaProduccion> {
     }
   }
 
+  String? _turnoActual(List<Map<String, dynamic>> turnos) => turnos.isEmpty ? null : (turnos.any((t) => t['codigo'] == _turno) ? _turno : '${turnos.first['codigo']}');
+
   @override
   Widget build(BuildContext context) {
     final h = _hoja;
+    final turnos = Api.instancia.puede('produccion.planificar') ? turnosProduccion() : const <Map<String, dynamic>>[];
+    final turno = _turnoActual(turnos);
+    final turnoNombre = turno == null ? null : '${turnos.firstWhere((t) => t['codigo'] == turno)['nombre']}'.toLowerCase();
+    final archivo = 'hoja-produccion-${h?['fecha'] ?? ''}${turno == null ? '' : '-turno-${turno.toLowerCase()}'}';
     final clientes = (h?['clientes'] as List? ?? const []).cast<Map<String, dynamic>>();
     final filas = (h?['filas'] as List? ?? const []).cast<Map<String, dynamic>>();
     final insumos = (h?['insumos'] as List? ?? const []).cast<Map<String, dynamic>>();
@@ -174,8 +182,8 @@ class _HojaProduccionState extends State<HojaProduccion> {
     final fecha = '${h?['fecha'] ?? ''}';
     return Scaffold(
       appBar: AppBar(title: const Text('Hoja de producción'), actions: [
-        IconButton(tooltip: 'Exportar a Excel', icon: const Icon(Icons.grid_on_outlined), onPressed: filas.isEmpty ? null : () => compartirHoja('hoja-produccion-$fecha', clientes, filas)),
-        IconButton(tooltip: 'Exportar a PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: filas.isEmpty ? null : () => compartirHojaPdf('hoja-produccion-$fecha', 'Hoja de producción · entrega ${_dma(fecha)}', clientes, filas)),
+        IconButton(tooltip: 'Exportar a Excel', icon: const Icon(Icons.grid_on_outlined), onPressed: filas.isEmpty ? null : () => compartirHoja(archivo, clientes, filas)),
+        IconButton(tooltip: 'Exportar a PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: filas.isEmpty ? null : () => compartirHojaPdf(archivo, 'Hoja de producción · entrega ${_dma(fecha)}${turnoNombre == null ? '' : ' · turno $turnoNombre'}', clientes, filas)),
       ]),
       body: _error != null
           ? ErrorReintentar(mensaje: _error!, onReintentar: _cargar)
@@ -199,6 +207,12 @@ class _HojaProduccionState extends State<HojaProduccion> {
                     Panel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       Text('Producción para el ${_dma(fecha)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
                       const Text('El código de lote se asigna al cerrar los pedidos', style: TextStyle(fontSize: 11.5, color: TantaColors.textMuted)),
+                      if (turnos.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(spacing: 6, children: [
+                          for (final t in turnos) ChoiceChip(label: Text('Turno ${'${t['nombre']}'.toLowerCase()}'), selected: turno == t['codigo'], onSelected: (_) => setState(() => _turno = '${t['codigo']}')),
+                        ]),
+                      ],
                       if (fechas.length > 1) ...[
                         const SizedBox(height: 8),
                         Wrap(spacing: 6, children: [
