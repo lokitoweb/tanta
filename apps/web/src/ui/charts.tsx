@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 
 const SERIE = ['var(--tanta-ink-800)', 'var(--tanta-sand-500)', 'var(--tanta-olive-600)', 'var(--tanta-honey-500)', 'var(--tanta-clay-600)'];
 
@@ -127,5 +127,128 @@ export function Sparkline({ valores, tono = 'ink' }: { valores: number[]; tono?:
     <svg viewBox={`0 0 ${W} ${H}`} className="spark" aria-hidden="true">
       <polyline points={pts} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/* ---------- Líneas múltiples (una serie por categoría o producto, Ene–Dic) ---------- */
+
+// Colores categóricos que se distinguen entre sí en claro y oscuro (hasta 10 series; luego se repiten).
+const PALETA = ['#8C4A2F', '#C8902E', '#4F7A5A', '#3F6A9C', '#B5533C', '#7D5BA6', '#2E8C8C', '#9C7A3C', '#6B6B6B', '#C2668A'];
+export const colorSerie = (i: number) => PALETA[i % PALETA.length];
+
+const ejeFmt = (n: number) => (Math.abs(n) >= 1000 ? `${(n / 1000).toFixed(Math.abs(n) >= 10000 ? 0 : 1)}k` : String(Math.round(n * 100) / 100));
+/** Escala «redonda» para el eje Y (incluye negativos si los hay). */
+function escala(valores: number[]) {
+  const max = Math.max(0, ...valores), min = Math.min(0, ...valores);
+  const bruto = (max - min) / 4 || 1;
+  const pot = 10 ** Math.floor(Math.log10(bruto));
+  const paso = [1, 2, 2.5, 5, 10].map((k) => k * pot).find((p) => p >= bruto) ?? bruto;
+  const lo = Math.floor(min / paso) * paso, hi = Math.ceil(max / paso) * paso || paso;
+  const ticks: number[] = [];
+  for (let v = lo; v <= hi + paso / 2; v += paso) ticks.push(Number(v.toFixed(6)));
+  return { lo, hi, ticks };
+}
+
+export function LineasMultiples({ series, etiquetas, formato, formatoEje = ejeFmt, titulo }: {
+  series: Array<{ nombre: string; valores: number[] }>; etiquetas: string[]; formato: (n: number) => string; formatoEje?: (n: number) => string; titulo: string;
+}) {
+  const [ocultas, setOcultas] = useState<Set<string>>(new Set());
+  const [punto, setPunto] = useState<number | null>(null);
+  const W = 760, H = 300, PL = 58, PR = 16, PT = 14, PB = 28, iw = W - PL - PR, ih = H - PT - PB;
+  const visibles = series.map((s, i) => ({ ...s, color: colorSerie(i) })).filter((s) => !ocultas.has(s.nombre));
+  const { lo, hi, ticks } = escala(visibles.flatMap((s) => s.valores));
+  const x = (i: number) => PL + (i * iw) / Math.max(etiquetas.length - 1, 1);
+  const y = (v: number) => PT + ih - ((v - lo) / (hi - lo || 1)) * ih;
+  const alternar = (n: string) => setOcultas((o) => { const c = new Set(o); if (c.has(n)) c.delete(n); else c.add(n); return c; });
+
+  return (
+    <div className="chart">
+      <div className="chart__legend chart__legend--toggle" role="group" aria-label="Mostrar u ocultar series">
+        {series.map((s, i) => (
+          <button key={s.nombre} type="button" className={`legend ${ocultas.has(s.nombre) ? 'is-off' : ''}`} aria-pressed={!ocultas.has(s.nombre)} onClick={() => alternar(s.nombre)}>
+            <i style={{ background: colorSerie(i) }} />{s.nombre}
+          </button>
+        ))}
+      </div>
+      <div className="chart__lienzo">
+        <svg viewBox={`0 0 ${W} ${H}`} className="chart__svg" role="img" aria-label={titulo} onMouseLeave={() => setPunto(null)}>
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)} stroke="var(--tanta-border-subtle)" strokeDasharray={t === 0 ? '0' : '3 5'} />
+              <text x={PL - 8} y={y(t) + 4} textAnchor="end" className="chart__axis">{formatoEje(t)}</text>
+            </g>
+          ))}
+          {etiquetas.map((e, i) => <text key={e} x={x(i)} y={H - 8} textAnchor="middle" className="chart__axis">{e}</text>)}
+          {punto !== null && <line x1={x(punto)} x2={x(punto)} y1={PT} y2={PT + ih} stroke="var(--tanta-border-default)" />}
+          {visibles.map((s) => (
+            <g key={s.nombre}>
+              <path d={s.valores.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')} fill="none" stroke={s.color} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+              {s.valores.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r={punto === i ? 4.5 : 3} fill="var(--tanta-surface-card)" stroke={s.color} strokeWidth="2" />)}
+            </g>
+          ))}
+          {/* Franjas invisibles por mes: el detalle sigue al cursor (o al toque en tablet). */}
+          {etiquetas.map((e, i) => (
+            <rect key={e} x={x(i) - iw / Math.max(etiquetas.length - 1, 1) / 2} y={PT} width={iw / Math.max(etiquetas.length - 1, 1)} height={ih} fill="transparent"
+              onMouseEnter={() => setPunto(i)} onClick={() => setPunto(i)} />
+          ))}
+        </svg>
+        {punto !== null && visibles.length > 0 && (
+          <div className={`chart__tip ${punto >= etiquetas.length / 2 ? "chart__tip--izq" : ""}`} style={{ left: `${(x(punto) / W) * 100}%` }} role="status">
+            <b>{etiquetas[punto]}</b>
+            {[...visibles].sort((a, b) => b.valores[punto] - a.valores[punto]).map((s) => (
+              <span key={s.nombre}><i style={{ background: s.color }} />{s.nombre}<em>{formato(s.valores[punto])}</em></span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Barras verticales (una o agrupadas), con el valor encima ---------- */
+
+export function BarrasV({ etiquetas, series, formato, formatoEje = ejeFmt, titulo, colorNegativo = true }: {
+  etiquetas: string[]; series: Array<{ nombre: string; valores: number[]; color: string }>; formato: (n: number) => string; formatoEje?: (n: number) => string; titulo: string;
+  /** Una sola serie: las barras negativas en rojo de alerta. */ colorNegativo?: boolean;
+}) {
+  const W = 760, H = 300, PL = 58, PR = 12, PT = 22, PB = 28, iw = W - PL - PR, ih = H - PT - PB;
+  const { lo, hi, ticks } = escala(series.flatMap((s) => s.valores));
+  const y = (v: number) => PT + ih - ((v - lo) / (hi - lo || 1)) * ih;
+  const grupo = iw / etiquetas.length, ancho = Math.min(34, (grupo * 0.72) / series.length);
+  const rojo = colorNegativo && series.length === 1;
+  return (
+    <div className="chart">
+      {series.length > 1 && (
+        <div className="chart__legend">{series.map((s) => <span key={s.nombre} className="legend"><i style={{ background: s.color }} />{s.nombre}</span>)}</div>
+      )}
+      <svg viewBox={`0 0 ${W} ${H}`} className="chart__svg" role="img" aria-label={titulo}>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)} stroke="var(--tanta-border-subtle)" strokeDasharray={t === 0 ? '0' : '3 5'} />
+            <text x={PL - 8} y={y(t) + 4} textAnchor="end" className="chart__axis">{formatoEje(t)}</text>
+          </g>
+        ))}
+        {etiquetas.map((e, i) => {
+          const x0 = PL + i * grupo + (grupo - ancho * series.length) / 2;
+          return (
+            <g key={e}>
+              {series.map((s, k) => {
+                const v = s.valores[i], top = y(Math.max(v, 0)), alto = Math.abs(y(v) - y(0));
+                const color = rojo && v < 0 ? 'var(--tanta-state-danger)' : s.color;
+                return (
+                  <g key={s.nombre}>
+                    <rect x={x0 + k * ancho} y={top} width={ancho - 2} height={Math.max(alto, v ? 1 : 0)} rx="3" fill={color}><title>{`${s.nombre} · ${e}: ${formato(v)}`}</title></rect>
+                    {v !== 0 && series.length === 1 && (
+                      <text x={x0 + k * ancho + (ancho - 2) / 2} y={v >= 0 ? top - 5 : top + alto + 12} textAnchor="middle" className="chart__valor">{formatoEje(v)}</text>
+                    )}
+                  </g>
+                );
+              })}
+              <text x={PL + i * grupo + grupo / 2} y={H - 8} textAnchor="middle" className="chart__axis">{e}</text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }

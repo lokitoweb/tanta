@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { SelectorFechas } from '@/ui/SelectorFechas';
 
-export interface Filtros { desde: string; hasta: string; categoria?: string; producto?: string; cliente?: string; vendedor?: string }
+export interface Filtros { desde: string; hasta: string; categoria?: string; producto?: string; cliente?: string; vendedor?: string;
+  /** Registro de ventas. */ canal?: string; condicion?: string; estadoPago?: string;
+  /** Reportes anuales: año, S/ · % · unidades y Top N. */ anio?: string; medida?: string; top?: string }
+export type CampoFiltro = 'categoria' | 'producto' | 'cliente' | 'vendedor' | 'anio' | 'canal' | 'condicion' | 'estadoPago' | 'top';
 interface Opciones { categorias: Array<{ id: string; nombre: string }>; productos: Array<{ id: string; nombre: string }>; clientes: Array<{ id: string; nombre: string }>; vendedores: string[] }
 
 // Fecha local (Lima), no UTC: de noche el UTC ya es "mañana".
@@ -11,10 +14,11 @@ export const rango = (dias: number): Pick<Filtros, 'desde' | 'hasta'> => { const
 export const aQuery = (f: Filtros) => '?' + new URLSearchParams(Object.entries(f).filter(([, v]) => v) as Array<[string, string]>).toString();
 
 let opcionesCache: Promise<Opciones> | null = null;
+const anioActual = new Date().getFullYear();
 
 /** Filtros del PDF §5.4: fecha, categoría, producto, cliente y vendedor. Muestra solo los que se pidan. */
 export function BarraFiltros({ valor, onChange, campos = ['categoria', 'producto', 'cliente', 'vendedor'] }: {
-  valor: Filtros; onChange: (f: Filtros) => void; campos?: Array<'categoria' | 'producto' | 'cliente' | 'vendedor'>;
+  valor: Filtros; onChange: (f: Filtros) => void; campos?: CampoFiltro[];
 }) {
   const [op, setOp] = useState<Opciones | null>(null);
   useEffect(() => { (opcionesCache ??= api<Opciones>('/reportes-filtros')).then(setOp).catch(() => { opcionesCache = null; }); }, []);
@@ -22,7 +26,14 @@ export function BarraFiltros({ valor, onChange, campos = ['categoria', 'producto
 
   return (
     <div className="filtros" role="search">
-      <div className="filtros__campo"><span>Fechas</span><SelectorFechas valor={valor} onChange={(r) => onChange({ ...valor, ...r })} /></div>
+      {/* Un reporte anual se filtra por año (Ene–Dic); los demás, por rango de fechas. */}
+      {campos.includes('anio') ? (
+        <label className="filtros__campo"><span>Año</span>
+          <select value={valor.anio ?? String(anioActual)} onChange={(e) => set('anio', e.target.value)}>
+            {Array.from({ length: 6 }, (_, i) => anioActual - i).map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </label>
+      ) : <div className="filtros__campo"><span>Fechas</span><SelectorFechas valor={valor} onChange={(r) => onChange({ ...valor, ...r })} /></div>}
       {campos.includes('categoria') && (
         <label className="filtros__campo"><span>Categoría</span>
           <select value={valor.categoria ?? ''} onChange={(e) => set('categoria', e.target.value)}><option value="">Todas</option>{op?.categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select>
@@ -38,6 +49,22 @@ export function BarraFiltros({ valor, onChange, campos = ['categoria', 'producto
       {campos.includes('vendedor') && (
         <label className="filtros__campo"><span>Vendedor</span>
           <select value={valor.vendedor ?? ''} onChange={(e) => set('vendedor', e.target.value)}><option value="">Todos</option>{op?.vendedores.map((v) => <option key={v} value={v}>{v}</option>)}</select>
+        </label>)}
+      {campos.includes('canal') && (
+        <label className="filtros__campo"><span>Canal</span>
+          <select value={valor.canal ?? ''} onChange={(e) => set('canal', e.target.value)}><option value="">Todos</option><option value="APP">Pedido por app</option><option value="TERCEROS">Venta a terceros</option></select>
+        </label>)}
+      {campos.includes('condicion') && (
+        <label className="filtros__campo"><span>Condición</span>
+          <select value={valor.condicion ?? ''} onChange={(e) => set('condicion', e.target.value)}><option value="">Todas</option><option value="CONTADO">Contado</option><option value="CREDITO">Crédito</option></select>
+        </label>)}
+      {campos.includes('estadoPago') && (
+        <label className="filtros__campo"><span>Estado de pago</span>
+          <select value={valor.estadoPago ?? ''} onChange={(e) => set('estadoPago', e.target.value)}><option value="">Todos</option><option value="PAGADO">Pagado</option><option value="PARCIAL">Pago parcial</option><option value="PENDIENTE">Pendiente</option><option value="VENCIDO">Vencido</option></select>
+        </label>)}
+      {campos.includes('top') && (
+        <label className="filtros__campo"><span>Mostrar</span>
+          <select value={valor.top ?? ''} onChange={(e) => set('top', e.target.value)}><option value="">Todos los productos</option><option value="5">Top 5 más vendidos</option><option value="10">Top 10 más vendidos</option></select>
         </label>)}
     </div>
   );

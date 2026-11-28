@@ -1721,3 +1721,18 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   .kpi, .card { animation: none; }
   .kpi:hover, .acceso-card:hover { transform: none; }
 }
+
+/* Gráficos de los reportes anuales (REQ-REP-02…04): leyenda que oculta series, detalle del mes y valor encima de la barra. */
+.chart__legend { flex-wrap: wrap; }
+.chart__legend--toggle .legend { padding: 4px 8px; border-radius: 999px; border: 1px solid var(--tanta-border-subtle); background: var(--tanta-surface-card); cursor: pointer; }
+.chart__legend--toggle .legend:hover { border-color: var(--tanta-border-default); }
+.legend.is-off { opacity: .45; text-decoration: line-through; }
+.chart__lienzo { position: relative; }
+.chart__tip { position: absolute; top: 8px; transform: translateX(14px); min-width: 220px; max-width: 300px; padding: 8px 10px; border-radius: 10px; background: var(--tanta-surface-card); border: 1px solid var(--tanta-border-subtle); box-shadow: 0 12px 28px -10px rgba(30,20,15,.3); display: flex; flex-direction: column; gap: 3px; font-size: .75rem; pointer-events: none; z-index: 2; }
+.chart__tip--izq { transform: translateX(calc(-100% - 14px)); }
+.chart__tip span { white-space: nowrap; display: flex; align-items: center; gap: 6px; color: var(--tanta-text-secondary); }
+.chart__tip span i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.chart__tip em { margin-left: auto; padding-left: 10px; font-style: normal; font-weight: 600; color: var(--tanta-text-primary); font-variant-numeric: tabular-nums; }
+.chart__valor { font-size: 10px; font-weight: 600; fill: var(--tanta-text-secondary); font-family: var(--tanta-font-family-sans); }
+.reportes__grafico { display: flex; flex-direction: column; gap: 10px; }
+.reportes__grafico-cab { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

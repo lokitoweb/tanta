@@ -16,6 +16,15 @@ const Filtros = z.object({
   producto: z.string().uuid().optional(),
   cliente: z.string().uuid().optional(),
   vendedor: z.string().max(120).optional(),
+  // Registro de ventas (REQ-REP-01).
+  canal: z.enum(['APP', 'TERCEROS']).optional(),
+  condicion: z.enum(['CONTADO', 'CREDITO']).optional(),
+  estadoPago: z.enum(['PAGADO', 'PARCIAL', 'PENDIENTE', 'VENCIDO']).optional(),
+  // Reportes anuales (REQ-REP-02…04).
+  anio: z.coerce.number().int().min(2000).max(2100).optional(),
+  // utilidad/comparar: vista del gráfico de G-16 (no cambia el cálculo).
+  medida: z.enum(['soles', 'margen', 'unidades', 'utilidad', 'comparar']).optional(),
+  top: z.coerce.number().int().min(1).max(100).optional(),
 });
 type F = z.infer<typeof Filtros> & { desde: string; hasta: string };
 
@@ -45,7 +54,36 @@ type Col = { key: string; label: string; tipo?: 'dinero' | 'pct' | 'num' | 'text
 const columnasDe = (r: Reporte, u: UsuarioActual) =>
   r.costos && !u.permisos.has('costos.ver') ? r.columnas.filter((c) => !esCampoCosto(c.key)) : r.columnas;
 
-interface Reporte { titulo: string; permiso: string; /** Sus columnas en soles son costos: sin costos.ver no se envían. */ costos?: true; columnas: Col[]; calcular: (f: F) => Promise<{ filas: Record<string, unknown>[]; resumen?: Record<string, unknown> }> }
+interface Reporte { titulo: string; permiso: string; /** Sus columnas en soles son costos: sin costos.ver no se envían. */ costos?: true; columnas: Col[];
+  /** columnas: solo si cambian según un filtro (p. ej. S/ o unidades en un reporte anual). */
+  calcular: (f: F) => Promise<{ filas: Record<string, unknown>[]; resumen?: Record<string, unknown>; columnas?: Col[] }> }
+
+/* ------------------------------------------------ reportes anuales (REQ-REP-02…04) */
+const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'];
+const colsMeses = (tipo: Col['tipo']): Col[] => [...MESES.map((m, i) => ({ key: `m${i + 1}`, label: m, tipo })), { key: 'total', label: 'Total año', tipo }];
+/** El año pedido (por defecto el actual, hora de Lima) como rango de fechas para LINEAS. */
+const delAnio = (f: F): F => { const a = f.anio ?? Number(haceDias(0).slice(0, 4)); return { ...f, anio: a, desde: `${a}-01-01`, hasta: `${a}-12-31` }; };
+/** Ventas, costo y unidades por dimensión y mes (mes de Lima), sobre las mismas líneas que el resto de reportes. */
+const porMes = (f: F, dim: string) => q<Record<string, string>>(`${LINEAS}
+  SELECT ${dim} AS nombre, extract(month FROM creado_en AT TIME ZONE 'America/Lima')::int mes, sum(cantidad) unidades, sum(neto) ventas, sum(costo) costo
+  FROM l GROUP BY 1, 2`, params(f));
+/** Filas «una por nombre» con m1…m12 y total, a partir de un valor por mes. */
+function matriz(datos: Record<string, string>[], valor: (ventas: number, costo: number, unidades: number) => number, total: (ventas: number, costo: number, unidades: number) => number) {
+  const por = new Map<string, { v: number[]; c: number[]; u: number[] }>();
+  for (const d of datos) {
+    const x = por.get(d.nombre) ?? { v: Array(12).fill(0), c: Array(12).fill(0), u: Array(12).fill(0) };
+    x.v[num(d.mes) - 1] += num(d.ventas); x.c[num(d.mes) - 1] += num(d.costo); x.u[num(d.mes) - 1] += num(d.unidades);
+    por.set(d.nombre, x);
+  }
+  return [...por.entries()].map(([nombre, x]) => {
+    const fila: Record<string, string | number> = { nombre };
+    for (let m = 0; m < 12; m++) fila[`m${m + 1}`] = Number(valor(x.v[m], x.c[m], x.u[m]).toFixed(4));
+    const sv = x.v.reduce((a, b) => a + b, 0), sc = x.c.reduce((a, b) => a + b, 0), su = x.u.reduce((a, b) => a + b, 0);
+    fila.total = Number(total(sv, sc, su).toFixed(4));
+    return fila;
+  });
+}
+const margenDe = (v: number, c: number) => (v > 0 ? (v - c) / v : 0);
 
 const margenCols: Col[] = [
   { key: 'unidades', label: 'Unidades', tipo: 'num' }, { key: 'ventas', label: 'Ventas netas', tipo: 'dinero' },
@@ -129,16 +167,44 @@ const REPORTES: Record<string, Reporte> = {
       return { filas: filas.map((r) => ({ nombre: r.nombre, canal: r.canal === 'APP' ? 'Pedido por app' : 'Venta a terceros', tickets: num(r.tickets), ventas: num(r.ventas), costo: num(r.costo), utilidad: num(r.utilidad), margen: num(r.margen) })) };
     },
   },
+  // REQ-REP-01 (informe del ing. Alvarez, 27/11/2026): registro de ventas por documento. Reemplaza «Margen por venta»:
+  // mismas ventas, mismo costo congelado, más el comprobante, el IGV, la condición y el estado de pago.
   'G-06': {
-    titulo: 'Margen por venta (detalle)', permiso: 'dashboard.ver',
-    columnas: [{ key: 'codigo', label: 'Venta' }, { key: 'fecha', label: 'Fecha', tipo: 'fecha' }, { key: 'cliente', label: 'Cliente' }, { key: 'vendedor', label: 'Vendedor' }, { key: 'ventas', label: 'Ingreso neto', tipo: 'dinero' }, { key: 'costo', label: 'Costo', tipo: 'dinero' }, { key: 'utilidad', label: 'Utilidad', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }],
+    titulo: 'Registro de ventas', permiso: 'dashboard.ver',
+    columnas: [{ key: 'fecha', label: 'Fecha y hora', tipo: 'fecha' }, { key: 'documento', label: 'Comprobante' }, { key: 'codigo', label: 'Venta' }, { key: 'pedido', label: 'Pedido' },
+      { key: 'cliente', label: 'Cliente' }, { key: 'vendedor', label: 'Vendedor' }, { key: 'canal', label: 'Canal' }, { key: 'condicion', label: 'Condición' },
+      { key: 'subtotal', label: 'Subtotal (sin IGV)', tipo: 'dinero' }, { key: 'igv', label: 'IGV', tipo: 'dinero' }, { key: 'total', label: 'Total venta', tipo: 'dinero' },
+      { key: 'costo', label: 'Costo producción', tipo: 'dinero' }, { key: 'utilidad', label: 'Utilidad bruta', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' },
+      { key: 'estadoPago', label: 'Estado de pago' }],
     async calcular(f) {
-      const filas = await q<Record<string, string>>(`${LINEAS}
-        SELECT codigo, min(creado_en)::text fecha, max(cliente) cliente, max(vendedor) vendedor, sum(neto) ventas, sum(costo) costo,
-               sum(neto)-sum(costo) utilidad, CASE WHEN sum(neto) > 0 THEN (sum(neto)-sum(costo))/sum(neto) ELSE 0 END margen
-        FROM l GROUP BY codigo ORDER BY margen ASC, fecha DESC LIMIT 1000`, params(f));
-      return { filas: filas.map((r) => ({ codigo: r.codigo, fecha: r.fecha, cliente: r.cliente, vendedor: r.vendedor, ventas: num(r.ventas), costo: num(r.costo), utilidad: num(r.utilidad), margen: num(r.margen) })),
-        resumen: { ventasConMargenNegativo: filas.filter((r) => num(r.margen) < 0).length } };
+      // Estado de pago desde su cuenta por cobrar; sin cuenta (contado sin cliente) se pagó al vender.
+      const filas = await q<Record<string, string>>(`
+        WITH v AS (
+          SELECT v.codigo, v.creado_en, coalesce(v.serie || '-' || lpad(v.correlativo::text, 8, '0'), '—') documento, v.comprobante_tipo,
+                 coalesce(p.codigo, '—') pedido, coalesce(c.nombre, 'Público general') cliente, coalesce(nullif(v.vendedor, ''), '—') vendedor, v.canal,
+                 CASE WHEN v.forma_pago = 'CREDITO' THEN 'CREDITO' ELSE 'CONTADO' END condicion,
+                 coalesce(v.base, v.ventas_netas) subtotal, coalesce(v.igv, 0) igv, coalesce(v.total_con_igv, v.ventas_netas) total,
+                 k.costo, k.neto - k.costo utilidad, CASE WHEN k.neto > 0 THEN (k.neto - k.costo) / k.neto ELSE 0 END margen,
+                 CASE WHEN x.id IS NULL OR x.saldo <= 0.009 THEN 'PAGADO'
+                      WHEN x.vence_en < (now() AT TIME ZONE 'America/Lima')::date THEN 'VENCIDO'
+                      WHEN x.saldo < x.monto - 0.009 THEN 'PARCIAL' ELSE 'PENDIENTE' END estado_pago
+          FROM core.venta v LEFT JOIN core.cliente c ON c.id = v.cliente_id LEFT JOIN core.pedido p ON p.id = v.pedido_id
+          -- Costo y utilidad de sus líneas, igual que el resto de reportes (no el redondeo guardado en la cabecera).
+          CROSS JOIN LATERAL (SELECT coalesce(sum(d.precio_neto * d.cantidad), 0) neto, coalesce(sum(d.costo_unitario * d.cantidad), 0) costo FROM core.venta_detalle d WHERE d.venta_id = v.id) k
+          LEFT JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id AND x.estado <> 'ANULADA'
+          WHERE v.estado = 'CONFIRMADA' AND v.creado_en >= $1::date AND v.creado_en < $2::date + 1
+            AND ($3::uuid IS NULL OR v.cliente_id = $3) AND ($4::text IS NULL OR v.vendedor = $4) AND ($5::text IS NULL OR v.canal = $5)
+            AND ($6::text IS NULL OR (v.forma_pago = 'CREDITO') = ($6 = 'CREDITO')))
+        SELECT *, creado_en::text fecha FROM v WHERE $7::text IS NULL OR estado_pago = $7 ORDER BY creado_en DESC LIMIT 2000`,
+        [f.desde, f.hasta, f.cliente ?? null, f.vendedor ?? null, f.canal ?? null, f.condicion ?? null, f.estadoPago ?? null]);
+      const ESTADO: Record<string, string> = { PAGADO: 'Pagado', PARCIAL: 'Pago parcial', PENDIENTE: 'Pendiente', VENCIDO: 'Vencido' };
+      const TIPO: Record<string, string> = { FACTURA: 'Factura', BOLETA: 'Boleta', NOTA_VENTA: 'Nota de venta' };
+      const lista = filas.map((r) => ({ fecha: r.fecha, documento: `${TIPO[r.comprobante_tipo] ?? 'Nota de venta'} ${r.documento}`, codigo: r.codigo, pedido: r.pedido,
+        cliente: r.cliente, vendedor: r.vendedor, canal: r.canal === 'APP' ? 'Pedido por app' : 'Venta a terceros', condicion: r.condicion === 'CREDITO' ? 'Crédito' : 'Contado',
+        subtotal: num(r.subtotal), igv: num(r.igv), total: num(r.total), costo: num(r.costo), utilidad: num(r.utilidad), margen: num(r.margen), estadoPago: ESTADO[r.estado_pago] }));
+      const suma = (k: 'subtotal' | 'igv' | 'total' | 'costo' | 'utilidad') => Number(lista.reduce((t, x) => t + x[k], 0).toFixed(2));
+      return { filas: lista, resumen: { documentos: lista.length, total: suma('total'), utilidad: suma('utilidad'), margen: suma('subtotal') ? suma('utilidad') / suma('subtotal') : 0,
+        porCobrar: lista.filter((x) => x.estadoPago !== 'Pagado').length, ventasConMargenNegativo: lista.filter((x) => x.margen < 0).length } };
     },
   },
   'G-07': {
@@ -292,6 +358,48 @@ const REPORTES: Record<string, Reporte> = {
         count(*) FILTER (WHERE fecha_entrega <= current_date AND estado = 'ENTREGADO' AND (entregado_en AT TIME ZONE 'America/Lima')::date <= fecha_entrega) entregados FROM core.pedido WHERE fecha_entrega BETWEEN $1::date AND $2::date`, [f.desde, f.hasta]);
       return { filas: filas.map((r) => ({ producto: r.producto, planificado: num(r.planificado), producido: num(r.producido), cumplimiento: num(r.planificado) ? num(r.producido) / num(r.planificado) : 0, vendido: num(r.vendido) })),
         resumen: { cumplimientoPedidos: num(ped?.vencidos) ? num(ped?.entregados) / num(ped?.vencidos) : 0 } };
+    },
+  },
+  // REQ-REP-02: utilidad (o margen %) de cada categoría, mes a mes. La web la dibuja en líneas (una por categoría).
+  'G-14': {
+    titulo: 'Margen por categoría por año', permiso: 'dashboard.ver',
+    columnas: [{ key: 'nombre', label: 'Categoría' }, ...colsMeses('dinero')],
+    async calcular(f0) {
+      const f = delAnio(f0);
+      const pct = f.medida === 'margen';
+      const filas = matriz(await porMes(f, 'categoria'), pct ? margenDe : (v, c) => v - c, pct ? margenDe : (v, c) => v - c)
+        .sort((a, b) => (b.total as number) - (a.total as number));
+      return { filas, columnas: [{ key: 'nombre', label: 'Categoría' }, ...colsMeses(pct ? 'pct' : 'dinero')], resumen: { anio: f.anio, medida: pct ? 'margen' : 'soles' } };
+    },
+  },
+  // REQ-REP-03: ventas netas (S/) o unidades de cada producto, mes a mes; Top N por el total del año.
+  'G-15': {
+    titulo: 'Ventas de productos por año', permiso: 'dashboard.ver',
+    columnas: [{ key: 'nombre', label: 'Producto' }, ...colsMeses('dinero')],
+    async calcular(f0) {
+      const f = delAnio(f0);
+      const und = f.medida === 'unidades';
+      const todas = matriz(await porMes(f, 'producto'), und ? (_v, _c, u) => u : (v) => v, und ? (_v, _c, u) => u : (v) => v)
+        .sort((a, b) => (b.total as number) - (a.total as number));
+      const filas = f.top ? todas.slice(0, f.top) : todas;
+      return { filas, columnas: [{ key: 'nombre', label: 'Producto' }, ...colsMeses(und ? 'num' : 'dinero')], resumen: { anio: f.anio, medida: und ? 'unidades' : 'soles', productos: todas.length } };
+    },
+  },
+  // REQ-REP-04: por mes, ventas netas, costo de lo vendido (insumos + mano de obra + CIF, congelado al vender), utilidad y margen.
+  'G-16': {
+    titulo: 'Rentabilidad por año', permiso: 'dashboard.ver',
+    columnas: [{ key: 'mes', label: 'Mes' }, { key: 'ventas', label: 'Ventas netas', tipo: 'dinero' }, { key: 'costo', label: 'Costos totales', tipo: 'dinero' },
+      { key: 'utilidad', label: 'Utilidad bruta', tipo: 'dinero' }, { key: 'margen', label: 'Margen', tipo: 'pct' }],
+    async calcular(f0) {
+      const f = delAnio(f0);
+      const datos = await porMes(f, "'Total'");
+      const filas = MESES.map((mes, i) => {
+        const d = datos.find((x) => num(x.mes) === i + 1);
+        const ventas = num(d?.ventas), costo = num(d?.costo);
+        return { mes, ventas, costo, utilidad: Number((ventas - costo).toFixed(4)), margen: margenDe(ventas, costo) };
+      });
+      const ventas = filas.reduce((a, x) => a + x.ventas, 0), costo = filas.reduce((a, x) => a + x.costo, 0);
+      return { filas, resumen: { anio: f.anio, ventas, costo, utilidad: ventas - costo, margen: margenDe(ventas, costo) } };
     },
   },
   'V-01': {
@@ -465,9 +573,9 @@ export async function rutasReportes(app: FastifyInstance) {
     const f = leerFiltros(req.query);
     if (!f || f.desde > f.hasta) return reply.code(422).send(error(422, 'FILTRO_INVALIDO', 'Revisa las fechas y filtros.'));
     try {
-      const out = await r.calcular(f);
+      const { columnas, ...out } = await r.calcular(f);
       const visible = r.costos ? proyectarCostos(req.usuario!, out) : out;
-      return { codigo, titulo: r.titulo, columnas: columnasDe(r, req.usuario!), filtros: f, generadoEn: new Date().toISOString(), ...visible };
+      return { codigo, titulo: r.titulo, columnas: columnasDe(columnas ? { ...r, columnas } : r, req.usuario!), filtros: f, generadoEn: new Date().toISOString(), ...visible };
     } catch (e) {
       const err = e as Error & { status?: number };
       if (!err.status) throw e;
