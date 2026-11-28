@@ -32,14 +32,12 @@ function SelectorReporte({ catalogo, codigo, cargando, onElegir }: { catalogo: C
   const elegir = (c: string) => { onElegir(c); cerrar(); };
 
   return (
-    <div className="selrep" ref={ref}>
+    <div className="filtros__campo selrep" ref={ref}>
+      <span>Reporte</span>
       <button type="button" className="selrep__boton" aria-haspopup="dialog" aria-expanded={abierto} disabled={cargando && !actual} onClick={() => (abierto ? cerrar() : setAbierto(true))}>
         <span className="selrep__codigo mono">{actual?.codigo ?? '—'}</span>
-        <span className="selrep__texto">
-          <small>{actual ? GRUPOS[actual.codigo[0]] ?? 'Reporte' : 'Reporte'}</small>
-          <b>{actual?.titulo ?? (cargando ? 'Cargando reportes…' : 'Elige un reporte')}</b>
-        </span>
-        <span className="selrep__cambiar">Cambiar reporte <Icon name="chevron" size={16} /></span>
+        <b className="selrep__titulo">{actual?.titulo ?? (cargando ? 'Cargando reportes…' : 'Elige un reporte')}</b>
+        <Icon name="chevron" size={16} className="selrep__flecha" />
       </button>
       {abierto && (
         <div className="selrep__panel" role="dialog" aria-label="Elegir reporte">
@@ -168,7 +166,7 @@ export function Reportes() {
     catch (e) { setError(e instanceof Error ? e.message : 'No se pudo generar.'); }
     finally { setCargando(false); }
   };
-  const hace = useEnVivo(cargar, [codigo, JSON.stringify(filtros)], 60);
+  useEnVivo(cargar, [codigo, JSON.stringify(filtros)], 60);
 
   // Registro de ventas (G-06): con permiso, un clic abre la anulación (devuelve stock y cancela la deuda).
   const { rol } = useApp();
@@ -200,15 +198,12 @@ export function Reportes() {
       <div className="reportes">
         <div className="pila">
           <Tarjeta>
-            <div className="reportes__cab">
+            {/* Una sola fila: el reporte es un filtro más, junto a los suyos. */}
+            <div className={`reportes__barra ${cargando ? 'is-cargando' : ''}`}>
               <SelectorReporte catalogo={catalogo} cargando={catalogoCargado === null && !error} codigo={codigo}
                 onElegir={(c) => { if (c !== codigo) { setCodigo(c); setRes(null); } }} />
-              <div className="reportes__estado">
-                {cargando && <Insignia tono="info" punto>Calculando</Insignia>}
-                <span className="card__sub">{hace === null ? 'Cargando…' : `Actualizado hace ${hace} s · se refresca solo`}</span>
-              </div>
+              <BarraFiltros valor={filtros} onChange={setFiltros} campos={CAMPOS[codigo] ?? ['categoria', 'producto', 'cliente', 'vendedor']} />
             </div>
-            <BarraFiltros valor={filtros} onChange={setFiltros} campos={CAMPOS[codigo] ?? ['categoria', 'producto', 'cliente', 'vendedor']} />
             {resumen && <div className="resumen">{resumen.map(([k, v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>}
           </Tarjeta>
 
