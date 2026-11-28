@@ -1,16 +1,80 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '@/core/api';
 import { exportarExcel, exportarPdf } from '@/core/exportar';
 import { money, pct } from '@/core/format';
-import { Boton, Encabezado, Insignia, PilaEsqueleto, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
+import { Boton, Encabezado, Insignia, Tarjeta, TablaEsqueleto, Vacio } from '@/ui/primitives';
 import { BarraFiltros, aQuery, rango, useEnVivo, type CampoFiltro, type Filtros } from '@/ui/Filtros';
 import { BarrasV, LineasMultiples } from '@/ui/charts';
 import { TablaReporte, type ColRep } from '@/ui/TablaReporte';
 import { Dialogo } from '@/ui/Dialogo';
 import { useApp } from '@/core/app-state';
+import { Icon } from '@/ui/icons';
+import { useCerrarAfuera } from '@/ui/useCerrarAfuera';
 
 interface Catalogo { codigo: string; titulo: string; columnas: ColRep[] }
 interface Resultado extends Catalogo { filas: Array<Record<string, unknown>>; resumen?: Record<string, unknown>; generadoEn: string }
+
+/* ------------- Selector de reporte: arriba, con buscador y grupos (reemplaza la lista lateral) ------------- */
+function SelectorReporte({ catalogo, codigo, cargando, onElegir }: { catalogo: Catalogo[]; codigo: string; cargando: boolean; onElegir: (codigo: string) => void }) {
+  const [abierto, setAbierto] = useState(false);
+  const [busca, setBusca] = useState('');
+  const [grupo, setGrupo] = useState('');
+  const cerrar = () => { setAbierto(false); setBusca(''); };
+  const ref = useCerrarAfuera(abierto, cerrar);
+  const entrada = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (abierto) entrada.current?.focus(); }, [abierto]);
+  const actual = catalogo.find((c) => c.codigo === codigo);
+  const grupos = [...new Set(catalogo.map((c) => c.codigo[0]))];
+  // Sin tildes ni mayúsculas: «rentabilidad», «g-16» o «categoria» encuentran lo mismo.
+  const norm = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const visibles = useMemo(() => catalogo.filter((c) => (!grupo || c.codigo[0] === grupo) && (!busca || norm(`${c.codigo} ${c.titulo} ${GRUPOS[c.codigo[0]] ?? ''}`).includes(norm(busca)))),
+    [catalogo, grupo, busca]);
+  const elegir = (c: string) => { onElegir(c); cerrar(); };
+
+  return (
+    <div className="selrep" ref={ref}>
+      <button type="button" className="selrep__boton" aria-haspopup="dialog" aria-expanded={abierto} disabled={cargando && !actual} onClick={() => (abierto ? cerrar() : setAbierto(true))}>
+        <span className="selrep__codigo mono">{actual?.codigo ?? '—'}</span>
+        <span className="selrep__texto">
+          <small>{actual ? GRUPOS[actual.codigo[0]] ?? 'Reporte' : 'Reporte'}</small>
+          <b>{actual?.titulo ?? (cargando ? 'Cargando reportes…' : 'Elige un reporte')}</b>
+        </span>
+        <span className="selrep__cambiar">Cambiar reporte <Icon name="chevron" size={16} /></span>
+      </button>
+      {abierto && (
+        <div className="selrep__panel" role="dialog" aria-label="Elegir reporte">
+          <div className="selrep__buscar">
+            <Icon name="search" size={18} />
+            <input ref={entrada} value={busca} placeholder="Buscar reporte por nombre o código…" aria-label="Buscar reporte"
+              onChange={(e) => setBusca(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && visibles[0]) elegir(visibles[0].codigo); }} />
+            <span className="selrep__total">{visibles.length} de {catalogo.length}</span>
+          </div>
+          <div className="selrep__chips" role="group" aria-label="Área">
+            <button type="button" className={!grupo ? 'is-active' : ''} aria-pressed={!grupo} onClick={() => setGrupo('')}>Todos</button>
+            {grupos.map((g) => (
+              <button key={g} type="button" className={grupo === g ? 'is-active' : ''} aria-pressed={grupo === g} onClick={() => setGrupo(grupo === g ? '' : g)}>
+                {GRUPOS[g] ?? g}<span>{catalogo.filter((c) => c.codigo[0] === g).length}</span>
+              </button>
+            ))}
+          </div>
+          <div className="selrep__lista">
+            {visibles.length === 0 && <p className="selrep__vacio">Ningún reporte coincide con «{busca}».</p>}
+            {grupos.filter((g) => visibles.some((c) => c.codigo[0] === g)).map((g) => (
+              <section key={g} className="selrep__grupo">
+                <p className="selrep__grupo-t">{GRUPOS[g] ?? g}</p>
+                {visibles.filter((c) => c.codigo[0] === g).map((c) => (
+                  <button key={c.codigo} type="button" className={`selrep__item ${c.codigo === codigo ? 'is-active' : ''}`} onClick={() => elegir(c.codigo)}>
+                    <span className="mono">{c.codigo}</span>{c.titulo}{GRAFICOS[c.codigo] && <em className="selrep__marca">Gráfico</em>}
+                  </button>
+                ))}
+              </section>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ------------- Reportes anuales (REQ-REP-02…04): gráfico sobre las mismas filas de la tabla ------------- */
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'];
@@ -121,7 +185,6 @@ export function Reportes() {
   };
 
   const actual = catalogo.find((c) => c.codigo === codigo);
-  const grupos = [...new Set(catalogo.map((c) => c.codigo[0]))];
   const resumen = res?.resumen && RESUMEN[codigo]?.(res.resumen);
   const faltaProducto = codigo === 'M-01' && !filtros.producto;
   const reintentar = () => { setError(null); if (codigo) void cargar(); else cargarCatalogo(); };
@@ -135,26 +198,15 @@ export function Reportes() {
         </>} />
 
       <div className="reportes">
-        <nav className="reportes__lista" aria-label="Catálogo de reportes">
-          {catalogoCargado === null && !error && <PilaEsqueleto lineas={8} />}
-          {grupos.map((g) => (
-            <div key={g} className="reportes__grupo">
-              <p className="reportes__grupo-t">{GRUPOS[g] ?? g}</p>
-              {catalogo.filter((c) => c.codigo[0] === g).map((c) => (
-                <button key={c.codigo} className={`reportes__item ${c.codigo === codigo ? 'is-active' : ''}`} onClick={() => { setCodigo(c.codigo); setRes(null); }}>
-                  <span className="mono">{c.codigo}</span>{c.titulo}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-
         <div className="pila">
           <Tarjeta>
             <div className="reportes__cab">
-              <div><h2 className="card__title">{actual?.titulo ?? 'Reporte'}</h2>
-                <p className="card__sub">{hace === null ? 'Cargando…' : `Actualizado hace ${hace} s · se refresca solo`}</p></div>
-              {cargando && <Insignia tono="info" punto>Calculando</Insignia>}
+              <SelectorReporte catalogo={catalogo} cargando={catalogoCargado === null && !error} codigo={codigo}
+                onElegir={(c) => { if (c !== codigo) { setCodigo(c); setRes(null); } }} />
+              <div className="reportes__estado">
+                {cargando && <Insignia tono="info" punto>Calculando</Insignia>}
+                <span className="card__sub">{hace === null ? 'Cargando…' : `Actualizado hace ${hace} s · se refresca solo`}</span>
+              </div>
             </div>
             <BarraFiltros valor={filtros} onChange={setFiltros} campos={CAMPOS[codigo] ?? ['categoria', 'producto', 'cliente', 'vendedor']} />
             {resumen && <div className="resumen">{resumen.map(([k, v]) => <div key={k}><span>{k}</span><b>{v}</b></div>)}</div>}
