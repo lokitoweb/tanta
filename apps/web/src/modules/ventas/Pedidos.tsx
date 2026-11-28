@@ -21,6 +21,8 @@ interface Item { productoId: string; producto: string; cantidad: number; precio:
 const cantidadTxt = (i: Item) => (i.presentacion && i.cantidadPresentacion ? `${i.cantidadPresentacion} × ${i.presentacion.toLowerCase()} (${i.cantidad} unid)` : String(i.cantidad));
 interface Pedido { id: string; codigo: string; clienteId: string; cliente: string; vendedor: string; estado: string; total: number; fecha_entrega: string; hora_entrega: string; observaciones: string; venta: string | null; items: Item[];
   tipoEntrega?: string; direccion?: string; motivo?: string | null; entregaObs?: string | null; observacion?: string | null; porCobrar?: number | null;
+  /** Al entregar: días propuestos y máximo para la fecha en que el cliente paga lo que queda (Parámetros). */
+  plazoPago?: { propuesto: number; maximo: number } | null;
   comprobanteTipo?: string; comprobante?: { nombre: string; numero: string } | null;
   /** Pedido de stock: pan ya producido (venta de stock u oferta); no pasa por producción y se cobra aparte. */
   esOferta?: boolean; factura?: Factura | null }
@@ -56,7 +58,7 @@ export function Pedidos() {
   const [pago, setPago] = useState({ descuento: '0' });
   const { lineaNueva, revisar, aPagos, nombre: nombreMedio } = useMediosCobro();
   // Entregar y cobrar: lo que paga al recibir (una o varias formas); «no pagó» = todo queda como deuda.
-  const [entrega, setEntrega] = useState<{ lineas: LineaPago[]; nota: string; voucher: string | null } | null>(null);
+  const [entrega, setEntrega] = useState<{ lineas: LineaPago[]; nota: string; voucher: string | null; pagaEl: string } | null>(null);
   // El vendedor corrige lo pedido antes de producción (el total lo recalcula el servidor).
   const [corregir, setCorregir] = useState<Array<{ productoId: string; producto: string; cantidad: string; presentacion?: string | null; promocionId?: string | null }> | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'ok' | 'danger'; texto: string } | null>(null);
@@ -111,13 +113,14 @@ export function Pedidos() {
     });
     return `${p.codigo} despachado · ${nombreComprobante(p.comprobanteTipo).toLowerCase() || 'comprobante'} ${v.comprobante.numero} · por cobrar al entregar${v.alertaCredito ? ` · ${v.alertaCredito}` : ''}`;
   });
+  const enDias = (n: number) => new Date(Date.now() + n * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
   const debeEntrega = (p: Pedido) => p.porCobrar ?? p.total;
   const revisionEntrega = sel && entrega ? revisar(entrega.lineas, debeEntrega(sel)) : null;
   const entregar = (p: Pedido, conPago: boolean) => accion(async () => {
     const pagos = conPago && entrega ? aPagos(entrega.lineas) : [];
     const r = await api<{ recibo: { numero: string } | null; quedaPorCobrar: number }>(`/pedidos/${p.codigo}/estado`, {
-      method: 'PATCH', body: { estado: 'ENTREGADO', motivo: '', observaciones: entrega?.nota.trim() ?? '', pagos, voucher: pagos.length ? entrega?.voucher ?? null : null } });
-    return `${p.codigo} entregado${r.recibo ? ` · recibo ${r.recibo.numero} (${pagos.map((x) => `${nombreMedio(x.medio).toLowerCase()} ${money(x.monto)}`).join(' + ')})` : ' · sin pago'}${r.quedaPorCobrar > 0.009 ? ` · queda ${money(r.quedaPorCobrar)} por cobrar en Cobranza` : ' · saldado'}`;
+      method: 'PATCH', body: { estado: 'ENTREGADO', motivo: '', observaciones: entrega?.nota.trim() ?? '', pagos, voucher: pagos.length ? entrega?.voucher ?? null : null, pagaEl: entrega?.pagaEl || null } });
+    return `${p.codigo} entregado${r.recibo ? ` · recibo ${r.recibo.numero} (${pagos.map((x) => `${nombreMedio(x.medio).toLowerCase()} ${money(x.monto)}`).join(' + ')})` : ' · sin pago'}${r.quedaPorCobrar > 0.009 ? ` · queda ${money(r.quedaPorCobrar)} por cobrar en Cobranza${entrega?.pagaEl ? `, paga el ${entrega.pagaEl.split('-').reverse().join('/')}` : ''}` : ' · saldado'}`;
   });
 
   const guardarCorreccion = (p: Pedido) => accion(async () => {
@@ -215,7 +218,7 @@ export function Pedidos() {
           {sel.estado === 'REGISTRADO' && <Boton onClick={() => setMotivo({ destino: 'RECHAZADO', texto: '' })} disabled={ocupado}>Rechazar</Boton>}
           {['CONFIRMADO', 'EN_PRODUCCION', 'LISTO'].includes(sel.estado) && <Boton onClick={() => setMotivo({ destino: 'CANCELADO', texto: '' })} disabled={ocupado}>Anular pedido</Boton>}
           {COMPLETABLE.includes(sel.estado) && alcanzaStock(sel) && <Boton onClick={() => void avanzar(sel, 'LISTO')} disabled={ocupado} title="Hay pan libre en el almacén: se aparta y el pedido queda listo sin esperar la hoja">Completar con stock</Boton>}
-          {sel.estado === 'DESPACHADO' && !entrega && <Boton variant="primary" onClick={() => setEntrega({ lineas: [lineaNueva(debeEntrega(sel))], nota: '', voucher: null })} disabled={ocupado}>Entregar y cobrar</Boton>}
+          {sel.estado === 'DESPACHADO' && !entrega && <Boton variant="primary" onClick={() => setEntrega({ lineas: [lineaNueva(debeEntrega(sel))], nota: '', voucher: null, pagaEl: sel.plazoPago ? enDias(sel.plazoPago.propuesto) : '' })} disabled={ocupado}>Entregar y cobrar</Boton>}
           {sel.estado === 'DESPACHADO' && entrega && <>
             <Boton onClick={() => void entregar(sel, false)} disabled={ocupado}>No pagó: dejar como deuda</Boton>
             {puede('cobranza.registrar') && <Boton variant="primary" onClick={() => void entregar(sel, true)} disabled={ocupado || !!revisionEntrega?.problema}>Entregar y cobrar {money(revisionEntrega?.suma ?? 0)}</Boton>}
@@ -271,6 +274,9 @@ export function Pedidos() {
                 <p className="dialogo__nota field--ancho">Debe {money(debeEntrega(sel))}. Registra lo que pagó al recibir; lo que falte queda como deuda en Cobranza.</p>
                 {puede('cobranza.registrar') && <ComprobanteInput valor={entrega.voucher} onChange={(voucher) => setEntrega({ ...entrega, voucher })} onError={(texto) => setAviso({ tono: 'danger', texto })} />}
                 {puede('cobranza.registrar') && <LineasPago lineas={entrega.lineas} onChange={(lineas) => setEntrega({ ...entrega, lineas })} debe={debeEntrega(sel)} />}
+                {sel.plazoPago && <label className="field field--ancho"><span className="field__label">Si queda saldo, el cliente paga el</span>
+                  <input className="field__input" type="date" required min={enDias(0)} max={enDias(sel.plazoPago.maximo)} value={entrega.pagaEl} onChange={(e) => setEntrega({ ...entrega, pagaEl: e.target.value })} />
+                  <span className="field__ayuda">Hasta {sel.plazoPago.maximo} días · el saldo vence ese día</span></label>}
                 <label className="field field--ancho"><span className="field__label">Nota de la entrega (quién recibió, hora…)</span>
                   <input className="field__input" maxLength={200} value={entrega.nota} onChange={(e) => setEntrega({ ...entrega, nota: e.target.value })} /></label>
               </div>

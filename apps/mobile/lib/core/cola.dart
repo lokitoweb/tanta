@@ -216,7 +216,7 @@ class ColaOffline {
         // Seguro de reintentar: el servidor solo entrega un pedido «En camino» (no cobra dos veces).
         await api.entregarPedido('${op.datos['codigo']}',
             pagos: ((op.datos['pagos'] as List?) ?? const []).cast<Map<String, dynamic>>(),
-            observaciones: '${op.datos['observaciones'] ?? ''}', voucher: op.datos['voucher'] as String?, claveIdempotencia: op.clave);
+            observaciones: '${op.datos['observaciones'] ?? ''}', voucher: op.datos['voucher'] as String?, pagaEl: op.datos['pagaEl'] as String?, claveIdempotencia: op.clave);
       case 'pedido':
         await api.cambiarEstadoPedido('${op.datos['codigo']}', '${op.datos['estado']}', claveIdempotencia: op.clave);
       default:

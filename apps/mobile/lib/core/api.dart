@@ -670,8 +670,9 @@ class Api {
   Future<void> observarPedido(String codigo, String mensaje) async => await _post('/pedidos/$codigo/observar', {'mensaje': mensaje});
 
   /// Entregar y cobrar en un paso: [pagos] vacío = queda todo como deuda.
-  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = '', String? voucher, String? claveIdempotencia}) async =>
-      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos, 'voucher': voucher}, claveIdempotencia: claveIdempotencia) as Map<String, dynamic>;
+  /// [pagaEl]: fecha (aaaa-mm-dd) en que el cliente paga lo que queda; la deuda vence ese día.
+  Future<Map<String, dynamic>> entregarPedido(String codigo, {List<Map<String, dynamic>> pagos = const [], String observaciones = '', String? voucher, String? pagaEl, String? claveIdempotencia}) async =>
+      await _enviar('PATCH', '/pedidos/$codigo/estado', {'estado': 'ENTREGADO', 'motivo': '', 'observaciones': observaciones, 'pagos': pagos, 'voucher': voucher, 'pagaEl': pagaEl}, claveIdempotencia: claveIdempotencia) as Map<String, dynamic>;
 
   /// Caja del vendedor: lo cobrado hoy por forma de pago, recibos, entregas y su rendición.
   Future<Map<String, dynamic>> miDia() async => await _get('/cobranza/mi-dia') as Map<String, dynamic>;

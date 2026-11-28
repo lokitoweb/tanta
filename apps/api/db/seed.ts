@@ -303,6 +303,8 @@ async function main() {
       ['ofertas_pedido_cliente', 'false', 'booleano', 'El cliente puede tomar ofertas desde la app (false = solo ve el aviso con precio y unidades; la venta la registra el vendedor)'],
       ['dias_alerta_vencimiento_pan', '1', 'numero', 'Días antes del vencimiento de un lote de pan para avisar a Almacén (0 = el mismo día)'],
       ['factura_max_mb', '3', 'numero', 'Tamaño máximo del PDF de la factura de SUNAT que se sube a un pedido (MB)'],
+      ['dias_pago_entrega', '2', 'numero', 'Al entregar sin pago completo: días que se proponen para la fecha en que el cliente paga (el vendedor la puede cambiar)'],
+      ['dias_pago_entrega_max', '7', 'numero', 'Al entregar sin pago completo: días máximos para la fecha de pago que elige el vendedor (un cliente a crédito puede llegar hasta sus días de crédito)'],
     ]) {
       await c.query('INSERT INTO core.parametro (clave,valor,tipo,descripcion) VALUES ($1,$2,$3,$4)', [clave, valor, tipo, desc]);
     }

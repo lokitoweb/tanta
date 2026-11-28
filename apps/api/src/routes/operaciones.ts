@@ -892,6 +892,8 @@ export async function rutasOperaciones(app: FastifyInstance) {
     // Al entregar: lo que pagó el cliente en ese momento (una o varias formas). Vacío = queda como deuda.
     pagos: z.array(LineaPago).max(5).default([]),
     voucher: z.string().max(1_500_000).startsWith('data:').nullable().default(null),
+    // Al entregar: fecha en que el cliente se compromete a pagar lo que queda (vence la deuda ese día).
+    pagaEl: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de pago inválida.').nullable().default(null),
   }).refine((d) => !['RECHAZADO', 'CANCELADO'].includes(d.estado) || d.motivo.length >= 3, { message: 'Indica el motivo.', path: ['motivo'] });
 
   /** Transiciones permitidas: es una máquina de estados, no un campo libre. */
@@ -950,7 +952,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     const parseo = CambioPedido.safeParse(req.body);
     if (!parseo.success) return reply.code(422).send(error(422, 'ESTADO_INVALIDO', parseo.error.issues[0]?.message ?? 'Estado de pedido inválido.'));
     let destino = parseo.data.estado;
-    const { motivo, observaciones, pagos, voucher } = parseo.data;
+    const { motivo, observaciones, pagos, voucher, pagaEl } = parseo.data;
     if (pagos.length && destino !== 'ENTREGADO') return reply.code(422).send(error(422, 'PAGO_FUERA_DE_ENTREGA', 'Los pagos se registran al entregar el pedido.'));
     if (pagos.length && !req.usuario!.permisos.has('cobranza.registrar')) return reply.code(403).send(error(403, 'SIN_PERMISO', 'Falta el permiso cobranza.registrar para cobrar al entregar.'));
 
@@ -1004,6 +1006,14 @@ export async function rutasOperaciones(app: FastifyInstance) {
           if (!cx) throw Object.assign(new Error('El pedido no tiene saldo por cobrar: registra la entrega sin pago.'), { status: 409 });
           recibo = await emitirRecibo(c, { clienteId: cx.cliente_id, cxcIds: [cx.id], pagos, usuarioId: req.usuario!.id, comprobanteId });
         }
+        if (destino === 'ENTREGADO' && pagaEl) {
+          // Lo que queda vence el día que el cliente se comprometió a pagar, entre hoy y el máximo permitido.
+          const r = (await c.query<{ ok: boolean; max: number }>(`SELECT $2::date BETWEEN core.hoy_lima() AND core.hoy_lima() + m ok, m max
+            FROM (SELECT core.plazo_pago_max(cliente_id) m FROM core.pedido WHERE id = $1) x`, [pedido.id, pagaEl])).rows[0];
+          if (!r?.ok) throw Object.assign(new Error(`La fecha de pago debe ser entre hoy y dentro de ${r?.max ?? 0} días.`), { status: 422 });
+          await c.query(`UPDATE core.cuenta_por_cobrar SET vence_en = $2::date WHERE estado IN ('PENDIENTE','PARCIAL')
+            AND venta_id IN (SELECT id FROM core.venta WHERE pedido_id = $1 AND estado = 'CONFIRMADA')`, [pedido.id, pagaEl]);
+        }
         if (destino === 'LISTO') await reservarListo(c, pedido.id, true);
         if (['CANCELADO', 'RECHAZADO'].includes(destino)) await liberarAlAnular(c, pedido.id, pedido.estado);
       });
@@ -1015,7 +1025,7 @@ export async function rutasOperaciones(app: FastifyInstance) {
     await auditar({
       actorId: req.usuario!.id, actor: req.usuario!.nombre, rol: req.usuario!.rol,
       accion: `PEDIDO_${destino}`, entidad: 'pedido', entidadId: codigo,
-      detalle: { de: pedido.estado, a: destino, cliente: pedido.cliente, motivo: motivo || undefined }, ip: req.ip,
+      detalle: { de: pedido.estado, a: destino, cliente: pedido.cliente, motivo: motivo || undefined, pagaEl: pagaEl ?? undefined }, ip: req.ip,
     });
     void emitirEvento('pedido.estado', { codigo, de: pedido.estado, a: destino });
     // Los avisos al cliente y a cada área salen del historial del pedido (notificaciones.ts).

@@ -450,6 +450,8 @@ export async function rutasFlujo(app: FastifyInstance) {
               FROM core.venta v LEFT JOIN core.tipo_comprobante_venta t ON t.codigo = v.comprobante_tipo
               WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA' AND v.serie IS NOT NULL LIMIT 1) AS comprobante,
              (SELECT sum(x.saldo) FROM core.venta v JOIN core.cuenta_por_cobrar x ON x.venta_id = v.id WHERE v.pedido_id = p.id AND v.estado = 'CONFIRMADA') AS "porCobrar",
+             -- Al entregar sin pago completo, el vendedor elige la fecha de pago: días propuestos y máximo (Parámetros y ficha del cliente).
+             CASE WHEN p.estado = 'DESPACHADO' THEN json_build_object('propuesto', core.plazo_pago_propuesto(p.cliente_id), 'maximo', core.plazo_pago_max(p.cliente_id)) END AS "plazoPago",
              coalesce(json_agg(json_build_object('productoId', d.producto_id, 'producto', d.producto, 'cantidad', d.cantidad, 'precio', d.precio_con_igv, 'despachado', d.cantidad_despachada,
                'presentacion', d.presentacion_codigo, 'cantidadPresentacion', d.cantidad_presentacion, 'promocionId', d.promocion_id, 'precioLista', d.precio_lista) ORDER BY d.id)
                       FILTER (WHERE d.id IS NOT NULL), '[]') items

@@ -185,13 +185,13 @@ class _PedidosState extends State<Pedidos> {
   /// Entregar y cobrar: lo que paga en el momento entra por Cobranza; lo que falta queda como deuda.
   Future<void> _entregar(Map<String, dynamic> p) async {
     final debe = p['porCobrar'] == null ? _n(p['total']) : _n(p['porCobrar']);
-    final cobro = await mostrarHojaCobro(context, cliente: '${p['cliente']}', detalle: '${p['codigo']}', debe: debe, alEntregar: true);
+    final cobro = await mostrarHojaCobro(context, cliente: '${p['cliente']}', detalle: '${p['codigo']}', debe: debe, alEntregar: true, plazoPago: p['plazoPago'] as Map?);
     if (cobro == null || !mounted) return;
     final queda = debe - cobro.monto;
     final resumen = cobro.pagos.isEmpty ? 'queda ${dinero(debe)} por cobrar' : 'cobrado ${dinero(cobro.monto)}${queda > 0.009 ? ' · queda ${dinero(queda)}' : ' · saldado'}';
     setState(() => _ocupado = '${p['codigo']}');
     try {
-      final r = await Api.instancia.entregarPedido('${p['codigo']}', pagos: cobro.pagos, observaciones: cobro.nota, voucher: cobro.pagos.isEmpty ? null : cobro.voucher);
+      final r = await Api.instancia.entregarPedido('${p['codigo']}', pagos: cobro.pagos, observaciones: cobro.nota, voucher: cobro.pagos.isEmpty ? null : cobro.voucher, pagaEl: cobro.pagaEl);
       await _cargar();
       final recibo = (r['recibo'] as Map?)?.cast<String, dynamic>();
       _aviso('${p['codigo']} entregado · $resumen', color: TantaColors.stateOk,
@@ -213,7 +213,7 @@ class _PedidosState extends State<Pedidos> {
 
   /// Sin señal en la calle: la entrega (con su cobro) se guarda y se envía sola; el servidor no la repite.
   Future<void> _entregaSinRed(Map<String, dynamic> p, Cobro cobro, String resumen) async {
-    await ColaOffline.instancia.encolar('entrega', {'codigo': '${p['codigo']}', 'pagos': cobro.pagos, 'observaciones': cobro.nota, 'voucher': cobro.pagos.isEmpty ? null : cobro.voucher},
+    await ColaOffline.instancia.encolar('entrega', {'codigo': '${p['codigo']}', 'pagos': cobro.pagos, 'observaciones': cobro.nota, 'voucher': cobro.pagos.isEmpty ? null : cobro.voucher, 'pagaEl': cobro.pagaEl},
         descripcion: 'Entrega ${p['codigo']} · $resumen');
     if (!mounted) return;
     setState(() { p['estado'] = 'ENTREGADO'; p['pendiente'] = true; });

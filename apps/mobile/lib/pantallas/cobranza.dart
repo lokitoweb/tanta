@@ -290,10 +290,12 @@ class _CobranzaState extends State<Cobranza> {
 
 /// Resultado de la hoja: las formas de pago (vacío = no pagó, queda como deuda) y una nota opcional.
 class Cobro {
-  const Cobro(this.pagos, this.nota, [this.voucher]);
+  const Cobro(this.pagos, this.nota, [this.voucher, this.pagaEl]);
   final List<Map<String, dynamic>> pagos;
   final String nota;
   final String? voucher;
+  /// Al entregar: fecha (aaaa-mm-dd) en que el cliente se compromete a pagar lo que queda.
+  final String? pagaEl;
   double get monto => pagos.fold(0, (s, p) => s + _d(p['monto']));
 }
 
@@ -335,17 +337,19 @@ class BotonVoucher extends StatelessWidget {
 
 /// Abre la hoja de cobro. Con [alEntregar] ofrece «No pagó» y la nota de la entrega (quién recibió).
 /// [otras]: lo que el cliente debe fuera de este cobro; sigue pendiente aunque este se pague completo.
-Future<Cobro?> mostrarHojaCobro(BuildContext context, {required String cliente, required String detalle, required double debe, double otras = 0, bool alEntregar = false}) =>
+/// [plazoPago]: al entregar, días propuestos y máximo para la fecha en que paga lo que quede (Parámetros).
+Future<Cobro?> mostrarHojaCobro(BuildContext context, {required String cliente, required String detalle, required double debe, double otras = 0, bool alEntregar = false, Map? plazoPago}) =>
     showModalBottomSheet<Cobro>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => HojaCobro(cliente: cliente, detalle: detalle, debe: debe, otras: otras, alEntregar: alEntregar),
+      builder: (_) => HojaCobro(cliente: cliente, detalle: detalle, debe: debe, otras: otras, alEntregar: alEntregar, plazoPago: plazoPago),
     );
 
 /// Formulario del cobro: una o varias formas de pago (p. ej. efectivo + Yape) que suman lo que se cobra.
 class HojaCobro extends StatefulWidget {
-  const HojaCobro({super.key, required this.cliente, required this.detalle, required this.debe, this.otras = 0, this.alEntregar = false});
+  const HojaCobro({super.key, required this.cliente, required this.detalle, required this.debe, this.otras = 0, this.alEntregar = false, this.plazoPago});
+  final Map? plazoPago;
   final String cliente;
   final String detalle;
   final double debe;
@@ -368,6 +372,11 @@ class _HojaCobroState extends State<HojaCobro> {
   final _nota = TextEditingController();
   String? _voucher;
   late final List<_Linea> _lineas = [_Linea('${_medios.first['codigo']}', widget.debe)];
+  final _hoy = DateUtils.dateOnly(DateTime.now());
+  int get _maxDias => ((widget.plazoPago?['maximo'] as num?) ?? 0).toInt();
+  late DateTime _pagaEl = _hoy.add(Duration(days: ((widget.plazoPago?['propuesto'] as num?) ?? 0).toInt()));
+  String? get _pagaElIso => widget.alEntregar && widget.plazoPago != null ? _pagaEl.toIso8601String().substring(0, 10) : null;
+  String _dma(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   double get _suma => _lineas.fold(0, (s, l) => s + l.valor);
 
@@ -426,6 +435,19 @@ class _HojaCobroState extends State<HojaCobro> {
           ],
           const SizedBox(height: 6),
           BotonVoucher(valor: _voucher, onCambio: (v) => setState(() => _voucher = v)),
+          // Lo que no paga ahora vence el día que el cliente se compromete a pagar (no a 30 días automáticos).
+          if (_pagaElIso != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final d = await showDatePicker(context: context, helpText: 'Fecha en que paga lo que queda', initialDate: _pagaEl, firstDate: _hoy, lastDate: _hoy.add(Duration(days: _maxDias)));
+                if (d != null) setState(() => _pagaEl = d);
+              },
+              icon: const Icon(Icons.event_outlined, size: 18),
+              label: Text('Si queda saldo, paga el ${_dma(_pagaEl)}'),
+            ),
+            Text('Hasta ${_maxDias == 0 ? 'hoy' : '$_maxDias ${_maxDias == 1 ? 'día' : 'días'}'} · el saldo vence ese día', style: const TextStyle(fontSize: 11.5, color: TantaColors.textMuted)),
+          ],
           if (widget.alEntregar) ...[
             const SizedBox(height: 12),
             TextField(controller: _nota, maxLength: 200, decoration: const InputDecoration(labelText: 'Nota de la entrega (opcional)', hintText: 'Quién recibió, hora…', counterText: '')),
@@ -437,14 +459,14 @@ class _HojaCobroState extends State<HojaCobro> {
                 : () => Navigator.pop(context, Cobro([
                       for (final l in _lineas)
                         {'monto': double.parse(l.valor.toStringAsFixed(2)), 'medio': l.medio, 'referencia': l.referencia.text.trim()},
-                    ], _nota.text.trim(), _voucher)),
+                    ], _nota.text.trim(), _voucher, _pagaElIso)),
             child: Text(widget.alEntregar ? 'Entregar y cobrar ${dinero(_suma)}' : 'Cobrar ${dinero(_suma)}'),
           ),
           // «Te pago mañana»: se entrega y todo queda como deuda en Cobranza.
           if (widget.alEntregar) ...[
             const SizedBox(height: 8),
             OutlinedButton(
-              onPressed: () => Navigator.pop(context, Cobro(const [], _nota.text.trim())),
+              onPressed: () => Navigator.pop(context, Cobro(const [], _nota.text.trim(), null, _pagaElIso)),
               child: const Text('No pagó: entregar y dejar como deuda'),
             ),
           ],

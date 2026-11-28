@@ -94,6 +94,22 @@ test('entregar sin cobro: todo queda como deuda («te pago mañana»)', async ()
   assert.equal((await api(ven, 'PATCH', `/pedidos/${p.codigo}/estado`, { estado: 'ENTREGADO', pagos: [{ monto: 1, medio: 'EFECTIVO' }] })).s, 409, 'no se entrega dos veces');
 });
 
+test('al entregar sin pago completo, el vendedor fija la fecha en que el cliente paga (no 30 días automáticos)', async () => {
+  const p = await despachado();
+  const enDias = (n) => sql(`SELECT (core.hoy_lima() + ${n})::text`);
+  const max = Number(sql(`SELECT core.plazo_pago_max('${clienteId}')`));
+  // La lista de pedidos trae el plazo propuesto y el máximo (Parámetros) para el pedido despachado.
+  const plazo = (await api(ven, 'GET', '/pedidos')).b.find((x) => x.codigo === p.codigo).plazoPago;
+  assert.deepEqual(plazo, { propuesto: Number(sql(`SELECT core.plazo_pago_propuesto('${clienteId}')`)), maximo: max });
+  assert.equal((await api(ven, 'PATCH', `/pedidos/${p.codigo}/estado`, { estado: 'ENTREGADO', pagaEl: enDias(max + 1) })).s, 422, 'no más allá del máximo');
+  assert.equal((await api(ven, 'PATCH', `/pedidos/${p.codigo}/estado`, { estado: 'ENTREGADO', pagaEl: enDias(-1) })).s, 422, 'no en el pasado');
+  assert.equal(sql(`SELECT estado FROM core.pedido WHERE id = '${p.pedId}'`), 'DESPACHADO', 'un rechazo no entrega');
+  const e = await api(ven, 'PATCH', `/pedidos/${p.codigo}/estado`, { estado: 'ENTREGADO', pagos: [{ monto: 5, medio: 'EFECTIVO' }], pagaEl: enDias(2) });
+  assert.equal(e.s, 200, JSON.stringify(e.b));
+  assert.equal(e.b.quedaPorCobrar, 15);
+  assert.equal(sql(`SELECT vence_en::text FROM core.cuenta_por_cobrar WHERE venta_id = (SELECT id FROM core.venta WHERE pedido_id = '${p.pedId}' AND estado = 'CONFIRMADA')`), enDias(2), 'el saldo vence el día acordado');
+});
+
 test('mi día, rendición del vendedor y recepción en caja', async () => {
   // Cada cobro queda ligado a su rendición: se sueltan antes de borrar las de hoy.
   sql(`UPDATE core.cobranza SET rendicion_id = NULL WHERE rendicion_id IN (SELECT id FROM core.rendicion_cobranza WHERE vendedor_id = (SELECT id FROM core.usuario WHERE usuario = 'cmedina') AND fecha = (now() AT TIME ZONE 'America/Lima')::date)`);
