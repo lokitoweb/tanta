@@ -85,9 +85,11 @@ test('Del pedido a la cobranza: hoja de producción, cierre con lo real, despach
   assert.equal(h.s, 200, JSON.stringify(h.b));
   const fila = h.b.filas.find((f) => f.productoId === prodA);
   assert.ok(fila.pedido >= 10);
-  // Observaciones 04: Producción (sin pedidos.ver ni inventario.ver) ve cuánto hacer, no los clientes ni el consumo de insumos.
-  const sinPermisos = sql("SELECT count(*) FROM core.rol_permiso WHERE rol_id = 'PRODUCCION' AND permiso_id IN ('pedidos.ver','inventario.ver')") === '0';
-  if (sinPermisos) assert.ok(h.b.clientes.length === 0 && Object.keys(fila.porCliente).length === 0 && h.b.insumos.length === 0, 'producción no ve clientes ni consumos');
+  // Observaciones 04: los clientes de la hoja dependen de produccion.ver_clientes; el consumo de insumos, de inventario.ver.
+  const tiene = (p) => sql(`SELECT count(*) FROM core.rol_permiso WHERE rol_id = 'PRODUCCION' AND permiso_id = '${p}'`) !== '0';
+  assert.equal(h.b.clientes.length > 0, tiene('produccion.ver_clientes'), 'columnas de clientes según el permiso');
+  if (!tiene('produccion.ver_clientes')) assert.equal(Object.keys(fila.porCliente).length, 0);
+  if (!tiene('inventario.ver')) assert.equal(h.b.insumos.length, 0, 'producción no ve consumos');
   const hAdm = (await api(adm, 'GET', `/produccion/hoja?fecha=${fecha}`)).b;
   assert.ok(Object.values(hAdm.filas.find((f) => f.productoId === prodA).porCliente).includes(10), 'columna por cliente');
   assert.ok(hAdm.insumos.length > 0 && hAdm.insumos.every((i) => ['NORMAL', 'ALERTA', 'FALTA'].includes(i.estado)));

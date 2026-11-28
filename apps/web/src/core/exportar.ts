@@ -43,3 +43,11 @@ export async function exportarExcel(nombre: string, filas: Array<Record<string, 
 
 /** PDF: el navegador imprime la pantalla actual sin menú ni botones (ver @media print). */
 export const exportarPdf = () => window.print();
+
+/** PDF de una sola parte de la pantalla (también dentro de un diálogo): el resto se oculta y el título nombra el archivo. */
+export function imprimirSolo(id: string, titulo: string) {
+  const html = document.documentElement, el = document.getElementById(id), antes = document.title;
+  html.classList.add('imprime-dialogo'); el?.classList.add('imprimible'); document.title = titulo;
+  window.addEventListener('afterprint', () => { html.classList.remove('imprime-dialogo'); el?.classList.remove('imprimible'); document.title = antes; }, { once: true });
+  window.print();
+}

@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/api.dart';
 import '../core/catalogos.dart';
@@ -24,6 +27,33 @@ Future<void> compartirHoja(String nombre, List<Map<String, dynamic>> clientes, L
     files: [XFile.fromData(bytes, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: '$nombre.xlsx')],
     fileNameOverrides: ['$nombre.xlsx'],
   ));
+}
+
+/// PDF de la hoja para imprimir: la misma tabla, una columna por cliente (con muchos clientes, la hoja va horizontal).
+Future<void> compartirHojaPdf(String nombre, String titulo, List<Map<String, dynamic>> clientes, List<Map<String, dynamic>> filas) async {
+  final doc = pw.Document(title: titulo);
+  String celda(Object? v) => v == null ? '' : _c(v as num);
+  doc.addPage(pw.MultiPage(
+    pageFormat: clientes.length > 5 ? PdfPageFormat.a4.landscape : PdfPageFormat.a4,
+    margin: const pw.EdgeInsets.all(28),
+    build: (_) => [
+      pw.Text(titulo, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+      pw.SizedBox(height: 10),
+      pw.TableHelper.fromTextArray(
+        headers: ['Pedido', for (final c in clientes) '${c['nombre']}', 'Pedido sistema'],
+        data: [
+          for (final f in filas) ['${f['producto']}', for (final c in clientes) celda((f['porCliente'] as Map)[c['id']]), celda(f['pedido'])],
+        ],
+        headerStyle: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+        cellStyle: const pw.TextStyle(fontSize: 9),
+        headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+        cellAlignment: pw.Alignment.centerRight,
+        cellAlignments: {0: pw.Alignment.centerLeft},
+        headerAlignments: {0: pw.Alignment.centerLeft},
+      ),
+    ],
+  ));
+  await Printing.sharePdf(bytes: await doc.save(), filename: '$nombre.pdf');
 }
 
 class _Matriz extends StatelessWidget {
@@ -144,7 +174,8 @@ class _HojaProduccionState extends State<HojaProduccion> {
     final fecha = '${h?['fecha'] ?? ''}';
     return Scaffold(
       appBar: AppBar(title: const Text('Hoja de producción'), actions: [
-        IconButton(tooltip: 'Exportar a Excel', icon: const Icon(Icons.ios_share), onPressed: filas.isEmpty ? null : () => compartirHoja('hoja-produccion-$fecha', clientes, filas)),
+        IconButton(tooltip: 'Exportar a Excel', icon: const Icon(Icons.grid_on_outlined), onPressed: filas.isEmpty ? null : () => compartirHoja('hoja-produccion-$fecha', clientes, filas)),
+        IconButton(tooltip: 'Exportar a PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: filas.isEmpty ? null : () => compartirHojaPdf('hoja-produccion-$fecha', 'Hoja de producción · entrega ${_dma(fecha)}', clientes, filas)),
       ]),
       body: _error != null
           ? ErrorReintentar(mensaje: _error!, onReintentar: _cargar)
@@ -321,7 +352,8 @@ class _DetalleHojaState extends State<DetalleHoja> {
     final abierta = d?['estado'] == 'EN_PRODUCCION';
     return Scaffold(
       appBar: AppBar(title: Text('${widget.codigo} - Tanta'), actions: [
-        IconButton(tooltip: 'Exportar a Excel', icon: const Icon(Icons.ios_share), onPressed: filas.isEmpty ? null : () => compartirHoja('hoja-${widget.codigo.replaceAll(' ', '-')}', clientes, filas)),
+        IconButton(tooltip: 'Exportar a Excel', icon: const Icon(Icons.grid_on_outlined), onPressed: filas.isEmpty ? null : () => compartirHoja('hoja-${widget.codigo.replaceAll(' ', '-')}', clientes, filas)),
+        IconButton(tooltip: 'Exportar a PDF', icon: const Icon(Icons.picture_as_pdf_outlined), onPressed: filas.isEmpty ? null : () => compartirHojaPdf('hoja-${widget.codigo.replaceAll(' ', '-')}', 'Hoja ${widget.codigo} · entrega ${_dma('${d?['fecha'] ?? ''}')}', clientes, filas)),
       ]),
       body: _error != null
           ? ErrorReintentar(mensaje: _error!, onReintentar: _cargar)

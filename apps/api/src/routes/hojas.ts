@@ -16,7 +16,7 @@ import { avisar } from './notificaciones.js';
 
 type Fila = { productoId: string; producto: string; porCliente: Record<string, number>; pedido: number };
 
-/** Word 04: sin pedidos.ver no se ve a qué cliente va cada pan (Producción solo ve cuánto hacer). */
+/** Word 04: sin produccion.ver_clientes no se ve a qué cliente va cada pan (Producción solo ve cuánto hacer). */
 async function matriz(filtro: string, params: unknown[], verClientes = true) {
   const lineas = await q<Record<string, string>>(`
     SELECT p.cliente_id, p.cliente, d.producto_id, d.producto, sum(d.cantidad) cantidad
@@ -58,8 +58,8 @@ async function insumosDe(filas: Fila[], verCostos: boolean) {
   return { insumos, sinReceta };
 }
 
-/** Qué ve cada rol de la hoja (Sistema → Roles): clientes con pedidos.ver; insumos y consumos con inventario.ver; costos con costos.ver. */
-const vista = (permisos: Set<string>) => ({ clientes: permisos.has('pedidos.ver'), insumos: permisos.has('inventario.ver'), costos: permisos.has('costos.ver') });
+/** Qué ve cada rol de la hoja (Sistema → Roles): clientes con produccion.ver_clientes; insumos y consumos con inventario.ver; costos con costos.ver. */
+const vista = (permisos: Set<string>) => ({ clientes: permisos.has('produccion.ver_clientes'), insumos: permisos.has('inventario.ver'), costos: permisos.has('costos.ver') });
 
 async function detalleHoja(codigo: string, ver: ReturnType<typeof vista>) {
   const verCostos = ver.costos;

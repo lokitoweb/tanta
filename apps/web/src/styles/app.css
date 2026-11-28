@@ -1517,7 +1517,13 @@ tr.is-clickable:hover td { background: var(--tanta-cream-100, #F6F1EA); }
   html.imprime-dialogo .edc .edc__acciones { display: none; }
   html.imprime-dialogo .edc { position: absolute; left: 0; top: 0; width: 100%; }
   html.imprime-dialogo .edc__cifra--total { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* imprimirSolo(): solo el bloque elegido (la hoja de producción) con su título. */
+  html.imprime-dialogo .imprimible, html.imprime-dialogo .imprimible * { visibility: visible; }
+  html.imprime-dialogo .imprimible { position: absolute; left: 0; top: 0; width: 100%; }
+  html.imprime-dialogo .imprimible .table-wrap { overflow: visible; }
+  html.imprime-dialogo .imprimible .solo-impresion { display: block; margin: 0 0 10px; font-size: 14pt; }
 }
+.solo-impresion { display: none; }
 
 /* Registrar pago con varias formas de pago: una fila por forma (medio, monto, N.° de operación). */
 .pago-linea { display: grid; grid-template-columns: 1.1fr 0.9fr 1.3fr auto; gap: 10px; align-items: end; }

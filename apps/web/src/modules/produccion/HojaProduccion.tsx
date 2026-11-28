@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/core/api';
 import { useApp } from '@/core/app-state';
-import { exportarExcel } from '@/core/exportar';
+import { exportarExcel, imprimirSolo } from '@/core/exportar';
 import { cant, money, num } from '@/core/format';
 import { Dialogo } from '@/ui/Dialogo';
 import { InputNumero } from '@/ui/InputNumero';
@@ -23,9 +23,10 @@ interface Detalle extends Omit<Hoja, 'productos' | 'unidades'> { tolerancia: num
 const dma = (x: string) => x.split('-').reverse().join('/');
 const TONO = { NORMAL: 'ok', ALERTA: 'warn', FALTA: 'danger' } as const;
 
-function Matriz({ clientes, filas, reales }: { clientes: Cliente[]; filas: Fila[]; reales?: Record<string, number | null> }) {
+/** id y titulo: lo que se imprime con el botón PDF (el título solo aparece en el papel). */
+function Matriz({ id, titulo, clientes, filas, reales }: { id: string; titulo: string; clientes: Cliente[]; filas: Fila[]; reales?: Record<string, number | null> }) {
   return (
-    <div className="table-wrap"><table className="table table--compacta">
+    <div id={id}><h3 className="solo-impresion">{titulo}</h3><div className="table-wrap"><table className="table table--compacta">
       <thead><tr><th>Pedido</th>{clientes.map((c) => <th key={c.id} className="t-right">{c.nombre}</th>)}<th className="t-right">Pedido sistema</th>{reales && <th className="t-right">Producción real</th>}</tr></thead>
       <tbody>{filas.map((f) => (
         <tr key={f.productoId}><td><strong>{f.producto}</strong></td>
@@ -33,7 +34,7 @@ function Matriz({ clientes, filas, reales }: { clientes: Cliente[]; filas: Fila[
           <td className="t-right"><strong>{num(f.pedido)}</strong></td>
           {reales && <td className="t-right">{reales[f.productoId] ?? '—'}</td>}</tr>
       ))}</tbody>
-    </table></div>
+    </table></div></div>
   );
 }
 
@@ -118,12 +119,13 @@ export function HojaProduccion() {
             <div className="fila-acciones">
               <input className="field__input" type="date" aria-label="Fecha de entrega" value={hoja.fecha} onChange={(e) => setFecha(e.target.value)} />
               <Boton icono="download" disabled={!hoja.filas.length} onClick={() => aExcel(`hoja-produccion-${hoja.fecha}`, hoja.clientes, hoja.filas)}>Excel</Boton>
+              <Boton icono="report" disabled={!hoja.filas.length} onClick={() => imprimirSolo('hoja-abierta', `hoja-produccion-${hoja.fecha}`)}>PDF</Boton>
               {puede('produccion.planificar') && turnosProduccion.length > 0 && <select className="field__input" aria-label="Turno" value={turno} onChange={(e) => setTurno(e.target.value)}>
                 {turnosProduccion.map((t) => <option key={t.codigo} value={t.codigo}>Turno {t.nombre.toLowerCase()}</option>)}</select>}
               {puede('produccion.planificar') && <Boton variant="primary" disabled={ocupado || !hoja.filas.length || hoja.sinReceta.length > 0} onClick={() => void cerrarPedidos()}>Cerrar pedidos</Boton>}
             </div>
           </div>
-          {hoja.filas.length ? <Matriz clientes={hoja.clientes} filas={hoja.filas} /> : <Vacio titulo="Sin pedidos confirmados para esta fecha" icono="clipboard" />}
+          {hoja.filas.length ? <Matriz id="hoja-abierta" titulo={`Hoja de producción · entrega ${dma(hoja.fecha)}`} clientes={hoja.clientes} filas={hoja.filas} /> : <Vacio titulo="Sin pedidos confirmados para esta fecha" icono="clipboard" />}
         </Tarjeta>
         {hoja.sinReceta.length > 0 && <div className="aviso aviso--danger" role="alert"><span className="aviso__icono">!</span><div><p>Sin receta vigente: {hoja.sinReceta.join(', ')}. Créala en Recetas para poder cerrar los pedidos.</p></div></div>}
         {hoja.insumos.length > 0 && (
@@ -162,10 +164,11 @@ export function HojaProduccion() {
       <Dialogo abierto={det !== null} titulo={`Hoja ${det?.codigo ?? ''} - Tanta`} descripcion={det ? `Entrega ${dma(det.fecha)}${det.turnoNombre ? ` · turno ${det.turnoNombre.toLowerCase()}` : ''} · ${det.estado === 'CERRADA' ? 'cerrada' : 'en producción'}` : ''} onCerrar={() => setDet(null)}
         acciones={<>
           <Boton icono="download" onClick={() => det && aExcel(`hoja-${det.codigo.replace(' ', '-')}`, det.clientes, det.filas)}>Excel</Boton>
+          <Boton icono="report" onClick={() => det && imprimirSolo('hoja-detalle', `hoja-${det.codigo.replace(' ', '-')}`)}>PDF</Boton>
           {det?.estado === 'EN_PRODUCCION' && puede('produccion.ejecutar') && <Boton variant="primary" disabled={ocupado} onClick={() => (fuera.length && !confirmado ? setConfirmado(true) : void cerrarProduccion())}>{ocupado ? 'Grabando…' : fuera.length && confirmado ? 'Sí, grabar así' : 'Grabar producción'}</Boton>}
         </>}>
         {det && <>
-          <Matriz clientes={det.clientes} filas={det.filas} reales={Object.fromEntries(det.resumen.map((r) => [r.productoId, r.real]))} />
+          <Matriz id="hoja-detalle" titulo={`Hoja ${det.codigo} · entrega ${dma(det.fecha)}${det.turnoNombre ? ` · turno ${det.turnoNombre.toLowerCase()}` : ''}`} clientes={det.clientes} filas={det.filas} reales={Object.fromEntries(det.resumen.map((r) => [r.productoId, r.real]))} />
           {det.estado === 'EN_PRODUCCION' && (
             <>
               <h4 className="hoja__titulo">Resumen de lo producido</h4>
