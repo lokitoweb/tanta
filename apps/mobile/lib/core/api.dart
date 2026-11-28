@@ -17,6 +17,8 @@ class Api {
   /// Sube cada vez que el servidor acepta un cambio (pedido, venta, pago…): las pantallas que muestran
   /// el resumen (panel, KPIs, «Mis últimos pedidos») se recargan solas. Un solo lugar, sin duplicar avisos.
   final cambios = ValueNotifier<int>(0);
+  /// Sube cuando el servidor ya no acepta la sesión: la app vuelve al ingreso en vez de quedarse con «El token expiró».
+  final sesionVencida = ValueNotifier<int>(0);
   // Sesión, avisos y telemetría no cambian los datos del negocio.
   static bool _cambiaDatos(String ruta) => !ruta.startsWith('/auth') && !ruta.startsWith('/notificaciones');
   dynamic _trasCambio(String ruta, dynamic r) {
@@ -156,6 +158,15 @@ class Api {
       ).timeout(_limite);
     } catch (_) {
       return false; // sin red: se reintenta cuando vuelva
+    }
+    if (r.statusCode == 401 || r.statusCode == 403) {
+      // Sesión rechazada (vencida, cerrada o cuenta bloqueada): reintentar con ese token solo cierra más sesiones.
+      // La cola offline no se toca: se envía cuando el mismo usuario vuelve a entrar.
+      if (_refresco == actual) {
+        await cerrarSesion();
+        sesionVencida.value++;
+      }
+      return false;
     }
     if (r.statusCode >= 400) return false;
     final datos = jsonDecode(r.body) as Map<String, dynamic>;

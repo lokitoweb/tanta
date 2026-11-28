@@ -250,6 +250,7 @@ export async function rutasAuth(app: FastifyInstance) {
   });
 
   /** POST /auth/refresh — rota el token. El refresco viaja en cookie HttpOnly. */
+  const GRACIA_REFRESCO_MS = 5 * 60_000;
   app.post('/auth/refresh', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
     const enCookie = (req as { cookies?: Record<string, string> }).cookies?.[COOKIE];
     const enCuerpo = Refresh.safeParse(req.body ?? {}).success ? (req.body as { refreshToken?: string }).refreshToken : undefined;
@@ -265,7 +266,15 @@ export async function rutasAuth(app: FastifyInstance) {
       const fila = r.rows[0];
       if (!fila) return reply.code(401).send(error(401, 'REFRESCO_INVALIDO', 'Sesión no válida. Vuelve a ingresar.'));
 
-      if (fila.revocado_en) {
+      // Gracia: la rotación anterior se hizo pero su respuesta no llegó al celular (mala señal, tiempo límite,
+      // reinicio del API) y este reintenta con el mismo token. Si fue reemplazado hace poco (no cerrado con «Salir»),
+      // se emite uno nuevo y se anulan los que no llegaron; pasada la gracia, es reuso y se cierran todas las sesiones.
+      const reemplazadoHacePoco = fila.revocado_en && Date.now() - Date.parse(fila.revocado_en) < GRACIA_REFRESCO_MS
+        && (await c.query('SELECT 1 FROM core.refresh_token WHERE familia = $1 AND id <> $2 AND creado_en >= $3::timestamptz LIMIT 1',
+          [fila.familia, fila.id, fila.revocado_en])).rowCount;
+      if (reemplazadoHacePoco) {
+        await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE familia = $1 AND revocado_en IS NULL', [fila.familia]);
+      } else if (fila.revocado_en) {
         await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE familia = $1 AND revocado_en IS NULL', [fila.familia]);
         await auditar({ actorId: fila.usuario_id, accion: 'REFRESCO_REUSO', entidad: 'refresh_token', entidadId: fila.id, ip: req.ip });
         quitarCookie(reply);
@@ -285,7 +294,7 @@ export async function rutasAuth(app: FastifyInstance) {
       const rol = await rolDeUsuario(u.id);
       if (!rol) return reply.code(403).send(error(403, 'SIN_ROL', 'El usuario no tiene rol asignado.'));
 
-      await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE id = $1', [fila.id]);
+      await c.query('UPDATE core.refresh_token SET revocado_en = now() WHERE id = $1 AND revocado_en IS NULL', [fila.id]);
       const { token: nuevoToken, hash: nuevoHash } = nuevoRefreshToken();
       // La sesión sin "recordar" (vida < 1 día) sigue siendo corta al renovarse.
       const recordar = Date.parse(fila.expira_en) - Date.parse(fila.creado_en) > 86_400_000;

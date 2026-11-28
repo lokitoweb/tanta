@@ -61,7 +61,24 @@ class _RaizState extends State<Raiz> {
   @override
   void initState() {
     super.initState();
+    Api.instancia.sesionVencida.addListener(_sesionVencida);
     _arrancar();
+  }
+
+  @override
+  void dispose() {
+    Api.instancia.sesionVencida.removeListener(_sesionVencida);
+    super.dispose();
+  }
+
+  /// El servidor cerró la sesión: se vuelve al ingreso con un aviso claro (lo pendiente de enviar se conserva).
+  void _sesionVencida() {
+    if (!mounted || _datos == null) return;
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    carrito.value = {};
+    promociones.value = const [];
+    setState(() => _datos = null);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tu sesión venció. Vuelve a ingresar; lo que tenías pendiente se envía al entrar.')));
   }
 
   Future<void> _arrancar() async {
